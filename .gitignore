@@ -1,3 +1,6 @@
+# Backend (PHP) — not tracked on GitHub
+react-api/
+
 # Secrets — must NEVER be committed
 react-api/config/aws.php
 
