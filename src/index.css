@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+@theme {
+  /* Exact colors from PHP admin panel */
+  --color-primary: #4f46e5;
+  --color-primary-dark: #4338ca;
+  --color-primary-light: #eef2ff;
+  --color-primary-hover: #f0f4ff;
+  --color-indigo-600: #4f46e5;
+  --color-indigo-500: #6366f1;
+  --color-indigo-400: #818cf8;
+  --color-indigo-100: #e0e7ff;
+  --color-indigo-50: #eef2ff;
+
+  /* Content & layout */
+  --color-content-bg: #f1f4f9;
+  --color-sidebar-bg: #ffffff;
+  --color-sidebar-border: #e2e8f0;
+  --color-navbar-bg: #ffffff;
+
+  /* Table header orange (legacy pages) */
+  --color-thead-orange: #f38f2b;
+
+  /* Badge colors from PHP */
+  --color-badge-success-bg: #dcfce7;
+  --color-badge-success-text: #166534;
+  --color-badge-danger-bg: #fee2e2;
+  --color-badge-danger-text: #991b1b;
+  --color-badge-warning-bg: #fff7e6;
+  --color-badge-warning-text: #b35300;
+  --color-badge-info-bg: #dbeafe;
+  --color-badge-info-text: #1d4ed8;
+  --color-badge-review-bg: #fff8e1;
+  --color-badge-review-text: #e65100;
+
+  /* Refund page teal theme */
+  --color-teal: #00bfa6;
+  --color-navy: #0d2137;
+
+  /* Netcore purple gradient */
+  --color-netcore-start: #667eea;
+  --color-netcore-end: #764ba2;
+
+  /* Stat card specific */
+  --color-stat-blue: #3b82f6;
+  --color-stat-green: #22c55e;
+  --color-stat-red: #ef4444;
+  --color-stat-amber: #f59e0b;
+  --color-stat-indigo: #6366f1;
+  --color-stat-purple: #a855f7;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: local('JetBrains Mono');
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: #f1f4f9;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom scrollbar matching PHP */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: #f8fafc; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* Animate count-up values */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fadeInUp 0.4s ease-out; }
