@@ -35,7 +35,7 @@ const PAYLOAD_OPTIONS = {
   payment_success: ['select parameter', 'paid_amount', 'coupon_applied_success', 'order_id', 'paid_internship_name', 'paid_batch_date', 'paid_at'],
   preferred_domain: ['select parameter', 'preferred_domain'],
   visited_iap: ['select parameter', 'visited', 'visited_time'],
-  result_view: ['select parameter', 'score'],
+  result_view: ['select parameter', 'score', 'viewed_at'],
   placement_community_link: ['select parameter', 'assigned_links', 'refund_non_refund'],
   instantexam_reminder: ['select parameter', 'date_time', 'time_slot'],
   course_edit: ['select parameter', 'edit_internship_name', 'edit_page_url', 'edit_batch_date', 'edit_type'],
