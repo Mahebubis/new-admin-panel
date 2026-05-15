@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams, useLocation, useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
 
 const API = '/api/netcore/user_timeline.php';
@@ -16,6 +16,11 @@ const EVENT_LABELS = {
   placement_community_link: 'Placement Community Link',
   instantexam_reminder: 'Instantexam Reminder',
   course_edit: 'Course Edit',
+  register_company: 'Register Company',
+  company_signin: 'Company Signin',
+  company_vacancy_post: 'Company Vacancy Post',
+  mark_attendance: 'Mark Attendance',
+  came_on_dashboard: 'Came on Dashboard',
 };
 
 /* small dotted circle */
@@ -69,6 +74,13 @@ function fmtDt(s) {
 export default function NetcoreUserTimeline() {
   const { email } = useParams();
   const [search]  = useSearchParams();
+  const location  = useLocation();
+  const navigate  = useNavigate();
+
+  /* Back target: respect the page that linked us here (e.g. Behaviour Users tab)
+     and fall back to the contacts list when no caller state was passed. */
+  const backTo    = location.state?.backTo    || '/netcore/contacts';
+  const backLabel = location.state?.backLabel || 'Profile details';
   const userId    = search.get('uid');
 
   const [loading, setLoading] = useState(true);
@@ -82,6 +94,40 @@ export default function NetcoreUserTimeline() {
   const [popData, setPopData]       = useState(null);
   const [popMeta, setPopMeta]       = useState(null);
   const popClickRef = useRef(null);
+
+  /* timeline filters / sort */
+  const [q, setQ]           = useState('');
+  const [fromD, setFromD]   = useState('');
+  const [toD, setToD]       = useState('');
+  const [sortDir, setSortDir] = useState('desc');
+
+  const filteredEvents = (() => {
+    const qLower = q.trim().toLowerCase();
+    const fromTs = fromD ? new Date(fromD + 'T00:00:00').getTime() : null;
+    const toTs   = toD   ? new Date(toD   + 'T23:59:59').getTime() : null;
+
+    const list = events.filter(e => {
+      if (qLower) {
+        const lbl = (EVENT_LABELS[e.event] || e.event || '').toLowerCase();
+        if (!lbl.includes(qLower) && !(e.event || '').toLowerCase().includes(qLower)) return false;
+      }
+      if (fromTs || toTs) {
+        const t = new Date((e.timestamp || '').replace(' ', 'T')).getTime();
+        if (isNaN(t)) return false;
+        if (fromTs && t < fromTs) return false;
+        if (toTs   && t > toTs)   return false;
+      }
+      return true;
+    });
+
+    list.sort((a, b) => {
+      const ta = new Date((a.timestamp || '').replace(' ', 'T')).getTime() || 0;
+      const tb = new Date((b.timestamp || '').replace(' ', 'T')).getTime() || 0;
+      return sortDir === 'asc' ? ta - tb : tb - ta;
+    });
+
+    return list;
+  })();
 
   useEffect(() => {
     let cancelled = false;
@@ -150,11 +196,11 @@ export default function NetcoreUserTimeline() {
 
         {/* breadcrumb */}
         <div style={{ flexShrink: 0 }}>
-          <Link to="/netcore/contacts" style={{ color: '#1e3a8a', textDecoration: 'none', fontSize: 13, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Link to={backTo} style={{ color: '#1e3a8a', textDecoration: 'none', fontSize: 13, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
               <line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" />
             </svg>
-            Profile details
+            {backLabel}
           </Link>
         </div>
 
@@ -202,10 +248,66 @@ export default function NetcoreUserTimeline() {
               boxShadow: '0 1px 3px rgba(0,0,0,.05)', display: 'flex', flexDirection: 'column', minHeight: 0
             }}>
               {/* header */}
-              <div style={{ padding: '18px 22px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <div style={{ padding: '14px 22px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, gap: 12, flexWrap: 'wrap' }}>
                 <div style={{ fontWeight: 700, fontSize: 16, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 8 }}>
                   Timeline
-                  <span style={{ color: '#64748b', fontWeight: 500, fontSize: 12 }}>({events.length} events)</span>
+                  <span style={{ color: '#64748b', fontWeight: 500, fontSize: 12 }}>
+                    ({filteredEvents.length}{filteredEvents.length !== events.length ? ` of ${events.length}` : ''} events)
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  {/* search */}
+                  <div style={{ position: 'relative' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"
+                      style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
+                      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    </svg>
+                    <input
+                      type="text" value={q} onChange={e => setQ(e.target.value)}
+                      placeholder="Search event…"
+                      style={{ padding: '6px 10px 6px 28px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 12.5, outline: 'none', width: 170, fontFamily: 'inherit' }}
+                    />
+                  </div>
+
+                  {/* date range */}
+                  <input
+                    type="date" value={fromD} onChange={e => setFromD(e.target.value)}
+                    title="From date"
+                    style={{ padding: '6px 8px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 12.5, color: '#334155', fontFamily: 'inherit' }}
+                  />
+                  <span style={{ color: '#94a3b8', fontSize: 12 }}>→</span>
+                  <input
+                    type="date" value={toD} onChange={e => setToD(e.target.value)}
+                    title="To date"
+                    style={{ padding: '6px 8px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 12.5, color: '#334155', fontFamily: 'inherit' }}
+                  />
+
+                  {/* sort toggle */}
+                  <button
+                    onClick={() => setSortDir(d => d === 'desc' ? 'asc' : 'desc')}
+                    title={sortDir === 'desc' ? 'Newest first (click for oldest first)' : 'Oldest first (click for newest first)'}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', border: '1px solid #e2e8f0', borderRadius: 6, background: '#fff', cursor: 'pointer', fontSize: 12, color: '#334155', fontFamily: 'inherit', fontWeight: 600 }}>
+                    {sortDir === 'desc' ? (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M3 6h13M3 12h9M3 18h5M17 8v13M17 21l-4-4M17 21l4-4"/>
+                      </svg>
+                    ) : (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M3 6h5M3 12h9M3 18h13M17 16V3M17 3l-4 4M17 3l4 4"/>
+                      </svg>
+                    )}
+                    {sortDir === 'desc' ? 'Newest' : 'Oldest'}
+                  </button>
+
+                  {(q || fromD || toD) && (
+                    <button
+                      onClick={() => { setQ(''); setFromD(''); setToD(''); }}
+                      title="Clear filters"
+                      style={{ padding: '6px 10px', border: '1px solid #fecaca', borderRadius: 6, background: '#fff', color: '#dc2626', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit', fontWeight: 600 }}>
+                      Clear
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -223,9 +325,11 @@ export default function NetcoreUserTimeline() {
 
               {/* scrollable rows */}
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-                {events.length === 0
-                  ? <div style={{ padding: 32, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>No events</div>
-                  : events.map((e, i) => {
+                {filteredEvents.length === 0
+                  ? <div style={{ padding: 32, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
+                      {events.length === 0 ? 'No events' : 'No events match the filters'}
+                    </div>
+                  : filteredEvents.map((e, i) => {
                     const label = EVENT_LABELS[e.event] || e.event;
                     const lower = label.toLowerCase();
                     return (

@@ -4799,7 +4799,7 @@
    <MetaAdsDashboard apiUrl="/admin/real_time_reports2.php" />
    ========================================================================== */
 
-import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
 /* =========================================================================
@@ -6407,6 +6407,496 @@ const DASHBOARD_CSS = `
 .mad-wrap .vwa-load-more:hover { background: #e0ecff; }
 .mad-wrap .vwa-load-more i { transition: transform .2s; }
 .mad-wrap .vwa-load-more.loaded i { transform: rotate(90deg); }
+
+/* =====================================================================
+   DAY / VERSION WISE ANALYSIS — modern design, matches main Meta theme
+   ===================================================================== */
+.mad-wrap .dv-view { padding-bottom: 40px; }
+
+.mad-wrap .dv-controls-sticky {
+    /* Admin layout has a fixed/sticky top bar (height ~62px, z-index 400),
+       so offset by 70px to leave a small gap below it. */
+    position: sticky;
+    top: 70px;
+    z-index: 60;
+    background: var(--bg-light);
+    padding: 8px 0 14px;
+    margin: 0 -4px 18px;
+}
+.mad-wrap .dv-controls-sticky::before {
+    /* Soft fade behind the sticky bar so table rows don't peek through
+       above it while scrolling. */
+    content: '';
+    position: absolute;
+    left: 0; right: 0; top: -10px; height: 10px;
+    background: linear-gradient(180deg, var(--bg-light) 0%, rgba(240,242,245,0) 100%);
+    pointer-events: none;
+}
+.mad-wrap .dv-controls {
+    border: 1px solid var(--border);
+    background: #fff;
+    border-radius: 10px;
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 14px -10px rgba(24,119,242,.18);
+}
+.mad-wrap .dv-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.mad-wrap .dv-row-spread { justify-content: space-between; }
+.mad-wrap .dv-divider {
+    height: 1px; background: var(--border); margin: 2px 0; border: 0;
+}
+.mad-wrap .dv-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    margin-right: 4px;
+}
+
+/* Segmented input-mode (replaces radio) */
+.mad-wrap .dv-segmented {
+    display: inline-flex;
+    background: #eef2f7;
+    padding: 3px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+}
+.mad-wrap .dv-segmented button {
+    appearance: none; border: 0; background: transparent;
+    padding: 6px 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 6px;
+    font-family: inherit;
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: all .15s;
+}
+.mad-wrap .dv-segmented button:hover:not(.is-on) { color: var(--text-primary); }
+.mad-wrap .dv-segmented button.is-on {
+    background: #fff;
+    color: var(--primary);
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+}
+.mad-wrap .dv-segmented button:disabled {
+    opacity: .45; cursor: not-allowed;
+}
+
+.mad-wrap .dv-view-toggle {
+    display: inline-flex; align-items: center; gap: 10px;
+}
+.mad-wrap .dv-label-text {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+}
+
+/* Generic ghost button */
+.mad-wrap .dv-ghost-btn {
+    padding: 7px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #fff;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--text-primary);
+    font-family: inherit;
+    transition: all .15s;
+    display: inline-flex; align-items: center; gap: 6px;
+}
+.mad-wrap .dv-ghost-btn:hover:not(:disabled) {
+    background: var(--bg-selected);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+.mad-wrap .dv-ghost-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* Version pills (match vwa-version-pill) */
+.mad-wrap .dv-pills-wrap {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    max-height: 44px;
+    overflow: hidden;
+    transition: max-height .25s ease;
+    flex: 1;
+    min-width: 0;
+}
+.mad-wrap .dv-pills-wrap.dv-pills-expanded { max-height: 600px; }
+.mad-wrap .dv-pill {
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1.5px solid var(--border);
+    background: #fff;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-family: inherit;
+    transition: all .15s;
+    user-select: none;
+}
+.mad-wrap .dv-pill:hover { border-color: var(--primary); }
+.mad-wrap .dv-pill.is-on {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+    font-weight: 600;
+}
+.mad-wrap .dv-show-more-pill {
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1.5px dashed var(--primary);
+    background: #fff;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--primary);
+    cursor: pointer;
+    font-family: inherit;
+}
+.mad-wrap .dv-show-more-pill:hover { background: var(--bg-selected); }
+.mad-wrap .dv-clear-btn {
+    padding: 5px 12px;
+    border-radius: 20px;
+    border: 1px solid #fecaca;
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    display: inline-flex; align-items: center; gap: 5px;
+}
+.mad-wrap .dv-clear-btn:hover { background: #fee2e2; }
+
+.mad-wrap .dv-date-range { display: flex; gap: 14px; align-items: flex-end; }
+.mad-wrap .dv-date-range label {
+    display: flex; flex-direction: column; gap: 5px;
+    font-size: 11px; font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase; letter-spacing: .04em;
+}
+.mad-wrap .dv-date-range input {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 13px;
+    background: #fff;
+    color: var(--text-primary);
+    height: 36px;
+}
+.mad-wrap .dv-date-range input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(24,119,242,.1);
+}
+
+/* Columns dropdown */
+.mad-wrap .dv-col-menu-wrap { position: relative; }
+.mad-wrap .dv-col-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    z-index: 70;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px -10px rgba(0,0,0,.18);
+    padding: 10px;
+    min-width: 300px;
+    max-height: 360px;
+    overflow-y: auto;
+}
+.mad-wrap .dv-col-menu-head {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase; letter-spacing: .05em;
+    padding: 4px 8px 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 6px;
+}
+.mad-wrap .dv-col-menu-item {
+    display: flex; gap: 10px; align-items: center;
+    padding: 7px 8px;
+    font-size: 13px;
+    cursor: pointer;
+    border-radius: 6px;
+    color: var(--text-primary);
+}
+.mad-wrap .dv-col-menu-item:hover { background: var(--bg-selected); }
+.mad-wrap .dv-col-menu-item input { accent-color: var(--primary); width: 15px; height: 15px; }
+.mad-wrap .dv-col-menu-foot {
+    border-top: 1px solid var(--border);
+    padding-top: 8px; margin-top: 6px;
+    display: flex; justify-content: space-between; gap: 8px;
+}
+.mad-wrap .dv-badge {
+    margin-left: 4px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: var(--primary);
+    color: #fff;
+    font-size: 10.5px;
+    font-weight: 700;
+}
+
+/* Primary "Load" button — matches btn-primary style */
+.mad-wrap .dv-load-btn {
+    padding: 9px 22px;
+    border-radius: 8px;
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 13px;
+    font-family: inherit;
+    display: inline-flex; align-items: center; gap: 8px;
+    height: 38px;
+    transition: background .15s;
+    box-shadow: 0 1px 2px rgba(24,119,242,.2);
+}
+.mad-wrap .dv-load-btn:hover:not(:disabled) { background: var(--primary-hover); }
+.mad-wrap .dv-load-btn:disabled { opacity: .55; cursor: not-allowed; }
+
+/* Download button — green Excel-style, sits in the result bar above the table */
+.mad-wrap .dv-download-btn {
+    padding: 7px 14px;
+    border-radius: 8px;
+    background: #1f7a4d;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 12.5px;
+    font-family: inherit;
+    display: inline-flex; align-items: center; gap: 7px;
+    transition: background .15s, transform .08s;
+    box-shadow: 0 1px 2px rgba(31,122,77,.25);
+}
+.mad-wrap .dv-download-btn:hover { background: #186640; }
+.mad-wrap .dv-download-btn:active { transform: translateY(1px); }
+.mad-wrap .dv-download-btn i { font-size: 14px; }
+
+/* Empty state */
+.mad-wrap .dv-empty {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 64px 20px;
+    text-align: center;
+    box-shadow: var(--shadow);
+}
+.mad-wrap .dv-empty-icon {
+    width: 64px; height: 64px;
+    margin: 0 auto 14px;
+    border-radius: 50%;
+    background: var(--bg-selected);
+    color: var(--primary);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px;
+}
+.mad-wrap .dv-empty-title { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+.mad-wrap .dv-empty-hint  { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+
+/* ---------- Table ----------
+   Sticky-thead strategy: we put position:sticky on each TH and use the PAGE
+   as the scroll context. That means NO ancestor of the table can have any
+   form of overflow set (auto/scroll/hidden) — that would create an implicit
+   scroll container and detach sticky from the page. */
+.mad-wrap .dv-table-wrap {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.04);
+    overflow: visible;
+}
+.mad-wrap .dv-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: 100%;
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+    table-layout: fixed;
+}
+.mad-wrap .dv-table thead th {
+    /* Sticky relative to page scroll. Offset set at runtime via
+       --dv-thead-top (controls bar height + admin bar). */
+    position: sticky;
+    top: var(--dv-thead-top, 240px);
+    z-index: 5;
+    background: linear-gradient(180deg, #1976d2 0%, #1565c0 100%);
+    color: #fff;
+    text-align: left;
+    padding: 12px 14px;
+    font-weight: 600;
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: .4px;
+    border-right: 1px solid rgba(255,255,255,.12);
+    border-bottom: 1px solid rgba(0,0,0,.06);
+    white-space: normal;
+    line-height: 1.3;
+    user-select: none;
+}
+.mad-wrap .dv-table thead th:last-child { border-right: 0; }
+.mad-wrap .dv-table tbody td {
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border-light, #eef1f5);
+    border-right: 1px solid #f3f5f8;
+    vertical-align: top;
+    color: var(--text-primary);
+}
+.mad-wrap .dv-table tbody td:last-child { border-right: 0; }
+.mad-wrap .dv-table tbody tr { transition: background .12s; }
+.mad-wrap .dv-table tbody tr:nth-child(even) td.dv-base-bg { background: #fafbfc; }
+.mad-wrap .dv-table tbody tr:hover td.dv-base-bg { background: #f0f7ff; }
+
+.mad-wrap .dv-table tfoot td {
+    padding: 12px 14px;
+    background: #eef2f7;
+    font-weight: 700;
+    border-top: 2px solid var(--primary);
+    color: var(--text-primary);
+    border-right: 1px solid #e3e8ef;
+}
+.mad-wrap .dv-table tfoot td:last-child { border-right: 0; }
+.mad-wrap .dv-summary-total td {
+    background: #dbe7f4;
+    border-bottom: 0;
+}
+
+.mad-wrap .dv-table .dv-sticky-col {
+    position: sticky;
+    left: 0;
+    z-index: 4;
+    background: #fff;
+    border-right: 2px solid var(--primary) !important;
+}
+.mad-wrap .dv-table thead th.dv-sticky-col {
+    z-index: 6;
+    background: linear-gradient(180deg, #1976d2 0%, #1565c0 100%);
+}
+.mad-wrap .dv-table tbody tr:nth-child(even) td.dv-sticky-col { background: #fafbfc; }
+.mad-wrap .dv-table tbody tr:hover td.dv-sticky-col { background: #f0f7ff; }
+.mad-wrap .dv-table tfoot td.dv-sticky-col { background: #eef2f7; }
+.mad-wrap .dv-table tfoot .dv-summary-total td.dv-sticky-col { background: #dbe7f4; }
+
+/* Label column */
+.mad-wrap .dv-label-cell { display: flex; flex-direction: column; gap: 2px; }
+.mad-wrap .dv-label-date { font-weight: 700; color: var(--text-primary); font-size: 13px; }
+.mad-wrap .dv-label-ver  {
+    font-size: 10.5px; color: var(--primary); font-weight: 600;
+    background: var(--bg-selected);
+    padding: 2px 7px; border-radius: 10px;
+    align-self: flex-start;
+    letter-spacing: .02em;
+}
+
+/* Stacked block cells */
+.mad-wrap .dv-block { display: flex; flex-direction: column; gap: 2px; line-height: 1.3; }
+.mad-wrap .dv-block-count { font-weight: 700; font-size: 13px; }
+.mad-wrap .dv-block-pct   { font-size: 11px; opacity: .85; font-weight: 500; }
+.mad-wrap .dv-block-cost  { font-size: 11px; opacity: .75; font-weight: 500; }
+
+/* Footer summary labels look distinct */
+.mad-wrap .dv-summary-label {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-weight: 700;
+    color: var(--primary);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    font-size: 12px;
+}
+.mad-wrap .dv-summary-total .dv-summary-label { color: #0d47a1; }
+
+/* ---------- Heatmap bands ----------
+   Softer pastel palette so text stays readable and matches the FB-blue
+   theme better than the saturated red/green of the reference. */
+.mad-wrap .dv-band-1 { background: #fde7e9 !important; color: #b3261e !important; }
+.mad-wrap .dv-band-2 { background: #fdebd0 !important; color: #a55a00 !important; }
+.mad-wrap .dv-band-3 { background: #fff8dc !important; color: #7a5a00 !important; }
+.mad-wrap .dv-band-4 { background: #e3f3da !important; color: #2f6a1f !important; }
+.mad-wrap .dv-band-5 { background: #d4eede !important; color: #0d6e3a !important; }
+
+.mad-wrap .dv-band-1 .dv-block-pct,
+.mad-wrap .dv-band-1 .dv-block-cost { color: #b3261e; }
+.mad-wrap .dv-band-2 .dv-block-pct,
+.mad-wrap .dv-band-2 .dv-block-cost { color: #a55a00; }
+.mad-wrap .dv-band-3 .dv-block-pct,
+.mad-wrap .dv-band-3 .dv-block-cost { color: #7a5a00; }
+.mad-wrap .dv-band-4 .dv-block-pct,
+.mad-wrap .dv-band-4 .dv-block-cost { color: #2f6a1f; }
+.mad-wrap .dv-band-5 .dv-block-pct,
+.mad-wrap .dv-band-5 .dv-block-cost { color: #0d6e3a; }
+
+/* Tiny trend dot on the right edge of each cell, for quick scanning */
+.mad-wrap .dv-band-1::after,
+.mad-wrap .dv-band-2::after,
+.mad-wrap .dv-band-3::after,
+.mad-wrap .dv-band-4::after,
+.mad-wrap .dv-band-5::after {
+    content: '';
+    position: absolute;
+    right: 6px; top: 50%;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    transform: translateY(-50%);
+    opacity: .8;
+}
+.mad-wrap .dv-table tbody td { position: relative; }
+.mad-wrap .dv-band-1::after { background: #ef4444; }
+.mad-wrap .dv-band-2::after { background: #f59e0b; }
+.mad-wrap .dv-band-3::after { background: #eab308; }
+.mad-wrap .dv-band-4::after { background: #84cc16; }
+.mad-wrap .dv-band-5::after { background: #22c55e; }
+
+/* Column resize handle */
+.mad-wrap .dv-col-resizer {
+    position: absolute;
+    top: 0; right: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 2;
+}
+.mad-wrap .dv-col-resizer:hover,
+.mad-wrap .dv-col-resizer.resizing {
+    background: rgba(255,255,255,.5);
+}
+
+/* Subtle results count chip above the table */
+.mad-wrap .dv-result-bar {
+    display: flex; justify-content: space-between; align-items: center;
+    margin: 4px 2px 10px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.mad-wrap .dv-result-chip {
+    background: var(--bg-selected);
+    color: var(--primary);
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 11.5px;
+}
+.mad-wrap .dv-legend { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.mad-wrap .dv-legend-item {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; color: var(--text-secondary);
+}
+.mad-wrap .dv-legend-dot {
+    width: 10px; height: 10px; border-radius: 3px;
+    display: inline-block;
+}
 `;
 
 /* =========================================================================
@@ -6542,6 +7032,28 @@ export default function MetaAdsDashboard({
     const [allNotes, setAllNotes] = useState({});
     const [notesFilter, setNotesFilter] = useState(false);
     const [noteHistory, setNoteHistory] = useState(null); // { entity, rows } when history modal open
+
+    /* ==================================================================
+       DAY / VERSION ANALYSIS STATE
+       Controls the new "Day_Version wise Analysis" tab.
+       inputModeDV  : 'versions' (pick CIT versions) | 'daterange' (free range)
+       viewModeDV   : 'version'  (one row / version)  | 'day' (one row / day)
+       Notes:
+         - When inputModeDV === 'daterange', viewModeDV is forced to 'day'.
+         - When versions are picked + viewModeDV === 'day', backend expands
+           each version's range into per-day rows under that version.
+       ================================================================== */
+    const [inputModeDV,        setInputModeDV]        = useState('versions');
+    const [selectedVersionsDV, setSelectedVersionsDV] = useState([]);
+    const [dvFromDate,         setDvFromDate]         = useState('');
+    const [dvToDate,           setDvToDate]           = useState('');
+    const [viewModeDV,         setViewModeDV]         = useState('version');
+    const [dvRows,             setDvRows]             = useState([]);
+    const [dvLoading,          setDvLoading]          = useState(false);
+    const [dvPillsExpanded,    setDvPillsExpanded]    = useState(false);
+    // Column show/hide. Keys map to DV_COLUMNS below.
+    const [dvHiddenCols, setDvHiddenCols] = useState(new Set());
+    const [dvColMenuOpen, setDvColMenuOpen] = useState(false);
 
     /* ==================================================================
        COLUMN RESIZE (mirrors the original JS implementation)
@@ -7379,6 +7891,66 @@ export default function MetaAdsDashboard({
         }
     }, [adsCacheVA, fetchVersionAds]);
 
+    /* ==================================================================
+       DAY / VERSION ANALYSIS - fetch + helpers
+       ================================================================== */
+    const toggleVersionPillDV = useCallback((version) => {
+        setSelectedVersionsDV(prev =>
+            prev.includes(version) ? prev.filter(v => v !== version) : [...prev, version]
+        );
+    }, []);
+
+    const toggleDvCol = useCallback((key) => {
+        setDvHiddenCols(prev => {
+            const n = new Set(prev);
+            if (n.has(key)) n.delete(key); else n.add(key);
+            return n;
+        });
+    }, []);
+
+    const fetchDayVersionAnalysis = useCallback(async () => {
+        // Effective view: daterange mode forces 'day'
+        const effectiveView = inputModeDV === 'daterange' ? 'day' : viewModeDV;
+
+        if (inputModeDV === 'versions' && selectedVersionsDV.length === 0) {
+            showAlert('Please select at least one CIT version');
+            return;
+        }
+        if (inputModeDV === 'daterange' && (!dvFromDate || !dvToDate)) {
+            showAlert('Please pick a from and to date');
+            return;
+        }
+        setDvLoading(true);
+        setDvRows([]);
+        try {
+            const params = { mode: effectiveView };
+            if (inputModeDV === 'versions') {
+                params.versions = selectedVersionsDV;
+            } else {
+                params.from_date = dvFromDate;
+                params.to_date   = dvToDate;
+            }
+            const data = await apiAction(apiUrl, 'fetch_day_version_analysis', params);
+            if (data.token_expired) {
+                showAlert('Meta Access Token Expired. Please update token.');
+                setShowTokenBox(true);
+                return;
+            }
+            if (data.success) {
+                setDvRows(data.rows || []);
+                if ((data.rows || []).length === 0) {
+                    showAlert('No data for the selected input', 'info');
+                }
+            } else {
+                showAlert(data.message || 'Error fetching day/version data');
+            }
+        } catch (e) {
+            showAlert('Error: ' + e.message);
+        } finally {
+            setDvLoading(false);
+        }
+    }, [apiUrl, inputModeDV, viewModeDV, selectedVersionsDV, dvFromDate, dvToDate, showAlert]);
+
     const exportCampaignCSV = useCallback((campaign) => {
         const cols = ['version', ...VA_METRICS.filter(m => selectedMetricsVA.has(m.key)).map(m => m.key)];
         let csv = cols.join(',') + '\n';
@@ -7598,6 +8170,10 @@ export default function MetaAdsDashboard({
         if (newLevel === 'adset') buildAdsetTable();
         if (newLevel === 'ad')    buildAdTable();
     };
+
+    /* DV columns are defined outside the component (see DV_COLUMNS) but we
+       need a stable mode key derived from inputModeDV/viewModeDV for the table. */
+    const dvEffectiveView = inputModeDV === 'daterange' ? 'day' : viewModeDV;
 
     /* =====================================================================
        SORT HANDLER
@@ -8045,8 +8621,8 @@ export default function MetaAdsDashboard({
             <style>{DASHBOARD_CSS}</style>
             <div className="container">
 
-                {/* ========== HEADER (hidden on Version Analysis tab) ========== */}
-                {currentLevel !== 'version' && (
+                {/* ========== HEADER (hidden on Version Analysis / Day-Version tabs) ========== */}
+                {currentLevel !== 'version' && currentLevel !== 'dayversion' && (
                 <div className="dashboard-header">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 20 }}>
                         <div>
@@ -8064,8 +8640,8 @@ export default function MetaAdsDashboard({
                 </div>
                 )}
 
-                {/* ========== FILTERS (hidden on Version Analysis tab) ========== */}
-                {currentLevel !== 'version' && (
+                {/* ========== FILTERS (hidden on Version Analysis / Day-Version tabs) ========== */}
+                {currentLevel !== 'version' && currentLevel !== 'dayversion' && (
                 <div className="filters-section">
                     <div className="search-date-row">
                         <div className="search-wrapper">
@@ -8313,10 +8889,45 @@ export default function MetaAdsDashboard({
                             <span className="tab-badge">{selectedVersionsVA.length}</span>
                         )}
                     </button>
+                    <button
+                        className={`level-tab ${currentLevel === 'dayversion' ? 'active' : ''}`}
+                        onClick={() => switchLevel('dayversion')}
+                    >
+                        <i className="fas fa-calendar-day"></i>
+                        <span>Day_Version wise Analysis</span>
+                        {dvRows.length > 0 && (
+                            <span className="tab-badge">{dvRows.length}</span>
+                        )}
+                    </button>
                 </div>
 
-                {/* ========== TABLE or VERSION ANALYSIS ========== */}
-                {currentLevel === 'version' ? (
+                {/* ========== TABLE or VERSION ANALYSIS or DAY-VERSION ========== */}
+                {currentLevel === 'dayversion' ? (
+                    <DayVersionAnalysisView
+                        citVersions={citVersions}
+                        inputMode={inputModeDV}
+                        setInputMode={setInputModeDV}
+                        selectedVersions={selectedVersionsDV}
+                        toggleVersionPill={toggleVersionPillDV}
+                        clearVersions={() => setSelectedVersionsDV([])}
+                        fromDate={dvFromDate}
+                        setFromDate={setDvFromDate}
+                        toDate={dvToDate}
+                        setToDate={setDvToDate}
+                        viewMode={viewModeDV}
+                        setViewMode={setViewModeDV}
+                        effectiveView={dvEffectiveView}
+                        rows={dvRows}
+                        loading={dvLoading}
+                        fetchData={fetchDayVersionAnalysis}
+                        pillsExpanded={dvPillsExpanded}
+                        setPillsExpanded={setDvPillsExpanded}
+                        hiddenCols={dvHiddenCols}
+                        toggleCol={toggleDvCol}
+                        colMenuOpen={dvColMenuOpen}
+                        setColMenuOpen={setDvColMenuOpen}
+                    />
+                ) : currentLevel === 'version' ? (
                     <VersionAnalysisView
                         citVersions={citVersions}
                         selectedVersionsVA={selectedVersionsVA}
@@ -9855,6 +10466,750 @@ function FinalReportModal({ selectedVersions, campaigns, onClose, sort, setSort 
                     )}
                 </div>
             </div>
+        </div>
+    );
+}
+
+/* =========================================================================
+   DAY / VERSION WISE ANALYSIS - column definitions + view component
+   ========================================================================= */
+
+/* Each top-level column may render a single value OR a stacked block of
+   count / "% of reg" / cost-per-unit (matches the user's reference image).
+   `kind` describes how to colour the cell:
+     'higher-better'  -> high values  -> green band, low -> red
+     'lower-better'   -> low values   -> green band, high -> red
+     'neutral'        -> no colouring
+   `denom` lists which sub-fields use the registrations count as denominator
+   for the % line. */
+const DV_COLUMNS = [
+    { key: 'label',                 label: 'Date / Version',            kind: 'neutral',       width: 130, sticky: true, type: 'label'                       },
+    { key: 'spend',                 label: 'Meta Spent',                kind: 'lower-better',  width: 110,                type: 'value', format: 'currency' },
+    { key: 'registrations',         label: 'Registration Count',        kind: 'higher-better', width: 130,                type: 'value', format: 'int'      },
+    { key: 'cost_per_registration', label: 'Cost per Registration',     kind: 'lower-better',  width: 140,                type: 'value', format: 'currency' },
+    { key: 'exam_count',            label: 'Exam Taken Count',          kind: 'higher-better', width: 130,                type: 'value', format: 'int'      },
+    { key: 'cost_per_exam',         label: 'Cost per Exam',             kind: 'lower-better',  width: 120,                type: 'value', format: 'currency' },
+    { key: 'exam_percentage',       label: 'Exam %',                    kind: 'higher-better', width: 90,                 type: 'value', format: 'percent'  },
+    { key: 'internship_count',      label: 'Internship Purchase Once',  kind: 'higher-better', width: 170,                type: 'value', format: 'int'      },
+    { key: 'second_internship',     label: 'Internship Purchase Twice', kind: 'higher-better', width: 170,                type: 'value', format: 'int'      },
+    { key: 'revenue',               label: 'Revenue',                   kind: 'higher-better', width: 120,                type: 'value', format: 'currency' },
+    { key: 'roi',                   label: 'ROI',                       kind: 'higher-better', width: 80,                 type: 'value', format: 'ratio'    },
+];
+
+const DV_FMT_CURRENCY = (v) => '₹' + Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const DV_FMT_INT      = (v) => Number(v || 0).toLocaleString('en-IN');
+const DV_FMT_RATIO    = (v) => Number(v || 0).toFixed(2);
+const DV_FMT_DATE     = (s) => {
+    if (!s) return '—';
+    const [y, m, d] = s.split('-').map(Number);
+    if (!y) return s;
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${d} ${months[m-1]} ${y}`;
+};
+
+/* Build "% of registrations" string. Returns "—" when reg = 0. */
+function dvPct(num, reg) {
+    if (!reg || reg <= 0) return '0.00%';
+    return ((Number(num || 0) / reg) * 100).toFixed(2) + '%';
+}
+
+/* Heat-map colour band given a value vs that column's min/max.
+   Returns a tailwind-style class string we map in CSS to a background tint. */
+function dvBand(val, min, max, kind) {
+    if (kind === 'neutral') return '';
+    if (max === min) return 'dv-band-3'; // all equal -> neutral mid colour
+    const norm = (val - min) / (max - min); // 0..1
+    let score = kind === 'higher-better' ? norm : 1 - norm; // 1 = best
+    if (score < 0.2) return 'dv-band-1';
+    if (score < 0.4) return 'dv-band-2';
+    if (score < 0.6) return 'dv-band-3';
+    if (score < 0.8) return 'dv-band-4';
+    return 'dv-band-5';
+}
+
+/* Lightweight, single-period date range picker for the Day/Version tab.
+   Reuses the dp-* / cal-* CSS from the main analytics date picker but is
+   completely self-contained — no comparison, no shared state. */
+function DvDateRangePicker({ fromDate, toDate, onApply }) {
+    const [open, setOpen] = useState(false);
+    const [tempFrom, setTempFrom] = useState(null);
+    const [tempTo,   setTempTo]   = useState(null);
+    const [viewMonth, setViewMonth] = useState(new Date());
+    const [activePreset, setActivePreset] = useState(null);
+
+    const monthsList = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+    const openPicker = () => {
+        const f = fromDate ? parseYMD(fromDate) : null;
+        const t = toDate   ? parseYMD(toDate)   : null;
+        setTempFrom(f);
+        setTempTo(t);
+        setActivePreset(null);
+        const anchor = f || new Date();
+        setViewMonth(new Date(anchor.getFullYear(), anchor.getMonth(), 1));
+        setOpen(true);
+    };
+    const closePicker = () => setOpen(false);
+
+    const handleDayClick = (d) => {
+        if (!tempFrom || (tempFrom && tempTo)) {
+            setTempFrom(d); setTempTo(null);
+        } else {
+            let from = tempFrom, to = d;
+            if (d < tempFrom) { from = d; to = tempFrom; }
+            setTempFrom(from); setTempTo(to);
+        }
+        setActivePreset(null);
+    };
+
+    const applyPreset = (preset) => {
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        let from, to;
+        switch (preset) {
+            case 'today':     from = new Date(today); to = new Date(today); break;
+            case 'yesterday': from = new Date(today); from.setDate(from.getDate() - 1); to = new Date(from); break;
+            case 'last7':     to = new Date(today); from = new Date(today); from.setDate(from.getDate() - 6); break;
+            case 'last14':    to = new Date(today); from = new Date(today); from.setDate(from.getDate() - 13); break;
+            case 'last28':    to = new Date(today); from = new Date(today); from.setDate(from.getDate() - 27); break;
+            case 'last30':    to = new Date(today); from = new Date(today); from.setDate(from.getDate() - 29); break;
+            case 'thisweek':  from = new Date(today); from.setDate(from.getDate() - from.getDay()); to = new Date(today); break;
+            case 'lastweek':  to = new Date(today); to.setDate(to.getDate() - today.getDay() - 1); from = new Date(to); from.setDate(from.getDate() - 6); break;
+            case 'thismonth': from = new Date(today.getFullYear(), today.getMonth(), 1); to = new Date(today); break;
+            case 'lastmonth': to = new Date(today.getFullYear(), today.getMonth(), 0); from = new Date(today.getFullYear(), today.getMonth() - 1, 1); break;
+            default: return;
+        }
+        setTempFrom(from); setTempTo(to);
+        setActivePreset(preset);
+        setViewMonth(new Date(from.getFullYear(), from.getMonth(), 1));
+    };
+
+    const confirm = () => {
+        if (!tempFrom || !tempTo) return;
+        onApply(toYMD(tempFrom), toYMD(tempTo));
+        setOpen(false);
+    };
+
+    const renderCalendar = (monthDate) => {
+        const year = monthDate.getFullYear();
+        const month = monthDate.getMonth();
+        const firstDay = new Date(year, month, 1).getDay();
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const daysInPrev = new Date(year, month, 0).getDate();
+        const today = new Date(); today.setHours(0,0,0,0);
+        const cells = [];
+        for (let i = firstDay - 1; i >= 0; i--) {
+            const d = daysInPrev - i;
+            const prev = new Date(year, month - 1, d);
+            cells.push(<button key={'p'+d} className="cal-day other-month" onClick={() => handleDayClick(prev)}>{d}</button>);
+        }
+        for (let d = 1; d <= daysInMonth; d++) {
+            const current = new Date(year, month, d);
+            const cls = ['cal-day'];
+            if (current.getTime() === today.getTime()) cls.push('today');
+            if (tempFrom && tempTo) {
+                const t = current.getTime(), sf = tempFrom.getTime(), se = tempTo.getTime();
+                if (t === sf && t === se) cls.push('selected-start','selected-end');
+                else if (t === sf) cls.push('selected-start');
+                else if (t === se) cls.push('selected-end');
+                else if (t > sf && t < se) cls.push('in-range');
+            } else if (tempFrom && current.getTime() === tempFrom.getTime()) {
+                cls.push('selected-start','selected-end');
+            }
+            cells.push(<button key={'c'+d} className={cls.join(' ')} onClick={() => handleDayClick(current)}>{d}</button>);
+        }
+        const remaining = (7 - ((firstDay + daysInMonth) % 7)) % 7;
+        for (let d = 1; d <= remaining; d++) {
+            const next = new Date(year, month + 1, d);
+            cells.push(<button key={'n'+d} className="cal-day other-month" onClick={() => handleDayClick(next)}>{d}</button>);
+        }
+        return (
+            <div className="dp-calendar">
+                <div className="cal-month-title">{monthsList[month]} {year}</div>
+                <div className="cal-weekdays">
+                    <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+                </div>
+                <div className="cal-days">{cells}</div>
+            </div>
+        );
+    };
+
+    const display = (() => {
+        if (!fromDate || !toDate) return 'Select date range...';
+        const f = parseYMD(fromDate), t = parseYMD(toDate);
+        const fl = `${f.getDate()} ${monthsList[f.getMonth()].slice(0,3)} ${f.getFullYear()}`;
+        const tl = `${t.getDate()} ${monthsList[t.getMonth()].slice(0,3)} ${t.getFullYear()}`;
+        return fromDate === toDate ? fl : `${fl} — ${tl}`;
+    })();
+
+    const summary = (() => {
+        if (!tempFrom) return 'Select start date';
+        if (!tempTo)   return `${tempFrom.getDate()} ${monthsList[tempFrom.getMonth()].slice(0,3)} — Select end date`;
+        const f = `${tempFrom.getDate()} ${monthsList[tempFrom.getMonth()].slice(0,3)}`;
+        const t = `${tempTo.getDate()} ${monthsList[tempTo.getMonth()].slice(0,3)}`;
+        return `${f} — ${t}`;
+    })();
+
+    return (
+        <>
+            <button className="date-range-btn" onClick={openPicker} type="button">
+                <span><div className="dr-dates">{display}</div></span>
+                <i className="fas fa-calendar dr-icon"></i>
+            </button>
+
+            <div
+                className={`datepicker-overlay ${open ? 'visible' : ''}`}
+                onClick={(e) => { if (e.target === e.currentTarget) closePicker(); }}
+            >
+                <div className="datepicker-popup">
+                    <div className="dp-presets">
+                        <div className="dp-presets-title">Recently used</div>
+                        {[
+                            ['today','Today'],['yesterday','Yesterday'],['last7','Last 7 days'],
+                            ['last14','Last 14 days'],['last28','Last 28 days'],['last30','Last 30 days'],
+                            ['thisweek','This week'],['lastweek','Last week'],
+                            ['thismonth','This month'],['lastmonth','Last month'],
+                        ].map(([key, lbl]) => (
+                            <button
+                                key={key}
+                                className={`dp-preset-item ${activePreset === key ? 'active' : ''}`}
+                                onClick={() => applyPreset(key)}
+                                type="button"
+                            >
+                                <span className="dp-preset-radio"></span> {lbl}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="dp-calendars">
+                        <div className="dp-cal-header">
+                            <div className="dp-cal-nav">
+                                <button type="button" onClick={() => setViewMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))}>
+                                    <i className="fas fa-chevron-left"></i>
+                                </button>
+                                <span className="month-year">
+                                    {`${monthsList[viewMonth.getMonth()]} ${viewMonth.getFullYear()} - ${monthsList[(viewMonth.getMonth() + 1) % 12]} ${viewMonth.getMonth() === 11 ? viewMonth.getFullYear() + 1 : viewMonth.getFullYear()}`}
+                                </span>
+                                <button type="button" onClick={() => setViewMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))}>
+                                    <i className="fas fa-chevron-right"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="dp-two-calendars">
+                            {renderCalendar(viewMonth)}
+                            {renderCalendar(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1))}
+                        </div>
+
+                        <div className="dp-footer">
+                            <span className="dp-date-display">{summary}</span>
+                            <button className="btn-cancel"  type="button" onClick={closePicker}>Cancel</button>
+                            <button className="btn-update"  type="button" onClick={confirm}>Update</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </>
+    );
+}
+
+function DayVersionAnalysisView(props) {
+    const {
+        citVersions,
+        inputMode, setInputMode,
+        selectedVersions, toggleVersionPill, clearVersions,
+        fromDate, setFromDate, toDate, setToDate,
+        viewMode, setViewMode,
+        effectiveView,
+        rows, loading,
+        fetchData,
+        pillsExpanded, setPillsExpanded,
+        hiddenCols, toggleCol,
+        colMenuOpen, setColMenuOpen,
+    } = props;
+
+    /* Column resize state for this view (independent from main table) */
+    const tableRef = useRef(null);
+    const viewRef  = useRef(null);
+    const stickyRef = useRef(null);
+
+    /* Measure the sticky controls bar after every render and expose its height
+       as --dv-thead-top so the table header sticks just below it on scroll. */
+    useLayoutEffect(() => {
+        const view = viewRef.current;
+        const sticky = stickyRef.current;
+        if (!view || !sticky) return;
+        const apply = () => {
+            // 70 = admin top bar (62) + 8px breathing space
+            const offset = 70 + sticky.offsetHeight + 4;
+            view.style.setProperty('--dv-thead-top', offset + 'px');
+        };
+        apply();
+        const ro = new ResizeObserver(apply);
+        ro.observe(sticky);
+        window.addEventListener('resize', apply);
+        return () => { ro.disconnect(); window.removeEventListener('resize', apply); };
+    }, [inputMode, pillsExpanded, colMenuOpen, rows.length]);
+
+    useEffect(() => {
+        const table = tableRef.current;
+        if (!table) return;
+        const heads = table.querySelectorAll('thead th');
+        heads.forEach(th => {
+            if (th.querySelector('.dv-col-resizer')) return;
+            const handle = document.createElement('div');
+            handle.className = 'dv-col-resizer';
+            handle.addEventListener('click', (ev) => ev.stopPropagation());
+            th.appendChild(handle);
+        });
+
+        let startX = 0, startW = 0, colIdx = -1, active = null;
+        const onMove = (e) => {
+            if (colIdx < 0) return;
+            const w = Math.max(60, startW + (e.pageX - startX));
+            table.querySelectorAll(`th:nth-child(${colIdx + 1}), td:nth-child(${colIdx + 1})`).forEach(el => {
+                el.style.width = w + 'px';
+                el.style.minWidth = w + 'px';
+                el.style.maxWidth = w + 'px';
+            });
+        };
+        const onUp = () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            if (active) active.classList.remove('resizing');
+            colIdx = -1; active = null;
+        };
+        const onDown = (e) => {
+            const t = e.target;
+            if (!t.classList || !t.classList.contains('dv-col-resizer')) return;
+            e.preventDefault(); e.stopPropagation();
+            const th = t.parentElement;
+            colIdx = Array.prototype.indexOf.call(th.parentElement.children, th);
+            startX = e.pageX; startW = th.offsetWidth;
+            active = t; t.classList.add('resizing');
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        };
+        table.addEventListener('mousedown', onDown);
+        return () => { table.removeEventListener('mousedown', onDown); };
+    }, [rows.length, hiddenCols.size, effectiveView]);
+
+    /* Visible columns (preserving DV_COLUMNS order) */
+    const visibleCols = useMemo(
+        () => DV_COLUMNS.filter(c => !hiddenCols.has(c.key)),
+        [hiddenCols]
+    );
+
+    /* Prepared rows: derive exam_percentage, and in version-wise mode sort by
+       version ascending (natural numeric order on the version label). */
+    const preparedRows = useMemo(() => {
+        const out = rows.map(r => {
+            const reg  = Number(r.registrations || 0);
+            const exam = Number(r.exam_count || 0);
+            return { ...r, exam_percentage: reg > 0 ? (exam / reg) * 100 : 0 };
+        });
+        if (effectiveView === 'version') {
+            out.sort((a, b) => {
+                const ax = parseInt(String(a.version || '').replace(/[^\d]/g, ''), 10) || 0;
+                const bx = parseInt(String(b.version || '').replace(/[^\d]/g, ''), 10) || 0;
+                if (ax !== bx) return ax - bx;
+                return String(a.version || '').localeCompare(String(b.version || ''));
+            });
+        }
+        return out;
+    }, [rows, effectiveView]);
+
+    /* Pre-compute min/max per column for heat-map */
+    const stats = useMemo(() => {
+        const out = {};
+        DV_COLUMNS.forEach(c => {
+            if (c.kind === 'neutral' || c.type === 'label') return;
+            let min = Infinity, max = -Infinity;
+            preparedRows.forEach(r => {
+                const v = Number(r[c.key] || 0);
+                if (v < min) min = v;
+                if (v > max) max = v;
+            });
+            out[c.key] = { min: min === Infinity ? 0 : min, max: max === -Infinity ? 0 : max };
+        });
+        return out;
+    }, [preparedRows]);
+
+    /* Total row */
+    const totals = useMemo(() => {
+        const t = {
+            spend: 0, registrations: 0,
+            exam_count: 0, internship_count: 0, second_internship: 0, revenue: 0,
+        };
+        preparedRows.forEach(r => {
+            t.spend             += Number(r.spend || 0);
+            t.registrations     += Number(r.registrations || 0);
+            t.exam_count        += Number(r.exam_count || 0);
+            t.internship_count  += Number(r.internship_count || 0);
+            t.second_internship += Number(r.second_internship || 0);
+            t.revenue           += Number(r.revenue || 0);
+        });
+        t.roi                   = t.spend         > 0 ? t.revenue  / t.spend          : 0;
+        t.cost_per_registration = t.registrations > 0 ? t.spend    / t.registrations  : 0;
+        t.cost_per_exam         = t.exam_count    > 0 ? t.spend    / t.exam_count     : 0;
+        t.exam_percentage       = t.registrations > 0 ? (t.exam_count / t.registrations) * 100 : 0;
+        return t;
+    }, [preparedRows]);
+
+    /* CSV export — matches the current view: respects visible columns, sort
+       order, and effectiveView mode. Numbers are exported raw (no currency or
+       % symbol) so Excel can treat them as numbers. */
+    const downloadCSV = () => {
+        if (preparedRows.length === 0) return;
+
+        // Header row, with the label split into Date / Version where useful.
+        const headers = [];
+        const fieldGetters = []; // (row) => stringified value for that column
+
+        visibleCols.forEach(c => {
+            if (c.type === 'label') {
+                const hasDate = preparedRows.some(r => r.date);
+                const hasVer  = preparedRows.some(r => r.version);
+                if (hasDate)              { headers.push('Date');    fieldGetters.push(r => r.date    || ''); }
+                if (hasVer)               { headers.push('Version'); fieldGetters.push(r => r.version || ''); }
+                if (!hasDate && !hasVer)  { headers.push('Label');   fieldGetters.push(r => r.__label || ''); }
+                return;
+            }
+            // Plain text label (strip the ₹ / % already in DV_COLUMNS labels)
+            headers.push(c.label.replace(/\s*\(.*?\)\s*/g, '').trim());
+            fieldGetters.push(r => {
+                const v = Number(r[c.key] || 0);
+                if (c.format === 'currency') return v.toFixed(2);
+                if (c.format === 'ratio')    return v.toFixed(4);
+                if (c.format === 'percent')  return v.toFixed(2);
+                return Math.round(v);
+            });
+        });
+
+        const escape = (v) => {
+            const s = String(v ?? '');
+            return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+        };
+
+        const lines = [];
+        lines.push(headers.map(escape).join(','));
+        preparedRows.forEach(r => {
+            lines.push(fieldGetters.map(fn => escape(fn(r))).join(','));
+        });
+        // Total row
+        const totalRow = { ...totals, __label: 'Total' };
+        lines.push(fieldGetters.map(fn => escape(fn(totalRow))).join(','));
+
+        const today = new Date();
+        const stamp = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+        const filename = `day_version_${effectiveView}wise_${stamp}.csv`;
+
+        // Prepend BOM so Excel opens the file as UTF-8 (handles ₹ / unicode names).
+        const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(link.href);
+    };
+
+    /* Render the value inside one cell. */
+    const renderCell = (col, row, isSummary = false) => {
+        if (col.type === 'label') {
+            if (isSummary) return row.__label;
+            if (row.date && row.version) {
+                return (
+                    <div className="dv-label-cell">
+                        <span className="dv-label-date">{DV_FMT_DATE(row.date)}</span>
+                        <span className="dv-label-ver">{row.version}</span>
+                    </div>
+                );
+            }
+            if (row.date)    return DV_FMT_DATE(row.date);
+            if (row.version) return row.version;
+            return '—';
+        }
+
+        const v = Number(row[col.key] || 0);
+        switch (col.format) {
+            case 'currency': return DV_FMT_CURRENCY(v);
+            case 'ratio':    return DV_FMT_RATIO(v);
+            case 'percent':  return v.toFixed(2) + '%';
+            case 'int':
+            default:         return DV_FMT_INT(v);
+        }
+    };
+
+    const cellBand = (col, row) => {
+        if (col.kind === 'neutral' || col.type === 'label') return '';
+        const s = stats[col.key];
+        if (!s) return '';
+        return dvBand(Number(row[col.key] || 0), s.min, s.max, col.kind);
+    };
+
+    /* renderCell uses the new dv-summary-label for footer label cells */
+    const renderCellV2 = (col, row, isSummary = false) => {
+        if (col.type === 'label') {
+            if (isSummary) {
+                return (
+                    <span className="dv-summary-label">
+                        <i className={row.__label === 'Total' ? 'fas fa-sigma' : 'fas fa-equals'} />
+                        {row.__label}
+                    </span>
+                );
+            }
+            if (row.date && row.version) {
+                return (
+                    <div className="dv-label-cell">
+                        <span className="dv-label-date">{DV_FMT_DATE(row.date)}</span>
+                        <span className="dv-label-ver">{row.version}</span>
+                    </div>
+                );
+            }
+            if (row.date)    return <span className="dv-label-date">{DV_FMT_DATE(row.date)}</span>;
+            if (row.version) return <span className="dv-label-date">{row.version}</span>;
+            return '—';
+        }
+        return renderCell(col, row, isSummary);
+    };
+
+    return (
+        <div className="dv-view" ref={viewRef}>
+            {/* Sticky control bar */}
+            <div className="dv-controls-sticky" ref={stickyRef}>
+                <div className="dv-controls">
+
+                    {/* Row 1: input mode segmented + view-as segmented */}
+                    <div className="dv-row dv-row-spread">
+                        <div className="dv-segmented" role="tablist" aria-label="Input mode">
+                            <button
+                                className={inputMode === 'versions' ? 'is-on' : ''}
+                                onClick={() => setInputMode('versions')}
+                            >
+                                <i className="fas fa-tags" /> CIT Versions
+                            </button>
+                            <button
+                                className={inputMode === 'daterange' ? 'is-on' : ''}
+                                onClick={() => setInputMode('daterange')}
+                            >
+                                <i className="fas fa-calendar-week" /> Date Range
+                            </button>
+                        </div>
+
+                        <div className="dv-view-toggle">
+                            <span className="dv-label-text">View as</span>
+                            <div className="dv-segmented" role="tablist" aria-label="View mode">
+                                <button
+                                    className={effectiveView === 'version' ? 'is-on' : ''}
+                                    onClick={() => setViewMode('version')}
+                                    disabled={inputMode === 'daterange'}
+                                    title={inputMode === 'daterange'
+                                        ? 'A free date range cannot be split into whole versions'
+                                        : ''}
+                                >
+                                    <i className="fas fa-layer-group" /> Version wise
+                                </button>
+                                <button
+                                    className={effectiveView === 'day' ? 'is-on' : ''}
+                                    onClick={() => setViewMode('day')}
+                                >
+                                    <i className="fas fa-calendar-day" /> Day wise
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr className="dv-divider" />
+
+                    {/* Row 2: versions OR date range */}
+                    {inputMode === 'versions' ? (
+                        <div className="dv-row">
+                            <div className="dv-section-title">Select CIT Versions</div>
+                            <div className={`dv-pills-wrap ${pillsExpanded ? 'dv-pills-expanded' : ''}`}>
+                                {citVersions.map(v => (
+                                    <button
+                                        key={v}
+                                        className={`dv-pill ${selectedVersions.includes(v) ? 'is-on' : ''}`}
+                                        onClick={() => toggleVersionPill(v)}
+                                    >
+                                        {v}
+                                    </button>
+                                ))}
+                            </div>
+                            {citVersions.length > 12 && (
+                                <button
+                                    className="dv-show-more-pill"
+                                    onClick={() => setPillsExpanded(!pillsExpanded)}
+                                >
+                                    {pillsExpanded
+                                        ? 'Show less'
+                                        : `Show more (${citVersions.length - 12})`}
+                                </button>
+                            )}
+                            {selectedVersions.length > 0 && (
+                                <button className="dv-clear-btn" onClick={clearVersions}>
+                                    <i className="fas fa-times" /> Clear ({selectedVersions.length})
+                                </button>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="dv-row">
+                            <div className="dv-section-title">Select Date Range</div>
+                            <DvDateRangePicker
+                                fromDate={fromDate}
+                                toDate={toDate}
+                                onApply={(f, t) => { setFromDate(f); setToDate(t); }}
+                            />
+                        </div>
+                    )}
+
+                    <hr className="dv-divider" />
+
+                    {/* Row 3: column show/hide + Download + Load button */}
+                    <div className="dv-row dv-row-spread">
+                      <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                        <div className="dv-col-menu-wrap">
+                            <button
+                                className="dv-ghost-btn"
+                                onClick={() => setColMenuOpen(!colMenuOpen)}
+                            >
+                                <i className="fas fa-columns" /> Columns
+                                <span className="dv-badge">
+                                    {DV_COLUMNS.length - hiddenCols.size}/{DV_COLUMNS.length}
+                                </span>
+                            </button>
+                            {colMenuOpen && (
+                                <div className="dv-col-menu">
+                                    <div className="dv-col-menu-head">Show / Hide Columns</div>
+                                    {DV_COLUMNS.map(c => (
+                                        <label key={c.key} className="dv-col-menu-item">
+                                            <input
+                                                type="checkbox"
+                                                checked={!hiddenCols.has(c.key)}
+                                                onChange={() => toggleCol(c.key)}
+                                            />
+                                            <span>{c.label}</span>
+                                        </label>
+                                    ))}
+                                    <div className="dv-col-menu-foot">
+                                        <button
+                                            className="dv-ghost-btn"
+                                            onClick={() => {
+                                                // Reset = show all
+                                                Array.from(hiddenCols).forEach(k => toggleCol(k));
+                                            }}
+                                        >Show all</button>
+                                        <button
+                                            className="dv-ghost-btn"
+                                            onClick={() => setColMenuOpen(false)}
+                                        >Done</button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                      </div>
+
+                        <button
+                            className="dv-load-btn"
+                            onClick={fetchData}
+                            disabled={loading}
+                        >
+                            {loading ? (
+                                <><i className="fas fa-spinner fa-spin" /> Loading...</>
+                            ) : (
+                                <><i className="fas fa-chart-bar" /> Load Comparison</>
+                            )}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* Table area */}
+            {rows.length === 0 ? (
+                <div className="dv-empty">
+                    <div className="dv-empty-icon">
+                        <i className="fas fa-chart-bar" />
+                    </div>
+                    <div className="dv-empty-title">No comparison data yet</div>
+                    <div className="dv-empty-hint">
+                        {inputMode === 'versions'
+                            ? 'Select CIT versions above and click "Load Comparison".'
+                            : 'Pick a date range and click "Load Comparison".'}
+                    </div>
+                </div>
+            ) : (
+                <>
+                    <div className="dv-result-bar">
+                        <span>
+                            Showing <span className="dv-result-chip">{rows.length}</span>{' '}
+                            {effectiveView === 'day' ? 'day rows' : 'version rows'}
+                            {inputMode === 'versions' && selectedVersions.length > 0 && (
+                                <> across <span className="dv-result-chip">{selectedVersions.length}</span> version(s)</>
+                            )}
+                        </span>
+                        <div style={{ display:'flex', gap:14, alignItems:'center', flexWrap:'wrap' }}>
+                            <div className="dv-legend">
+                                <span className="dv-legend-item"><span className="dv-legend-dot" style={{ background:'#fde7e9' }} /> Low</span>
+                                <span className="dv-legend-item"><span className="dv-legend-dot" style={{ background:'#fdebd0' }} /> Below avg</span>
+                                <span className="dv-legend-item"><span className="dv-legend-dot" style={{ background:'#fff8dc' }} /> Avg</span>
+                                <span className="dv-legend-item"><span className="dv-legend-dot" style={{ background:'#e3f3da' }} /> Above avg</span>
+                                <span className="dv-legend-item"><span className="dv-legend-dot" style={{ background:'#d4eede' }} /> High</span>
+                            </div>
+                            <button
+                                className="dv-download-btn"
+                                onClick={downloadCSV}
+                                title={`Download the current ${effectiveView}-wise table as CSV`}
+                            >
+                                <i className="fas fa-file-excel" /> Download Excel
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="dv-table-wrap">
+                        <table className="dv-table" ref={tableRef}>
+                            <thead>
+                                <tr>
+                                    {visibleCols.map(c => (
+                                        <th
+                                            key={c.key}
+                                            className={c.sticky ? 'dv-sticky-col' : ''}
+                                            style={{ width: c.width, minWidth: c.width }}
+                                        >
+                                            {c.label}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {preparedRows.map((r, idx) => (
+                                    <tr key={(r.date || '') + '|' + (r.version || '') + '|' + idx}>
+                                        {visibleCols.map(c => {
+                                            const band = cellBand(c, r);
+                                            const cls = [
+                                                c.sticky ? 'dv-sticky-col' : '',
+                                                band || 'dv-base-bg',
+                                            ].filter(Boolean).join(' ');
+                                            return (
+                                                <td key={c.key} className={cls}>
+                                                    {renderCellV2(c, r)}
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                ))}
+                            </tbody>
+                            <tfoot>
+                                <tr className="dv-summary-row dv-summary-total">
+                                    {visibleCols.map(c => (
+                                        <td key={c.key} className={c.sticky ? 'dv-sticky-col' : ''}>
+                                            {renderCellV2(c, { ...totals, __label: 'Total' }, true)}
+                                        </td>
+                                    ))}
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </>
+            )}
         </div>
     );
 }

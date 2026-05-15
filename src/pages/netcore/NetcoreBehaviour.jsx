@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 
@@ -25,6 +26,8 @@ const OTHER_EVENT_LIST = [
   { key: 'register_company', label: 'Register Company' },
   { key: 'company_signin', label: 'Company Signin' },
   { key: 'company_vacancy_post', label: 'Company Vacancy Post' },
+  { key: 'mark_attendance', label: 'Mark Attendance' },
+  { key: 'came_on_dashboard', label: 'Came on Dashboard' },
 ];
 
 const PAYLOAD_OPTIONS = {
@@ -42,6 +45,8 @@ const PAYLOAD_OPTIONS = {
   register_company: ['select parameter', 'company_logo', 'company_mobile', 'company_name', 'company_email'],
   company_signin: ['select parameter', 'company_signin_email', 'company_signin_status', 'company_signin_ip', 'company_signin_user_agent'],
   company_vacancy_post: ['select parameter', 'vp_email', 'vp_job_type', 'vp_job_title', 'vp_mode', 'vp_openings', 'vp_start_date', 'vp_duration', 'vp_salary', 'vp_comp_amount', 'vp_comp_min', 'vp_comp_max', 'vp_comp_type', 'vp_comp_period', 'vp_experience', 'vp_method', 'vp_source'],
+  mark_attendance: ['select parameter', 'internship_id', 'attendance_date', 'note', 'character_count', 'marked_at', 'ip_address', 'user_agent'],
+  came_on_dashboard: ['select parameter', 'login_date', 'activity_level'],
 };
 
 const CARD_COLORS = ['#4f46e5', '#7c3aed', '#0369a1', '#059669', '#dc2626', '#d97706'];
@@ -119,20 +124,45 @@ function ChartBox({ height = 480, loading, noData, noDataMsg, children, loaderCo
   );
 }
 
+/* Map filter preset key -> human label (used when restoring state from URL) */
+const PRESET_LABELS = {
+  today:    'Today',
+  yesterday:'Yesterday',
+  '7days':  'Last 7 Days',
+  '30days': 'Last 30 Days',
+};
+
 export default function NetcoreBehaviour() {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  /* Lazy-initialize from URL so that returning here from the user-timeline page
+     (via browser back) restores the previous tab/filter/event/date selection. */
+  const initialFilter   = searchParams.get('filter')   || 'today';
+  const initialFrom     = searchParams.get('from')     || '';
+  const initialTo       = searchParams.get('to')       || '';
+  const initialEvent    = searchParams.get('event')    || 'register';
+  const initialTab      = searchParams.get('tab')      || 'overview';
+  const initialOther    = searchParams.get('other')    || 'preferred_domain';
+  const initialIsCustom = !!(initialFrom && initialTo);
+
   const [counts, setCounts] = useState({});
   const [users, setUsers] = useState([]);
-  const [filter, setFilter] = useState('today');
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
-  const [filterLabel, setFilterLabel] = useState('Today');
-  const [activePreset, setActivePreset] = useState('today');
+  const [filter, setFilter] = useState(initialIsCustom ? '' : initialFilter);
+  const [fromDate, setFromDate] = useState(initialFrom);
+  const [toDate, setToDate] = useState(initialTo);
+  const [filterLabel, setFilterLabel] = useState(
+    initialIsCustom
+      ? `${initialFrom} → ${initialTo}`
+      : (PRESET_LABELS[initialFilter] || 'Today')
+  );
+  const [activePreset, setActivePreset] = useState(initialIsCustom ? '' : initialFilter);
   const [dropOpen, setDropOpen] = useState(false);
-  const [activeEvent, setActiveEvent] = useState('register');
-  const [otherEvent, setOtherEvent] = useState('preferred_domain');
+  const [activeEvent, setActiveEvent] = useState(initialEvent);
+  const [otherEvent, setOtherEvent] = useState(initialOther);
   const [otherDropOpen, setOtherDropOpen] = useState(false);
   const [otherSearch, setOtherSearch] = useState('');
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [payloadParam, setPayloadParam] = useState('select parameter');
   const [payloadDropOpen, setPayloadDropOpen] = useState(false);
   const [payloadSearch, setPayloadSearch] = useState('');
@@ -201,16 +231,37 @@ export default function NetcoreBehaviour() {
     return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  /* ── initial load: ALL calls in parallel — no sequential await, no setTimeout ── */
+  /* ── initial load: ALL calls in parallel — no sequential await, no setTimeout ──
+     Uses initial* values captured from URL search params so a browser-back
+     return restores the prior tab + filter + event. */
   useEffect(() => {
+    const f  = initialIsCustom ? '' : initialFilter;
+    const fd = initialFrom;
+    const td = initialTo;
+    const ev = initialEvent;
     loadChartJs().then(() => {
-      doFetchCounts('today', '', '', 'register');
-      doFetchUsers('register', 'today', '', '');
-      doFetchHourly('today', '', '', 'register');
-      doFetchFreq('today', '', '', 'register');
-      doFetchOverview('today', '', '', 'register'); /* default tab is now Overview */
+      doFetchCounts(f, fd, td, ev);
+      doFetchUsers(ev, f, fd, td);
+      doFetchHourly(f, fd, td, ev);
+      doFetchFreq(f, fd, td, ev);
+      doFetchOverview(f, fd, td, ev);
     });
+    if (initialTab === 'overview') overviewLoaded.current = true;
   }, []); // eslint-disable-line
+
+  /* Keep URL search params in sync with state. `replace: true` so each tweak
+     doesn't push a new history entry — only navigating away (e.g. clicking an
+     email) pushes a new entry, which is what browser-back should return to. */
+  useEffect(() => {
+    const p = new URLSearchParams();
+    if (filter)      p.set('filter', filter);
+    if (fromDate)    p.set('from',   fromDate);
+    if (toDate)      p.set('to',     toDate);
+    if (activeEvent) p.set('event',  activeEvent);
+    if (activeTab)   p.set('tab',    activeTab);
+    if (otherEvent && otherEvent !== 'preferred_domain') p.set('other', otherEvent);
+    setSearchParams(p, { replace: true });
+  }, [filter, fromDate, toDate, activeEvent, activeTab, otherEvent, setSearchParams]);
 
   /* ══════════ BODY BUILDER ══════════ */
   function mkBody(extra = {}, f, fd, td, ev) {
@@ -255,7 +306,8 @@ export default function NetcoreBehaviour() {
       const allEv = [...EVENT_LIST, ...OTHER_EVENT_LIST];
 
       let datasets = res.data.datasets || [];
-      const primaryAllSeries = datasets.map(ds => ({ label: ds.label, total: sumOf(ds.data) }));
+      const dsTotal = ds => (typeof ds.total === 'number' ? ds.total : sumOf(ds.data));
+      const primaryAllSeries = datasets.map(ds => ({ label: ds.label, total: dsTotal(ds) }));
 
       /* compare mode: drop previous-period / last-week from chart; keep only primary[0] + each compare[0] */
       const cmps = (cmpList || []).filter(k => k && k !== ev);
@@ -272,7 +324,7 @@ export default function NetcoreBehaviour() {
             const cmpDs = data.datasets[0];
             const cmpName = (allEv.find(e => e.key === key) || {}).label || key;
             datasets.push({ ...cmpDs, label: cmpName });
-            nextCompareTotals[key] = sumOf(cmpDs.data);
+            nextCompareTotals[key] = dsTotal(cmpDs);
           } else {
             nextCompareTotals[key] = 0;
           }
@@ -849,8 +901,10 @@ export default function NetcoreBehaviour() {
                       <div style={{ fontSize: 12, fontWeight: 600, color: LINE_COLORS[i % LINE_COLORS.length].border, marginBottom: 4 }}>
                         {compareEvents.length ? `${primaryLabel.toLowerCase()} count` : s.label}
                       </div>
-                      <div style={{ fontSize: 22, fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>
-                        {Number(s.total || 0).toLocaleString()}
+                      <div style={{ fontSize: 22, fontWeight: 700, color: '#0f172a', lineHeight: 1, minHeight: 22, display: 'flex', alignItems: 'center' }}>
+                        {ldOverview
+                          ? <DotsLoader color={LINE_COLORS[i % LINE_COLORS.length].border} size={7} />
+                          : Number(s.total || 0).toLocaleString()}
                       </div>
                     </div>
                   ))}
@@ -872,8 +926,10 @@ export default function NetcoreBehaviour() {
                           </svg>
                         </button>
                         <div style={{ fontSize: 12, fontWeight: 600, color: lineColor, marginBottom: 4 }}>{labelOf(k).toLowerCase()} count</div>
-                        <div style={{ fontSize: 22, fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>
-                          {Number(compareTotals[k] || 0).toLocaleString()}
+                        <div style={{ fontSize: 22, fontWeight: 700, color: '#0f172a', lineHeight: 1, minHeight: 22, display: 'flex', alignItems: 'center' }}>
+                          {ldOverview
+                            ? <DotsLoader color={lineColor} size={7} />
+                            : Number(compareTotals[k] || 0).toLocaleString()}
                         </div>
                       </div>
                     );
@@ -996,9 +1052,29 @@ export default function NetcoreBehaviour() {
                 {users.length === 0
                   ? <tr><td colSpan={3} style={{ textAlign: 'center', color: '#94a3b8', padding: 32, fontSize: 13 }}>No users found</td></tr>
                   : users.map((u, i) => (
-                    <tr key={i} className="nc-tr">
+                    <tr
+                      key={i}
+                      className="nc-tr"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => {
+                        const sp = new URLSearchParams();
+                        if (filter)      sp.set('filter', filter);
+                        if (fromDate)    sp.set('from',   fromDate);
+                        if (toDate)      sp.set('to',     toDate);
+                        if (activeEvent) sp.set('event',  activeEvent);
+                        sp.set('tab', 'users');
+                        if (otherEvent && otherEvent !== 'preferred_domain') sp.set('other', otherEvent);
+                        navigate(`/netcore/contacts/${encodeURIComponent(u.email)}`, {
+                          state: {
+                            backTo: `/netcore/behaviour?${sp.toString()}`,
+                            backLabel: 'Users',
+                          },
+                        });
+                      }}
+                      title="View user timeline"
+                    >
                       <td style={{ padding: '10px 14px', borderBottom: '1px solid #f1f5f9', color: '#94a3b8', fontWeight: 600, fontSize: 12 }}>{i + 1}</td>
-                      <td style={{ padding: '10px 14px', borderBottom: '1px solid #f1f5f9', color: '#4f46e5', fontSize: 13 }}>{u.email}</td>
+                      <td style={{ padding: '10px 14px', borderBottom: '1px solid #f1f5f9', color: '#4f46e5', fontSize: 13, textDecoration: 'underline', textUnderlineOffset: 2 }}>{u.email}</td>
                       <td style={{ padding: '10px 14px', borderBottom: '1px solid #f1f5f9', color: '#64748b', fontSize: 12 }}>{u.created_at}</td>
                     </tr>
                   ))
