@@ -195,6 +195,7 @@ import ReferralList from './pages/referrals/ReferralList';
 import WithdrawalList from './pages/referrals/WithdrawalList';
 import RefundList from './pages/refunds/RefundList';
 import RefundNew from './pages/refunds/RefundNew';
+import Attendance from './pages/attendance/Attendance';
 import DomainList from './pages/domains/DomainList';
 import NetcoreBehaviour from './pages/netcore/NetcoreBehaviour';
 import NetcoreFilter from './pages/netcore/NetcoreFilter';
@@ -226,6 +227,8 @@ import ExamNotGiven from './pages/examinations/ExamNotGiven';
 import CITVersions from './pages/examinations/CITVersions';
 import FreeApplicants from './pages/examinations/FreeApplicants';
 import ExamResultsNew from './pages/examinations/ExamResultsNew';
+import ResultPublish from './pages/examinations/ResultPublish';
+import ResultPublishTest from './pages/examinations/ResultPublishTest';
 import BatchDates from './pages/reports/BatchDates';
 import Reports from './pages/reports/Reports';
 import MatchingData from './pages/reports/MatchingData';
@@ -304,6 +307,9 @@ export default function App() {
         <Route path="refunds" element={G('manage_refund', <RefundList />)} />
         <Route path="refunds/new" element={G('manage_refund', <RefundNew />)} />
 
+        {/* Attendance */}
+        <Route path="attendance" element={G('attendance', <Attendance />)} />
+
         {/* Domain Management */}
         <Route path="domains" element={G('manage_domains', <DomainList />)} />
 
@@ -358,6 +364,8 @@ export default function App() {
         <Route path="exams/panel" element={G('exam_panel_admin', <ExamPanelForAdmin />)} />
         <Route path="exams/results-new" element={G('exam_results_new', <ExamResultsNew />)} />
         <Route path="exams/auto-submitted" element={G('auto_submitted_exams', <AutoSubmittedExams />)} />
+        <Route path="exams/publish-result" element={G('publish_result', <ResultPublish />)} />
+        <Route path="exams/publish-result-test" element={G('publish_result', <ResultPublishTest />)} />
 
         {/* Reporting & Analysis */}
         <Route path="reports/batch-dates" element={G('batch_dates', <BatchDates />)} />

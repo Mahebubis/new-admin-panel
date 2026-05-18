@@ -900,16 +900,20 @@ const P = {
 function ProofAvatar({ url }) {
   const [open, setOpen] = useState(false);
   if (!url) return <span style={{ color: '#cbd5e1', fontSize: 11 }}>—</span>;
-  const isImg = /\.(jpg|jpeg|png|gif|webp|bmp)(\?.*)?$/i.test(url);
+  const clean = String(url).trim();
+  /* only hosted http(s) links can be opened; file:// / local paths cannot */
+  const viewable = /^https?:\/\//i.test(clean);
+  const isImg = viewable && /\.(jpg|jpeg|png|gif|webp|bmp)(\?.*)?$/i.test(clean);
+  const badMsg = `Not viewable — this is a local/invalid path, not a hosted link:\n${clean}\n\nIt is a file on someone's own computer and cannot be opened from here.`;
   return (
     <>
-      <div onClick={() => setOpen(true)} title="View proof"
-        style={{ width: 32, height: 32, borderRadius: '50%', overflow: 'hidden', border: '2px solid #c4b5fd', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: '#ede9fe', transition: 'transform .15s, border-color .15s', flexShrink: 0 }}
-        onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.12)'; e.currentTarget.style.borderColor = '#7c3aed'; }}
-        onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)';    e.currentTarget.style.borderColor = '#c4b5fd'; }}>
+      <div onClick={() => setOpen(true)} title={viewable ? 'View proof' : badMsg}
+        style={{ width: 32, height: 32, borderRadius: '50%', overflow: 'hidden', border: `2px solid ${viewable ? '#c4b5fd' : '#fca5a5'}`, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: viewable ? '#ede9fe' : '#fee2e2', transition: 'transform .15s, border-color .15s', flexShrink: 0 }}
+        onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.12)'; e.currentTarget.style.borderColor = viewable ? '#7c3aed' : '#ef4444'; }}
+        onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)';    e.currentTarget.style.borderColor = viewable ? '#c4b5fd' : '#fca5a5'; }}>
         {isImg
-          ? <img src={url} alt="proof" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-          : <Ico d={P.file} size={14} color="#7c3aed" />}
+          ? <img src={clean} alt="proof" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          : <Ico d={P.file} size={14} color={viewable ? '#7c3aed' : '#dc2626'} />}
       </div>
       {open && (
         <div onClick={() => setOpen(false)}
@@ -921,25 +925,39 @@ function ProofAvatar({ url }) {
                 <Ico d={P.eye} size={13} color="#fff" /> Payment Proof
               </span>
               <div style={{ display: 'flex', gap: 8 }}>
-                <a href={url} target="_blank" rel="noopener"
-                  style={{ fontSize: 11, color: '#fff', opacity: .85, display: 'flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.3)', textDecoration: 'none' }}>
-                  Open ↗
-                </a>
+                {viewable && (
+                  <a href={clean} target="_blank" rel="noopener"
+                    style={{ fontSize: 11, color: '#fff', opacity: .85, display: 'flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.3)', textDecoration: 'none' }}>
+                    Open ↗
+                  </a>
+                )}
                 <button onClick={() => setOpen(false)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 6, width: 28, height: 28, cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
               </div>
             </div>
             <div style={{ background: '#0f172a', padding: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, overflow: 'auto' }}>
-              {isImg
-                ? <img src={url} alt="Payment proof" style={{ maxWidth: '100%', maxHeight: '70vh', borderRadius: 10, objectFit: 'contain', display: 'block' }} />
-                : <div style={{ textAlign: 'center', color: '#94a3b8' }}>
-                    <Ico d={P.file} size={48} color="#6366f1" style={{ marginBottom: 12 }} />
-                    <p style={{ fontSize: 12 }}>Cannot preview this file type.</p>
-                    <a href={url} target="_blank" rel="noopener"
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 18px', borderRadius: 8, background: '#4f46e5', color: '#fff', fontSize: 12, fontWeight: 600, textDecoration: 'none', marginTop: 10 }}>
-                      Open File
-                    </a>
-                  </div>
-              }
+              {isImg ? (
+                <img src={clean} alt="Payment proof" style={{ maxWidth: '100%', maxHeight: '70vh', borderRadius: 10, objectFit: 'contain', display: 'block' }} />
+              ) : viewable ? (
+                <div style={{ textAlign: 'center', color: '#94a3b8' }}>
+                  <Ico d={P.file} size={48} color="#6366f1" style={{ marginBottom: 12 }} />
+                  <p style={{ fontSize: 12 }}>Cannot preview this file type.</p>
+                  <a href={clean} target="_blank" rel="noopener"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 18px', borderRadius: 8, background: '#4f46e5', color: '#fff', fontSize: 12, fontWeight: 600, textDecoration: 'none', marginTop: 10 }}>
+                    Open File
+                  </a>
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', color: '#94a3b8', maxWidth: 560 }}>
+                  <Ico d={P.file} size={48} color="#ef4444" style={{ marginBottom: 12 }} />
+                  <p style={{ fontSize: 14, color: '#fca5a5', fontWeight: 700 }}>This file cannot be opened</p>
+                  <p style={{ fontSize: 12, marginTop: 8, wordBreak: 'break-all', color: '#cbd5e1' }}>{clean}</p>
+                  <p style={{ fontSize: 11.5, marginTop: 12, lineHeight: 1.7 }}>
+                    It is a local file path (<code>file://</code>) on someone's own computer — not a hosted link.
+                    No website can open it. Ask the student to upload the file and submit a public URL
+                    (Google Drive, GitHub, Netlify, etc.).
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1377,10 +1395,18 @@ export default function RefundList() {
                                 {ps.label}
                               </span>
                               {row.file_link && (
-                                <a href={row.file_link} target="_blank" rel="noopener" title="View file"
-                                  style={{ color: '#4f46e5', display: 'inline-flex' }}>
-                                  <Ico d={P.link} size={12} />
-                                </a>
+                                /^https?:\/\//i.test(String(row.file_link).trim()) ? (
+                                  <a href={String(row.file_link).trim()} target="_blank" rel="noopener" title="View file"
+                                    style={{ color: '#4f46e5', display: 'inline-flex' }}>
+                                    <Ico d={P.link} size={12} />
+                                  </a>
+                                ) : (
+                                  <span
+                                    title={`Not viewable — the student submitted a local/invalid path instead of a hosted link:\n${row.file_link}\n\nThis is a file on someone's own computer and cannot be opened from here. Ask the student to re-submit a public link (Google Drive, GitHub, Netlify, etc.).`}
+                                    style={{ color: '#ef4444', display: 'inline-flex', cursor: 'help' }}>
+                                    <Ico d={P.link} size={12} />
+                                  </span>
+                                )
                               )}
                             </div>
                           ) : <span style={{ color: '#cbd5e1', fontSize: 10 }}>—</span>}

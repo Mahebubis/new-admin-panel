@@ -1068,6 +1068,11 @@ const sidebarMenu = [
     ]
   },
   {
+    key: 'attendance', group: 'Attendance', icon: 'fas fa-calendar-check', items: [
+      { text: 'Attendance', link: '/attendance', icon: 'fas fa-calendar-check', perm: 'attendance' },
+    ]
+  },
+  {
     key: 'netcore', group: 'Netcore', icon: 'fas fa-network-wired', items: [
       { text: 'Netcore Behaviour', link: '/netcore/behaviour', icon: 'fas fa-chart-line', perm: 'netcore_behaviour' },
     ]
@@ -1123,6 +1128,8 @@ const sidebarMenu = [
       { text: 'Exam Panel Admin', link: '/exams/panel', icon: 'fas fa-user-shield', perm: 'exam_panel_admin' },
       { text: 'Exam Results For New Panel', link: '/exams/results-new', icon: 'fas fa-user-shield', perm: 'exam_results_new' },
       { text: 'Auto Submitted Exams', link: '/exams/auto-submitted', icon: 'fas fa-warning', perm: 'auto_submitted_exams' },
+      { text: 'Publish Result', link: '/exams/publish-result', icon: 'fas fa-bullhorn', perm: 'publish_result' },
+      { text: 'Publish Result (Test)', link: '/exams/publish-result-test', icon: 'fas fa-flask', perm: 'publish_result' },
     ]
   },
   {
