@@ -210,6 +210,7 @@ import AllocateInternships from './pages/internships/AllocateInternships';
 import ProjectSubmission from './pages/internships/ProjectSubmission';
 import CheckPayments from './pages/internships/CheckPayments';
 import ManageCoupons from './pages/internships/ManageCoupons';
+import InternshipSimulation2 from './pages/internships/InternshipSimulation2';
 import AddBlog from './pages/blogs/AddBlog';
 import ManageBlogs from './pages/blogs/ManageBlogs';
 import ManageFaqs from './pages/faqs/ManageFaqs';
@@ -327,6 +328,7 @@ export default function App() {
         <Route path="internships/projects" element={G('project_submission', <ProjectSubmission />)} />
         <Route path="internships/payments" element={G('check_payments', <CheckPayments />)} />
         <Route path="internships/coupons" element={G('manage_coupons', <ManageCoupons />)} />
+        <Route path="internships/simulation" element={G('internship_list', <InternshipSimulation2 />)} />
 
         {/* Blogs */}
         <Route path="blogs/add" element={G('add_blogs', <AddBlog />)} />

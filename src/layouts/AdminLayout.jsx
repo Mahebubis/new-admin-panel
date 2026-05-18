@@ -1085,6 +1085,7 @@ const sidebarMenu = [
       { text: 'Project Submission', link: '/internships/projects', icon: 'fas fa-file-circle-check', perm: 'project_submission' },
       { text: 'Check Payments', link: '/internships/payments', icon: 'fas fa-money-check-dollar', perm: 'check_payments' },
       { text: 'Manage Coupons', link: '/internships/coupons', icon: 'fas fa-tag', perm: 'manage_coupons' },
+      { text: 'Internship Simulation 2.2', link: '/internships/simulation', icon: 'fas fa-gamepad', perm: 'internship_list' },
     ]
   },
   {
