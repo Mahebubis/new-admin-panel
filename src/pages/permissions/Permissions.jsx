@@ -29,6 +29,16 @@ const EXTRA_SECTION_PERMISSIONS = {
   'Notes': {
     notes: 'Team Notes Access',
   },
+  'Attendance': {
+    attendance: 'Attendance',
+  },
+  'Examinations': {
+    publish_result: 'Publish Result',
+    publish_result_test: 'Publish Result (Test)',
+  },
+  'Internships': {
+    internship_simulation: 'Internship Simulation 2.2',
+  },
 };
 
 /* ─── section → icon emoji map (mirrors PHP sectionIconMap) ─── */
@@ -46,6 +56,7 @@ const SECTION_ICONS = {
   'Total Assessments': '📈',
   'Communication': '💬',
   'Examinations': '📝',
+  'Attendance': '📅',
   'Reporting & Analysis': '📊',
   'Company Management': '🏢',
   'Support': '🎧',

@@ -1090,7 +1090,7 @@ const sidebarMenu = [
       { text: 'Project Submission', link: '/internships/projects', icon: 'fas fa-file-circle-check', perm: 'project_submission' },
       { text: 'Check Payments', link: '/internships/payments', icon: 'fas fa-money-check-dollar', perm: 'check_payments' },
       { text: 'Manage Coupons', link: '/internships/coupons', icon: 'fas fa-tag', perm: 'manage_coupons' },
-      { text: 'Internship Simulation 2.2', link: '/internships/simulation', icon: 'fas fa-gamepad', perm: 'internship_list' },
+      { text: 'Internship Simulation 2.2', link: '/internships/simulation', icon: 'fas fa-gamepad', perm: 'internship_simulation' },
     ]
   },
   {
@@ -1129,7 +1129,7 @@ const sidebarMenu = [
       { text: 'Exam Results For New Panel', link: '/exams/results-new', icon: 'fas fa-user-shield', perm: 'exam_results_new' },
       { text: 'Auto Submitted Exams', link: '/exams/auto-submitted', icon: 'fas fa-warning', perm: 'auto_submitted_exams' },
       { text: 'Publish Result', link: '/exams/publish-result', icon: 'fas fa-bullhorn', perm: 'publish_result' },
-      { text: 'Publish Result (Test)', link: '/exams/publish-result-test', icon: 'fas fa-flask', perm: 'publish_result' },
+      { text: 'Publish Result (Test)', link: '/exams/publish-result-test', icon: 'fas fa-flask', perm: 'publish_result_test' },
     ]
   },
   {

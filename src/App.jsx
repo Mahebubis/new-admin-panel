@@ -334,7 +334,7 @@ export default function App() {
         <Route path="internships/projects" element={G('project_submission', <ProjectSubmission />)} />
         <Route path="internships/payments" element={G('check_payments', <CheckPayments />)} />
         <Route path="internships/coupons" element={G('manage_coupons', <ManageCoupons />)} />
-        <Route path="internships/simulation" element={G('internship_list', <InternshipSimulation2 />)} />
+        <Route path="internships/simulation" element={G('internship_simulation', <InternshipSimulation2 />)} />
 
         {/* Blogs */}
         <Route path="blogs/add" element={G('add_blogs', <AddBlog />)} />
@@ -365,7 +365,7 @@ export default function App() {
         <Route path="exams/results-new" element={G('exam_results_new', <ExamResultsNew />)} />
         <Route path="exams/auto-submitted" element={G('auto_submitted_exams', <AutoSubmittedExams />)} />
         <Route path="exams/publish-result" element={G('publish_result', <ResultPublish />)} />
-        <Route path="exams/publish-result-test" element={G('publish_result', <ResultPublishTest />)} />
+        <Route path="exams/publish-result-test" element={G('publish_result_test', <ResultPublishTest />)} />
 
         {/* Reporting & Analysis */}
         <Route path="reports/batch-dates" element={G('batch_dates', <BatchDates />)} />

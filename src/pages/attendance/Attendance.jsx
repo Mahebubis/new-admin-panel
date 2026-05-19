@@ -231,10 +231,10 @@ export default function Attendance() {
   };
   const clearSearch = () => { setSearchInput(''); setSearched(false); loadList(); };
 
-  /* ── open the calendar for a user ── */
-  const openCalendar = (user_id) => {
+  /* ── open the calendar for one internship payment ── */
+  const openCalendar = (payment_id) => {
     setCalLoading(true);
-    api.get(`${API}?action=calendar&user_id=${user_id}`)
+    api.get(`${API}?action=calendar&payment_id=${payment_id}`)
       .then(r => {
         const c = r.data?.data?.calendar;
         if (c) setCalData(c);
@@ -284,7 +284,7 @@ export default function Attendance() {
 
           {/* quick attendance icon for the first search match */}
           {searched && rows.length > 0 && (
-            <button onClick={() => openCalendar(rows[0].user_id)} disabled={calLoading}
+            <button onClick={() => openCalendar(rows[0].payment_id)} disabled={calLoading}
               title={`View calendar — ${rows[0].name}`}
               style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px',
                 border: '1.5px solid #c4b5fd', borderRadius: 8, background: '#ede9fe',
@@ -302,28 +302,27 @@ export default function Attendance() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                 <tr style={{ background: 'linear-gradient(135deg,#4f46e5,#7c3aed)' }}>
-                  {['User ID', 'Name', 'Email', 'Phone', 'Batch Start', 'Paid Date',
+                  {['User ID', 'Name', 'Email', 'Phone', 'Batch Start',
                     'Internship', 'Attendance %', 'Action'].map(h => <th key={h} style={thS}>{h}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={9} style={{ textAlign: 'center', padding: 48 }}>
+                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: 48 }}>
                     <div style={{ display: 'inline-block', width: 28, height: 28, border: '3px solid #ede9fe',
                       borderTop: '3px solid #4f46e5', borderRadius: '50%', animation: 'at_spin .7s linear infinite' }} />
                   </td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan={9} style={{ textAlign: 'center', color: '#94a3b8', padding: 40, fontSize: 13 }}>
+                  <tr><td colSpan={8} style={{ textAlign: 'center', color: '#94a3b8', padding: 40, fontSize: 13 }}>
                     No attendance records found
                   </td></tr>
                 ) : rows.map((r, i) => (
-                  <tr key={`${r.user_id}_${i}`} className="at-tr">
+                  <tr key={`${r.payment_id}_${i}`} className="at-tr">
                     <td style={{ ...tdS, color: '#4f46e5', fontWeight: 600 }}>{r.user_id}</td>
                     <td style={{ ...tdS, fontWeight: 600, color: '#1e293b', whiteSpace: 'nowrap' }}>{r.name || '—'}</td>
                     <td style={{ ...tdS, color: '#4f46e5', fontSize: 11.5 }}>{r.email || '—'}</td>
                     <td style={{ ...tdS, whiteSpace: 'nowrap' }}>{r.phone || '—'}</td>
                     <td style={{ ...tdS, whiteSpace: 'nowrap' }}>{fmtDate(r.batch_start)}</td>
-                    <td style={{ ...tdS, whiteSpace: 'nowrap' }}>{fmtDate(r.paid_at)}</td>
                     <td style={{ ...tdS, whiteSpace: 'nowrap' }}>{r.internship_name || '—'}</td>
                     <td style={tdS}>
                       <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 11, fontWeight: 700,
@@ -332,7 +331,7 @@ export default function Attendance() {
                       </span>
                     </td>
                     <td style={{ ...tdS, whiteSpace: 'nowrap' }}>
-                      <button onClick={() => openCalendar(r.user_id)} disabled={calLoading}
+                      <button onClick={() => openCalendar(r.payment_id)} disabled={calLoading}
                         style={{ padding: '5px 11px', background: '#ede9fe', color: '#6d28d9',
                           border: '1.5px solid #ddd6fe', borderRadius: 6, fontSize: 11,
                           fontWeight: 600, cursor: 'pointer' }}>
