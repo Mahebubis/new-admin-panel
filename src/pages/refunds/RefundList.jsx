@@ -889,6 +889,7 @@ const P = {
   copy:   'M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-4-4H8zM14 2v6h6',
   file:   'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6',
   link:   'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
+  video:  'M23 7l-7 5 7 5V7zM14 5H3a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z',
   upload: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12',
   mail:   'M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zM22 6l-10 7L2 6',
   check:  'M20 6 9 17l-5-5',
@@ -1080,6 +1081,50 @@ const Field = ({ label, children }) => (
   </div>
 );
 
+/* ──────── Rich text editor (contentEditable + toolbar) ────────
+   Lightweight inline editor — no external dependency. Uses execCommand
+   for formatting; deprecated but still universally supported and
+   sufficient for short admin emails. Emits onChange(html). */
+function RichEditor({ html, onChange, height = 240 }) {
+  const ref = useRef(null);
+  // Only set innerHTML once on mount / when html changes externally
+  useEffect(() => {
+    if (ref.current && ref.current.innerHTML !== html) {
+      ref.current.innerHTML = html || '';
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const exec = (cmd, val = null) => {
+    ref.current?.focus();
+    document.execCommand(cmd, false, val);
+    onChange?.(ref.current?.innerHTML || '');
+  };
+  const addLink = () => {
+    const url = window.prompt('Enter URL');
+    if (url) exec('createLink', url);
+  };
+  const btnS = { padding: '4px 8px', border: '1px solid #e2e8f0', background: '#fff', borderRadius: 5, fontSize: 11, fontWeight: 700, cursor: 'pointer', color: '#475569', minWidth: 26 };
+  return (
+    <div style={{ border: '1.5px solid #e2e8f0', borderRadius: 8, overflow: 'hidden', background: '#fff', display: 'flex', flexDirection: 'column', height }}>
+      <div style={{ display: 'flex', gap: 4, padding: '6px 8px', background: '#faf9ff', borderBottom: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
+        <button type="button" style={{ ...btnS, fontStyle: 'italic' }} onMouseDown={e => { e.preventDefault(); exec('bold'); }} title="Bold"><b>B</b></button>
+        <button type="button" style={{ ...btnS, fontStyle: 'italic' }} onMouseDown={e => { e.preventDefault(); exec('italic'); }} title="Italic"><i>I</i></button>
+        <button type="button" style={{ ...btnS, textDecoration: 'underline' }} onMouseDown={e => { e.preventDefault(); exec('underline'); }} title="Underline">U</button>
+        <span style={{ width: 1, background: '#e2e8f0', margin: '0 2px' }} />
+        <button type="button" style={btnS} onMouseDown={e => { e.preventDefault(); exec('insertUnorderedList'); }} title="Bulleted list">• List</button>
+        <button type="button" style={btnS} onMouseDown={e => { e.preventDefault(); exec('insertOrderedList'); }} title="Numbered list">1. List</button>
+        <span style={{ width: 1, background: '#e2e8f0', margin: '0 2px' }} />
+        <button type="button" style={btnS} onMouseDown={e => { e.preventDefault(); addLink(); }} title="Insert link">🔗</button>
+        <button type="button" style={btnS} onMouseDown={e => { e.preventDefault(); exec('removeFormat'); }} title="Clear formatting">⌫</button>
+      </div>
+      <div ref={ref} contentEditable suppressContentEditableWarning
+        onInput={e => onChange?.(e.currentTarget.innerHTML)}
+        style={{ flex: 1, padding: '10px 14px', fontSize: 12.5, lineHeight: 1.55, color: '#1e293b', outline: 'none', overflowY: 'auto' }}
+      />
+    </div>
+  );
+}
+
 const inputStyle = { width: '100%', padding: '7px 10px', border: '1.5px solid #e2e8f0', borderRadius: 8, fontSize: 12, fontFamily: 'inherit', outline: 'none', color: '#1e293b', background: '#faf9ff', boxSizing: 'border-box' };
 
 const LIMIT = 20;
@@ -1096,6 +1141,7 @@ export default function RefundList() {
   const [search,       setSearch]       = useState('');
   const [status,       setStatus]       = useState('');
   const [batch,        setBatch]        = useState('');
+  const [hasVideo,     setHasVideo]     = useState(false);
   const [loading,      setLoading]      = useState(true);
   const [actionLoading,setActionLoading]= useState(false);
   const jumpRef = useRef(null);
@@ -1111,7 +1157,7 @@ export default function RefundList() {
     setLoading(true);
     try {
       const res = await api.get('/api/refunds/list.php', {
-        params: { page, per_page: perPage, search, status, batch }
+        params: { page, per_page: perPage, search, status, batch, has_video: hasVideo ? 1 : 0 }
       });
       if (res.data.success) {
         const d = res.data.data;
@@ -1122,7 +1168,7 @@ export default function RefundList() {
         if (d.batches) setBatches(d.batches);
       }
     } catch {} finally { setLoading(false); }
-  }, [page, perPage, search, status, batch]);
+  }, [page, perPage, search, status, batch, hasVideo]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -1136,6 +1182,73 @@ export default function RefundList() {
   /* ── API calls ── */
   const callApi = async (body) => api.post('/api/refunds/list.php', body);
 
+  /* Send email via the existing list.php `send_email` action. Best-effort —
+     status update has already succeeded; an email failure just toasts. */
+  /* When wrap=false the backend skips rl_wrapEmail (use for full-design
+     templates like the approval email that already have their own header). */
+  const sendEmail = async (to, subject, html, wrap = true) => {
+    if (!to || !subject || !html) return;
+    try { await callApi({ action: 'send_email', to, subject, html, wrap }); }
+    catch (e) {
+      const msg = e?.response?.data?.message || 'Status updated but email failed to send';
+      toast.error(msg);
+    }
+  };
+
+  /* ── Email templates (HTML fragments — list.php wraps with rl_wrapEmail) ── */
+  const tmplRefund = (m) => `
+    <h2 style="color:#0d2137;margin:0 0 12px;">Refund Processed</h2>
+    <p>Dear ${m.name},</p>
+    <p>Your refund claim for the internship <strong>${m.internship_name}</strong> has been <strong style="color:#16a34a;">successfully processed</strong>.</p>
+    <p>The amount will reflect in your original payment method within 5–7 working days.</p>
+    ${m.adminNotes ? `<p style="background:#f5f3ff;border-left:3px solid #4f46e5;padding:10px 14px;border-radius:6px;"><strong>Note from the team:</strong><br>${m.adminNotes.replace(/\n/g,'<br>')}</p>` : ''}
+    <p>If you have any questions, simply reply to this email.</p>
+    <p style="margin-top:20px;">Best regards,<br><strong>Team Internship Studio</strong></p>`;
+
+  const tmplReject = (m) => `
+    <h2 style="color:#0d2137;margin:0 0 12px;">Refund Claim Update</h2>
+    <p>Dear ${m.name},</p>
+    <p>After reviewing your refund claim for the internship <strong>${m.internship_name}</strong>, we are unable to approve it at this time.</p>
+    ${m.adminNotes ? `<p style="background:#fef2f2;border-left:3px solid #dc2626;padding:10px 14px;border-radius:6px;"><strong>Reason:</strong><br>${m.adminNotes.replace(/\n/g,'<br>')}</p>` : ''}
+    <p>If you believe this decision needs to be reviewed, please reply to this email with any additional context.</p>
+    <p style="margin-top:20px;">Best regards,<br><strong>Team Internship Studio</strong></p>`;
+
+  /* Project Approve — full HTML (sent with wrap:false). Matches the design
+     of the original PHP modal: dark teal hero card with checkmark + body. */
+  const tmplApproveProject = (m) => `
+<div style="font-family:'Segoe UI',Arial,sans-serif;background:#f0faf8;margin:0;padding:24px 12px;">
+  <div style="max-width:620px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08);">
+    <div style="background:linear-gradient(135deg,#0d2137,#164a3e);padding:40px 32px;text-align:center;">
+      <div style="display:inline-block;width:62px;height:62px;line-height:62px;background:#00bfa6;border-radius:50%;margin-bottom:18px;color:#fff;font-size:34px;font-weight:800;">&#10003;</div>
+      <h1 style="color:#fff;font-size:26px;margin:0 0 6px;font-weight:800;">Project Approved!</h1>
+      <p style="color:rgba(255,255,255,.7);font-size:13px;margin:0;">Your internship project has been evaluated and approved</p>
+    </div>
+    <div style="padding:32px 36px;font-size:14px;color:#1a2e2b;line-height:1.7;text-align:center;">
+      <p style="margin:0 0 14px;">Dear <strong>${m.name}</strong>,</p>
+      <p style="margin:0 0 14px;">Greetings from <strong>Internship Studio</strong>!</p>
+      <p style="margin:0 0 18px;">We are pleased to inform you that your internship project submission for <strong style="color:#00bfa6;">${m.internship_name}</strong> has been successfully <strong>evaluated and approved</strong>. Thank you for submitting your project.</p>
+      <div style="background:#e0f7f4;border-left:4px solid #00bfa6;border-radius:8px;padding:14px 18px;margin:18px 0;text-align:left;font-size:13.5px;color:#0d2137;line-height:1.65;">
+        You will be able to <strong>download your internship certificates after your internship duration ends</strong>. Once you receive your <strong>internship completion certificates</strong>, you will be eligible to <strong>apply for stipend-based internships</strong> and further career opportunities through Internship Studio.
+      </div>
+      <p style="margin:18px 0 4px;">Warm regards,</p>
+      <p style="margin:0;"><strong>Internship Studio Team</strong></p>
+    </div>
+    <div style="background:#f0faf8;padding:14px;text-align:center;font-size:11px;color:#6b8f8a;border-top:1px solid #d4efeb;">
+      &copy; ${new Date().getFullYear()} Internship Studio &middot; This is an automated email.
+    </div>
+  </div>
+</div>`;
+
+  /* Project Decline — pre-written body fragment (sent with wrap:true so the
+     existing list.php wrapper applies). Admin can edit before sending. */
+  const tmplDeclineProject = (m) => `
+<p>Dear <strong>${m.name}</strong>,</p>
+<p>Thank you for submitting your project for the <strong>${m.internship_name}</strong> internship program.</p>
+<p>After careful review, we regret to inform you that your project submission has <strong>not been approved</strong> at this time.</p>
+<p>Please review the feedback provided and resubmit an updated version at your earliest convenience.</p>
+<p>If you have any questions, feel free to reach out to our support team.</p>
+<p>Warm regards,<br><strong>Internship Studio Team</strong></p>`;
+
   const handleConfirmRefund = async (m) => {
     setActionLoading(true);
     try {
@@ -1147,6 +1260,7 @@ export default function RefundList() {
       }
       await callApi({ action:'update_refund_claim', user_id:m.user_id, internship_id:m.internship_id, status:'refunded', admin_notes:m.adminNotes, proof_url:proofUrl });
       patchRow(m.user_id, m.internship_id, { refund_claim_status:'refunded', proof_url:proofUrl });
+      if (!m.skipEmail) await sendEmail(m.email, 'Refund Processed – Internship Studio', tmplRefund(m));
       toast.success('Refund confirmed');
       setConfirmModal(null);
     } catch { toast.error('Failed to confirm refund'); }
@@ -1154,10 +1268,15 @@ export default function RefundList() {
   };
 
   const handleRejectRefund = async (m) => {
+    if (!m.adminNotes || !m.adminNotes.trim()) {
+      toast.error('Please enter rejection notes before continuing');
+      return;
+    }
     setActionLoading(true);
     try {
       await callApi({ action:'update_refund_claim', user_id:m.user_id, internship_id:m.internship_id, status:'rejected', admin_notes:m.adminNotes });
       patchRow(m.user_id, m.internship_id, { refund_claim_status:'rejected' });
+      if (!m.skipEmail) await sendEmail(m.email, m.emailSubject || 'Refund Claim Update – Internship Studio', m.emailBody || tmplReject(m));
       toast.success('Claim rejected');
       setRejectModal(null);
     } catch { toast.error('Failed to reject'); }
@@ -1169,6 +1288,12 @@ export default function RefundList() {
     try {
       await callApi({ action:'approve_project', user_id:m.user_id, internship_id:m.internship_id });
       patchRow(m.user_id, m.internship_id, { project_status:'approved' });
+      if (!m.skipEmail) await sendEmail(
+        m.email,
+        m.emailSubject || `Your Project Has Been Approved - ${m.internship_name}`,
+        tmplApproveProject(m),
+        false /* full-design template — skip the wrapper */
+      );
       toast.success('Project approved');
       setApproveModal(null);
     } catch { toast.error('Failed to approve'); }
@@ -1176,10 +1301,19 @@ export default function RefundList() {
   };
 
   const handleDeclineProject = async (m) => {
+    if (!m.reason || !m.reason.trim()) {
+      toast.error('Please enter a decline reason before continuing');
+      return;
+    }
     setActionLoading(true);
     try {
       await callApi({ action:'decline_project', user_id:m.user_id, internship_id:m.internship_id, reason:m.reason });
       patchRow(m.user_id, m.internship_id, { project_status:'rejected' });
+      if (!m.skipEmail) await sendEmail(
+        m.email,
+        m.emailSubject || `Update on Your Project Submission - ${m.internship_name}`,
+        m.emailBody || tmplDeclineProject(m)
+      );
       toast.success('Project declined');
       setDeclineModal(null);
     } catch { toast.error('Failed to decline'); }
@@ -1187,13 +1321,14 @@ export default function RefundList() {
   };
 
   const doSearch  = () => { setSearch(searchInput); setPage(1); };
-  const doClear   = () => { setSearchInput(''); setSearch(''); setStatus(''); setBatch(''); setPage(1); };
+  const doClear   = () => { setSearchInput(''); setSearch(''); setStatus(''); setBatch(''); setHasVideo(false); setPage(1); };
   const jumpToPage = () => {
     const v = parseInt(jumpRef.current?.value);
     if (v >= 1 && v <= totalPages) setPage(v); else toast.error('Invalid page');
   };
 
   const fmtDate = d => { if (!d) return '—'; try { return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }); } catch { return d; } };
+  const fmtDateTime = d => { if (!d) return '—'; try { return new Date(d).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:true }); } catch { return d; } };
   const attColor = v => v >= 100 ? '#15803d' : v >= 50 ? '#c2410c' : '#b91c1c';
   const attBg    = v => v >= 100 ? '#f0fdf4' : v >= 50 ? '#fff7ed' : '#fef2f2';
 
@@ -1321,6 +1456,18 @@ export default function RefundList() {
           <select className="rl-sel" value={perPage} onChange={e => { setPerPage(Number(e.target.value)); setPage(1); }}>
             {[10, 20, 25, 50, 100].map(n => <option key={n} value={n}>{n} / page</option>)}
           </select>
+          <label style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+            padding: '0 11px', height: 32, borderRadius: 8, fontSize: 12, fontWeight: 600,
+            border: `1.5px solid ${hasVideo ? '#6d28d9' : '#e2e8f0'}`,
+            background: hasVideo ? '#ede9fe' : '#fff',
+            color: hasVideo ? '#6d28d9' : '#334155', userSelect: 'none', whiteSpace: 'nowrap'
+          }}>
+            <input type="checkbox" checked={hasVideo}
+              onChange={e => { setHasVideo(e.target.checked); setPage(1); }}
+              style={{ accentColor: '#6d28d9', cursor: 'pointer' }} />
+            Has Video
+          </label>
           <button className="rl-btn-p" onClick={doSearch}><Ico d={P.search} size={12} /> Search</button>
           <button className="rl-btn-o" onClick={doClear}><Ico d={P.x} size={12} /> Clear</button>
         </div>
@@ -1332,14 +1479,14 @@ export default function RefundList() {
               <table className="rl-t">
                 <thead>
                   <tr>
-                    {['#','Student','Contact','Internship','Duration','Batch','Paid At','Attendance','Project','Claim Status','Payment Info','Proof','Refund Action','Project Action'].map(h => (
+                    {['#','Student','Contact','Internship','Duration','Batch','Paid At','Attendance','Project','Video Link','Claim Status','Payment Info','Proof','Refund Action','Project Action'].map(h => (
                       <th key={h}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {!loading && data.length === 0 && (
-                    <tr><td colSpan={14} className="no-data">No refund records found</td></tr>
+                    <tr><td colSpan={15} className="no-data">No refund records found</td></tr>
                   )}
                   {data.map((row, i) => {
                     const claimSt = row.refund_claim_status || 'active';
@@ -1389,27 +1536,47 @@ export default function RefundList() {
                         {/* Project */}
                         <td>
                           {ps ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                              <span className="pill" style={{ background: ps.bg, color: ps.color, borderColor: ps.border }}>
-                                <svg width="5" height="5" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill={ps.dot}/></svg>
-                                {ps.label}
-                              </span>
-                              {row.file_link && (
-                                /^https?:\/\//i.test(String(row.file_link).trim()) ? (
-                                  <a href={String(row.file_link).trim()} target="_blank" rel="noopener" title="View file"
-                                    style={{ color: '#4f46e5', display: 'inline-flex' }}>
-                                    <Ico d={P.link} size={12} />
-                                  </a>
-                                ) : (
-                                  <span
-                                    title={`Not viewable — the student submitted a local/invalid path instead of a hosted link:\n${row.file_link}\n\nThis is a file on someone's own computer and cannot be opened from here. Ask the student to re-submit a public link (Google Drive, GitHub, Netlify, etc.).`}
-                                    style={{ color: '#ef4444', display: 'inline-flex', cursor: 'help' }}>
-                                    <Ico d={P.link} size={12} />
-                                  </span>
-                                )
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                                <span className="pill" style={{ background: ps.bg, color: ps.color, borderColor: ps.border }}>
+                                  <svg width="5" height="5" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill={ps.dot}/></svg>
+                                  {ps.label}
+                                </span>
+                                {row.file_link && (
+                                  /^https?:\/\//i.test(String(row.file_link).trim()) ? (
+                                    <a href={String(row.file_link).trim()} target="_blank" rel="noopener" title="View file"
+                                      style={{ color: '#4f46e5', display: 'inline-flex' }}>
+                                      <Ico d={P.link} size={12} />
+                                    </a>
+                                  ) : (
+                                    <span
+                                      title={`Not viewable — the student submitted a local/invalid path instead of a hosted link:\n${row.file_link}\n\nThis is a file on someone's own computer and cannot be opened from here. Ask the student to re-submit a public link (Google Drive, GitHub, Netlify, etc.).`}
+                                      style={{ color: '#ef4444', display: 'inline-flex', cursor: 'help' }}>
+                                      <Ico d={P.link} size={12} />
+                                    </span>
+                                  )
+                                )}
+                              </div>
+                              {row.project_submitted_date && (
+                                <span style={{ fontSize: 9.5, color: '#94a3b8', whiteSpace: 'nowrap' }}>
+                                  {fmtDateTime(row.project_submitted_date)}
+                                </span>
                               )}
                             </div>
                           ) : <span style={{ color: '#cbd5e1', fontSize: 10 }}>—</span>}
+                        </td>
+
+                        {/* Video Link */}
+                        <td>
+                          {row.video_link
+                            ? <a href={String(row.video_link).trim()} target="_blank" rel="noopener" title="View video"
+                                style={{
+                                  color: '#6d28d9', fontWeight: 600, fontSize: 11,
+                                  display: 'inline-flex', alignItems: 'center', gap: 4, textDecoration: 'none'
+                                }}>
+                                <Ico d={P.video} size={12} /> View Video
+                              </a>
+                            : <span style={{ color: '#cbd5e1', fontSize: 10 }}>—</span>}
                         </td>
 
                         {/* Claim Status */}
@@ -1444,15 +1611,25 @@ export default function RefundList() {
                         <td>
                           <RefundActions row={row}
                             onConfirm={r => setConfirmModal({ user_id:r.user_id, internship_id:r.internship_id, name:r.name, email:r.email, internship_name:r.internship_name, adminNotes:'', proofUrl:'', proofFile:null, skipEmail:false })}
-                            onReject={r => setRejectModal({ user_id:r.user_id, internship_id:r.internship_id, name:r.name, email:r.email, internship_name:r.internship_name, adminNotes:'', skipEmail:false, emailSubject:`Refund Claim Update – Internship Studio`, emailBody:'' })}
+                            onReject={r => setRejectModal({ user_id:r.user_id, internship_id:r.internship_id, name:r.name, email:r.email, internship_name:r.internship_name, adminNotes:'', skipEmail:false, emailSubject:`Refund Claim Update – Internship Studio`, emailBody: tmplReject({ name: r.name, internship_name: r.internship_name, adminNotes: '' }) })}
                           />
                         </td>
 
                         {/* Project Action */}
                         <td>
                           <ProjectActions row={row}
-                            onApprove={r => setApproveModal({ user_id:r.user_id, internship_id:r.internship_id, name:r.name, email:r.email, internship_name:r.internship_name, skipEmail:false })}
-                            onDecline={r => setDeclineModal({ user_id:r.user_id, internship_id:r.internship_id, name:r.name, email:r.email, internship_name:r.internship_name, reason:'', skipEmail:false })}
+                            onApprove={r => setApproveModal({
+                              user_id: r.user_id, internship_id: r.internship_id, name: r.name, email: r.email, internship_name: r.internship_name,
+                              skipEmail: false,
+                              emailSubject: `Your Project Has Been Approved - ${r.internship_name}`,
+                              emailHtml: tmplApproveProject({ name: r.name, internship_name: r.internship_name }),
+                            })}
+                            onDecline={r => setDeclineModal({
+                              user_id: r.user_id, internship_id: r.internship_id, name: r.name, email: r.email, internship_name: r.internship_name,
+                              reason: '', skipEmail: false,
+                              emailSubject: `Update on Your Project Submission - ${r.internship_name}`,
+                              emailBody: tmplDeclineProject({ name: r.name, internship_name: r.internship_name }),
+                            })}
                           />
                         </td>
                       </tr>
@@ -1513,72 +1690,230 @@ export default function RefundList() {
         </Modal>
       )}
 
-      {/* Reject Refund */}
+      {/* Reject Refund — split-view editor + live preview */}
       {rejectModal && (
-        <Modal title="Reject Refund Claim" onClose={() => !actionLoading && setRejectModal(null)} loading={actionLoading}
-          footer={<>
-            <Btn label="Cancel" color="gray" onClick={() => setRejectModal(null)} disabled={actionLoading} />
-            <Btn label="Reject Claim" color="red" onClick={() => handleRejectRefund(rejectModal)} loading={actionLoading} />
-          </>}>
-          <p style={{ fontSize: 12, color: '#475569', margin: '0 0 14px', padding: '8px 12px', background: '#fef2f2', borderRadius: 8, borderLeft: '3px solid #dc2626' }}>
-            <strong>{rejectModal.name}</strong> — {rejectModal.internship_name}
-          </p>
-          <Field label="Rejection Notes *">
-            <textarea value={rejectModal.adminNotes} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }}
-              placeholder="Required: reason for rejection…"
-              onChange={e => setRejectModal(m => ({ ...m, adminNotes: e.target.value }))} />
-          </Field>
-          <Field label="Email Subject">
-            <input value={rejectModal.emailSubject} style={inputStyle}
-              onChange={e => setRejectModal(m => ({ ...m, emailSubject: e.target.value }))} />
-          </Field>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, color: '#475569', cursor: 'pointer' }}>
-            <input type="checkbox" checked={rejectModal.skipEmail} onChange={e => setRejectModal(m => ({ ...m, skipEmail: e.target.checked }))} style={{ accentColor: '#4f46e5' }} />
-            Skip email notification
-          </label>
-        </Modal>
-      )}
+        <div onClick={() => !actionLoading && setRejectModal(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, backdropFilter: 'blur(4px)' }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: 14, width: '100%', maxWidth: 980, height: '90vh', boxShadow: '0 25px 60px rgba(0,0,0,0.25)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '13px 20px', background: 'linear-gradient(135deg,#dc2626,#b91c1c)' }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>✕ Reject Refund Claim</div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.8)', marginTop: 2 }}>{rejectModal.name} — {rejectModal.internship_name}</div>
+              </div>
+              <button onClick={() => setRejectModal(null)} disabled={actionLoading}
+                style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 6, width: 28, height: 28, cursor: actionLoading ? 'not-allowed' : 'pointer', fontSize: 18 }}>×</button>
+            </div>
 
-      {/* Approve Project */}
-      {approveModal && (
-        <Modal title="Approve Project" onClose={() => !actionLoading && setApproveModal(null)} loading={actionLoading}
-          footer={<>
-            <Btn label="Cancel" color="gray" onClick={() => setApproveModal(null)} disabled={actionLoading} />
-            <Btn label="Approve Project" onClick={() => handleApproveProject(approveModal)} loading={actionLoading} />
-          </>}>
-          <p style={{ fontSize: 12, color: '#475569', margin: '0 0 14px', padding: '8px 12px', background: '#f0fdf4', borderRadius: 8, borderLeft: '3px solid #16a34a' }}>
-            Approving project for <strong>{approveModal.name}</strong> — {approveModal.internship_name}
-          </p>
-          <div style={{ background: '#f5f3ff', borderRadius: 10, padding: '12px 14px', fontSize: 12, color: '#475569', lineHeight: 1.7 }}>
-            The student will be notified that their project has been approved and they can now claim their refund.
+            {/* top fields */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, padding: '14px 20px', background: '#faf9ff', borderBottom: '1.5px solid #f5f3ff' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#64748b', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.4px' }}>To</label>
+                <input value={rejectModal.email} readOnly style={{ ...inputStyle, background: '#f1f5f9', color: '#64748b' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#4f46e5', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Subject</label>
+                <input value={rejectModal.emailSubject} style={inputStyle}
+                  onChange={e => setRejectModal(m => ({ ...m, emailSubject: e.target.value }))} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#dc2626', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Rejection Notes (internal) *</label>
+                <input value={rejectModal.adminNotes} style={inputStyle}
+                  placeholder="Required: reason for rejection…"
+                  onChange={e => setRejectModal(m => ({ ...m, adminNotes: e.target.value }))} />
+              </div>
+            </div>
+
+            {/* split body */}
+            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, overflow: 'hidden', minHeight: 0 }}>
+              {/* LEFT — editor */}
+              <div style={{ display: 'flex', flexDirection: 'column', borderRight: '1.5px solid #f5f3ff', overflow: 'hidden' }}>
+                <div style={{ padding: '8px 14px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.5px' }}>
+                  ✏️ Email Editor
+                </div>
+                <div style={{ flex: 1, padding: 14, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                  <RichEditor html={rejectModal.emailBody} height="100%"
+                    onChange={html => setRejectModal(m => ({ ...m, emailBody: html }))} />
+                </div>
+              </div>
+              {/* RIGHT — live preview */}
+              <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <div style={{ padding: '8px 14px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.5px' }}>
+                  👁 Live Preview
+                </div>
+                <div style={{ flex: 1, overflow: 'auto', padding: 16, background: '#f5f3ff' }}>
+                  <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #e2e8f0', padding: '18px 20px', boxShadow: '0 1px 4px rgba(0,0,0,0.04)', fontSize: 13, lineHeight: 1.6, color: '#1e293b' }}>
+                    <div style={{ paddingBottom: 10, marginBottom: 12, borderBottom: '1px solid #f1f5f9', fontSize: 11, color: '#64748b' }}>
+                      <div><strong>To:</strong> {rejectModal.email}</div>
+                      <div><strong>Subject:</strong> {rejectModal.emailSubject}</div>
+                    </div>
+                    <div dangerouslySetInnerHTML={{ __html: rejectModal.emailBody || '' }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* footer */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 20px', borderTop: '1.5px solid #f5f3ff', background: '#fafafa' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, color: '#475569', cursor: 'pointer', userSelect: 'none' }}>
+                <input type="checkbox" checked={rejectModal.skipEmail}
+                  onChange={e => setRejectModal(m => ({ ...m, skipEmail: e.target.checked }))}
+                  style={{ accentColor: '#4f46e5', cursor: 'pointer' }} />
+                Skip email — status only
+              </label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn label="Cancel" color="gray" onClick={() => setRejectModal(null)} disabled={actionLoading} />
+                <Btn label="Reject Claim" color="red" onClick={() => handleRejectRefund(rejectModal)} loading={actionLoading} />
+              </div>
+            </div>
           </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, color: '#475569', cursor: 'pointer', marginTop: 14 }}>
-            <input type="checkbox" checked={approveModal.skipEmail} onChange={e => setApproveModal(m => ({ ...m, skipEmail: e.target.checked }))} style={{ accentColor: '#4f46e5' }} />
-            Skip email notification
-          </label>
-        </Modal>
+        </div>
       )}
 
-      {/* Decline Project */}
+      {/* Approve Project — preview-only (canned email) */}
+      {approveModal && (
+        <div onClick={() => !actionLoading && setApproveModal(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, backdropFilter: 'blur(4px)' }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: 14, width: '100%', maxWidth: 720, height: '88vh', boxShadow: '0 25px 60px rgba(0,0,0,0.25)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 22px', background: 'linear-gradient(135deg,#0d2137,#164a3e)' }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>
+                  <span style={{ color: '#69f0ae', marginRight: 6 }}>✓</span>
+                  Approve Project Submission
+                </div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.7)', marginTop: 2 }}>{approveModal.name} · {approveModal.email}</div>
+              </div>
+              <button onClick={() => setApproveModal(null)} disabled={actionLoading}
+                style={{ background: 'rgba(255,255,255,0.18)', border: 'none', color: '#fff', borderRadius: 6, width: 28, height: 28, cursor: actionLoading ? 'not-allowed' : 'pointer', fontSize: 18 }}>×</button>
+            </div>
+
+            {/* To / Subject */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12, padding: '14px 22px', borderBottom: '1.5px solid #f1f5f9', background: '#faf9ff' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#64748b', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.4px' }}>To</label>
+                <input value={approveModal.email} readOnly style={{ ...inputStyle, background: '#f1f5f9', color: '#64748b' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#00bfa6', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Subject</label>
+                <input value={approveModal.emailSubject} style={inputStyle}
+                  onChange={e => setApproveModal(m => ({ ...m, emailSubject: e.target.value }))} />
+              </div>
+            </div>
+
+            {/* preview */}
+            <div style={{ flex: 1, overflow: 'auto', background: '#f5f3ff', padding: '16px 22px' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.5px', textAlign: 'center', marginBottom: 8 }}>
+                👁 Email Preview
+              </div>
+              <div style={{ borderRadius: 10, overflow: 'hidden', border: '1.5px solid #e2e8f0', boxShadow: '0 2px 10px rgba(0,191,166,0.08)' }}
+                dangerouslySetInnerHTML={{ __html: approveModal.emailHtml }} />
+            </div>
+
+            {/* footer */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 22px', borderTop: '1.5px solid #f1f5f9', background: '#fafafa' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, color: '#475569', cursor: 'pointer', userSelect: 'none' }}>
+                <input type="checkbox" checked={approveModal.skipEmail}
+                  onChange={e => setApproveModal(m => ({ ...m, skipEmail: e.target.checked }))}
+                  style={{ accentColor: '#4f46e5', cursor: 'pointer' }} />
+                Skip email — status only
+              </label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn label="Cancel" color="gray" onClick={() => setApproveModal(null)} disabled={actionLoading} />
+                <button onClick={() => handleApproveProject(approveModal)} disabled={actionLoading}
+                  style={{ padding: '7px 18px', borderRadius: 8, fontSize: 12, fontWeight: 700, border: 'none', cursor: actionLoading ? 'not-allowed' : 'pointer', background: '#00bfa6', color: '#fff', opacity: actionLoading ? .6 : 1 }}>
+                  {actionLoading ? 'Processing…' : '✓ Approve & Send Email'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Decline Project — split-view editor + live preview */}
       {declineModal && (
-        <Modal title="Decline Project" onClose={() => !actionLoading && setDeclineModal(null)} loading={actionLoading}
-          footer={<>
-            <Btn label="Cancel" color="gray" onClick={() => setDeclineModal(null)} disabled={actionLoading} />
-            <Btn label="Decline Project" color="red" onClick={() => handleDeclineProject(declineModal)} loading={actionLoading} />
-          </>}>
-          <p style={{ fontSize: 12, color: '#475569', margin: '0 0 14px', padding: '8px 12px', background: '#fef2f2', borderRadius: 8, borderLeft: '3px solid #dc2626' }}>
-            Declining project for <strong>{declineModal.name}</strong> — {declineModal.internship_name}
-          </p>
-          <Field label="Reason for Decline *">
-            <textarea value={declineModal.reason} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }}
-              placeholder="Required: explain why the project is being declined…"
-              onChange={e => setDeclineModal(m => ({ ...m, reason: e.target.value }))} />
-          </Field>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, color: '#475569', cursor: 'pointer' }}>
-            <input type="checkbox" checked={declineModal.skipEmail} onChange={e => setDeclineModal(m => ({ ...m, skipEmail: e.target.checked }))} style={{ accentColor: '#4f46e5' }} />
-            Skip email notification
-          </label>
-        </Modal>
+        <div onClick={() => !actionLoading && setDeclineModal(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, backdropFilter: 'blur(4px)' }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: 14, width: '100%', maxWidth: 980, height: '90vh', boxShadow: '0 25px 60px rgba(0,0,0,0.25)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '13px 20px', background: 'linear-gradient(135deg,#0d2137,#164a3e)' }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>
+                  <span style={{ color: '#ff6b6b', marginRight: 6 }}>📁</span>
+                  Decline Project Submission
+                </div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.7)', marginTop: 2 }}>{declineModal.name} · {declineModal.email}</div>
+              </div>
+              <button onClick={() => setDeclineModal(null)} disabled={actionLoading}
+                style={{ background: 'rgba(255,255,255,0.18)', border: 'none', color: '#fff', borderRadius: 6, width: 28, height: 28, cursor: actionLoading ? 'not-allowed' : 'pointer', fontSize: 18 }}>×</button>
+            </div>
+
+            {/* top fields */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, padding: '14px 20px', background: '#faf9ff', borderBottom: '1.5px solid #f5f3ff' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#dc2626', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Decline Reason (internal) *</label>
+                <input value={declineModal.reason} style={inputStyle}
+                  placeholder="Enter reason (visible internally)…"
+                  onChange={e => setDeclineModal(m => ({ ...m, reason: e.target.value }))} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#64748b', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.4px' }}>To</label>
+                <input value={declineModal.email} readOnly style={{ ...inputStyle, background: '#f1f5f9', color: '#64748b' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#4f46e5', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Subject</label>
+                <input value={declineModal.emailSubject} style={inputStyle}
+                  onChange={e => setDeclineModal(m => ({ ...m, emailSubject: e.target.value }))} />
+              </div>
+            </div>
+
+            {/* split body */}
+            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, overflow: 'hidden', minHeight: 0 }}>
+              {/* LEFT — editor */}
+              <div style={{ display: 'flex', flexDirection: 'column', borderRight: '1.5px solid #f5f3ff', overflow: 'hidden' }}>
+                <div style={{ padding: '8px 14px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.5px' }}>
+                  ✏️ Email Editor
+                </div>
+                <div style={{ flex: 1, padding: 14, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                  <RichEditor html={declineModal.emailBody} height="100%"
+                    onChange={html => setDeclineModal(m => ({ ...m, emailBody: html }))} />
+                </div>
+              </div>
+              {/* RIGHT — live preview */}
+              <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <div style={{ padding: '8px 14px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.5px' }}>
+                  👁 Live Preview
+                </div>
+                <div style={{ flex: 1, overflow: 'auto', padding: 16, background: '#f5f3ff' }}>
+                  <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #e2e8f0', padding: '18px 20px', boxShadow: '0 1px 4px rgba(0,0,0,0.04)', fontSize: 13, lineHeight: 1.6, color: '#1e293b' }}>
+                    <div style={{ paddingBottom: 10, marginBottom: 12, borderBottom: '1px solid #f1f5f9', fontSize: 11, color: '#64748b' }}>
+                      <div><strong>To:</strong> {declineModal.email}</div>
+                      <div><strong>Subject:</strong> {declineModal.emailSubject}</div>
+                    </div>
+                    <div dangerouslySetInnerHTML={{ __html: declineModal.emailBody || '' }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* footer */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 20px', borderTop: '1.5px solid #f5f3ff', background: '#fafafa' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, color: '#475569', cursor: 'pointer', userSelect: 'none' }}>
+                <input type="checkbox" checked={declineModal.skipEmail}
+                  onChange={e => setDeclineModal(m => ({ ...m, skipEmail: e.target.checked }))}
+                  style={{ accentColor: '#4f46e5', cursor: 'pointer' }} />
+                Skip email — status only
+              </label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn label="Cancel" color="gray" onClick={() => setDeclineModal(null)} disabled={actionLoading} />
+                <Btn label="📁 Decline Project" color="red" onClick={() => handleDeclineProject(declineModal)} loading={actionLoading} />
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

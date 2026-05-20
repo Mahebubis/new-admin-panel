@@ -943,7 +943,7 @@
 
 
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 
@@ -1013,6 +1013,7 @@ const IC = {
   down: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
   check: 'M20 6 9 17l-5-5',
   eye: 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+  video: 'M23 7l-7 5 7 5V7zM14 5H3a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z',
 };
 
 /* ── Proof popup ── */
@@ -1129,6 +1130,7 @@ export default function RefundNew() {
   const [globalInput, setGlobalInput] = useState('');
   const [status, setStatus] = useState('');
   const [batch, setBatch] = useState('');
+  const [hasVideo, setHasVideo] = useState(false);
   const [funnelStep, setFunnelStep] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -1148,7 +1150,7 @@ export default function RefundNew() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get(API, { params: { page, per_page: perPage, search, global_search: globalSearch, status, batch, funnel_step: funnelStep, date_from: dateFrom, date_to: dateTo } });
+      const res = await api.get(API, { params: { page, per_page: perPage, search, global_search: globalSearch, status, batch, funnel_step: funnelStep, date_from: dateFrom, date_to: dateTo, has_video: hasVideo ? 1 : 0 } });
       if (res.data.success) {
         const d = res.data.data;
         setData(d.refunds || []); setTotal(d.total || 0); setTotalPages(d.total_pages || 1);
@@ -1156,7 +1158,7 @@ export default function RefundNew() {
         if (d.batches) setBatches(d.batches);
       }
     } catch { } finally { setLoading(false); }
-  }, [page, perPage, search, globalSearch, status, batch, funnelStep, dateFrom, dateTo]);
+  }, [page, perPage, search, globalSearch, status, batch, funnelStep, dateFrom, dateTo, hasVideo]);
 
   /* ── fetch funnel ── */
   const fetchFunnel = useCallback(async () => {
@@ -1291,7 +1293,7 @@ export default function RefundNew() {
 
         /* funnel — 100% width, flex, equal columns */
         .rn2-funnel{background:#fff;border-bottom:1.5px solid #ede9fe;padding:10px 20px;display:flex;align-items:stretch;width:100%;box-sizing:border-box;flex-shrink:0;}
-        .rn2-fcol{flex:1;min-width:0;padding:10px 6px;border-radius:10px;text-align:center;cursor:pointer;transition:all .15s;border:2px solid transparent;position:relative;}
+        .rn2-fcol{flex:1 1 0;min-width:0;padding:10px 6px;border-radius:10px;text-align:center;cursor:pointer;transition:all .15s;border:2px solid transparent;position:relative;overflow:hidden;}
         .rn2-fcol:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.08);}
         .rn2-fcol.factive{border-color:currentColor;box-shadow:0 4px 16px rgba(0,0,0,.12);}
         .rn2-fcount{font-size:clamp(14px,2vw,22px);font-weight:800;margin:3px 0 1px;}
@@ -1299,8 +1301,8 @@ export default function RefundNew() {
         .rn2-fpct{font-size:clamp(8px,0.85vw,10px);font-weight:700;margin-top:3px;}
         .rn2-fbar{height:3px;border-radius:2px;margin-top:5px;background:rgba(255,255,255,.3);overflow:hidden;}
         .rn2-fbarfill{height:100%;border-radius:2px;transition:width .4s;}
-        .rn2-farrow{display:flex;align-items:center;justify-content:center;width:28px;flex-shrink:0;}
-        .rn2-fdrop{font-size:9px;font-weight:700;padding:1px 5px;border-radius:10px;white-space:nowrap;}
+        .rn2-farrow{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:52px;flex-shrink:0;}
+        .rn2-fdrop{font-size:8px;font-weight:700;padding:1px 4px;border-radius:10px;white-space:nowrap;}
 
         /* chips */
         .rn2-chips{background:#fff;border-bottom:1.5px solid #ede9fe;padding:7px 20px;display:flex;flex-wrap:wrap;gap:5px;flex-shrink:0;}
@@ -1396,20 +1398,20 @@ table.rn2-t tbody tr:hover .sticky{background:#faf9ff;}
             const cnt = funnel[step.key] || 0;
             const pct = fPct(step.key);
             const drop = dropOff(i);
-            const dc = drop >= 40 ? '#dc2626' : drop >= 10 ? '#d97706' : '#059669';
-            const db = drop >= 40 ? '#fef2f2' : drop >= 10 ? '#fffbeb' : '#f0fdf9';
+            const up = drop < 0;
+            const dc = up ? '#059669' : drop >= 40 ? '#dc2626' : drop >= 10 ? '#d97706' : '#059669';
+            const db = up ? '#f0fdf9' : drop >= 40 ? '#fef2f2' : drop >= 10 ? '#fffbeb' : '#f0fdf9';
+            const dropLabel = up ? `+${Math.abs(drop)}%` : `-${drop}%`;
             return (
-              <div key={step.key} style={{ display: 'flex', alignItems: 'stretch', flex: i === 0 ? '1' : 'auto', minWidth: 0 }}>
+              <Fragment key={step.key}>
                 {i > 0 && (
                   <div className="rn2-farrow">
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-                      <span style={{ color: '#c4b5fd', fontSize: 14 }}>→</span>
-                      <span className="rn2-fdrop" style={{ background: db, color: dc }}>-{drop}%</span>
-                    </div>
+                    <span style={{ color: '#c4b5fd', fontSize: 14 }}>→</span>
+                    <span className="rn2-fdrop" style={{ background: db, color: dc }}>{dropLabel}</span>
                   </div>
                 )}
                 <div className={`rn2-fcol${funnelStep === step.key ? ' factive' : ''}`}
-                  style={{ background: step.color + '12', color: step.color, flex: 1, minWidth: 0 }}
+                  style={{ background: step.color + '12', color: step.color }}
                   onClick={() => { setFunnelStep(funnelStep === step.key ? '' : step.key); setPage(1); }}>
                   <div className="rn2-fcount" style={{ color: step.color }}>{cnt.toLocaleString()}</div>
                   <div className="rn2-flabel">{step.label}</div>
@@ -1418,7 +1420,7 @@ table.rn2-t tbody tr:hover .sticky{background:#faf9ff;}
                     <div className="rn2-fbarfill" style={{ width: `${pct}%`, background: step.color }} />
                   </div>
                 </div>
-              </div>
+              </Fragment>
             );
           })}
         </div>
@@ -1451,8 +1453,20 @@ table.rn2-t tbody tr:hover .sticky{background:#faf9ff;}
           <select className="rn2-sel" value={perPage} onChange={e => { setPerPage(+e.target.value); setPage(1); }}>
             {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n} rows</option>)}
           </select>
+          <label style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+            padding: '5px 11px', borderRadius: 8, fontSize: 11.5, fontWeight: 600,
+            border: `1.5px solid ${hasVideo ? '#6d28d9' : '#e2e8f0'}`,
+            background: hasVideo ? '#ede9fe' : '#faf9ff',
+            color: hasVideo ? '#6d28d9' : '#334155', userSelect: 'none', whiteSpace: 'nowrap'
+          }}>
+            <input type="checkbox" checked={hasVideo}
+              onChange={e => { setHasVideo(e.target.checked); setPage(1); }}
+              style={{ accentColor: '#6d28d9', cursor: 'pointer' }} />
+            Has Video
+          </label>
           <button className="rn2-bp" onClick={() => { setSearch(searchInput); setPage(1); }}><I d={IC.search} size={12} />Search</button>
-          <button className="rn2-bo" onClick={() => { setSearchInput(''); setSearch(''); setStatus(''); setBatch(''); setPage(1); }}><I d={IC.x} size={12} />Clear</button>
+          <button className="rn2-bo" onClick={() => { setSearchInput(''); setSearch(''); setStatus(''); setBatch(''); setHasVideo(false); setPage(1); }}><I d={IC.x} size={12} />Clear</button>
         </div>
 
         {/* TABLE */}
@@ -1462,13 +1476,13 @@ table.rn2-t tbody tr:hover .sticky{background:#faf9ff;}
               <table className="rn2-t">
                 <thead>
                   <tr>
-                    {['#', 'Student', 'Phone', 'Exam', 'Group', 'Intent', 'Internship', 'Duration', 'Batch', 'Paid At', 'Refund Status', 'Attendance', 'Project Sub', 'File', 'Proj Approved', 'Payment Info', 'Proof'].map(h => <th key={h}>{h}</th>)}
+                    {['#', 'Student', 'Phone', 'Exam', 'Group', 'Intent', 'Internship', 'Duration', 'Batch', 'Paid At', 'Refund Status', 'Attendance', 'Project Sub', 'File', 'Video', 'Proj Approved', 'Payment Info', 'Proof'].map(h => <th key={h}>{h}</th>)}
                     <th className="sticky sticky-ra" style={{ right: 120 }}>Refund Action</th>
                     <th className="sticky sticky-pa" style={{ right: 0 }}>Project Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {!loading && data.length === 0 && <tr><td colSpan={19} className="no-data">No refund records found</td></tr>}
+                  {!loading && data.length === 0 && <tr><td colSpan={20} className="no-data">No refund records found</td></tr>}
                   {data.map((r, i) => {
                     const cs = CLAIM_STYLE[r.refund_claim_status || 'active'] || CLAIM_STYLE.active;
                     const ps = r.project_status ? { pending: { bg: '#fff7ed', color: '#c2410c', dot: '#fb923c', label: 'Pending' }, approved: { bg: '#f0fdf4', color: '#15803d', dot: '#22c55e', label: 'Approved' }, rejected: { bg: '#fef2f2', color: '#b91c1c', dot: '#ef4444', label: 'Rejected' } }[r.project_status] : null;
@@ -1539,6 +1553,9 @@ table.rn2-t tbody tr:hover .sticky{background:#faf9ff;}
 
                         {/* File */}
                         <td>{r.file_link ? <a href={r.file_link} target="_blank" rel="noreferrer" style={{ color: '#4f46e5', fontSize: 11, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 3, textDecoration: 'none' }}><I d={IC.link} size={11} />View</a> : '—'}</td>
+
+                        {/* Video */}
+                        <td>{r.video_link ? <a href={r.video_link} target="_blank" rel="noreferrer" style={{ color: '#6d28d9', fontSize: 11, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 3, textDecoration: 'none' }}><I d={IC.video} size={11} />View Video</a> : '—'}</td>
 
                         {/* Project Approved */}
                         <td>{r.project_status === 'approved' ? (<div><span className="pill" style={{ background: '#f0fdf4', color: '#15803d' }}>✓ Approved</span>{r.project_approved_date && <div style={{ fontSize: 9, color: '#94a3b8', marginTop: 1 }}>{fmtD(r.project_approved_date)}</div>}</div>) : '—'}</td>

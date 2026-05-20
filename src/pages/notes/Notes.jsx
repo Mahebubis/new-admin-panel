@@ -426,7 +426,7 @@ function NoteRow({ note, onDelete, onEdit, isSA, currentUid }) {
 
   return (
     <div style={{ background:'#fff', borderRadius:12, border:`1.5px solid ${open?'#c4b5fd':'#ede9fe'}`,
-      overflow:'hidden', transition:'border-color .2s, box-shadow .2s',
+      overflow:'hidden', flexShrink:0, transition:'border-color .2s, box-shadow .2s',
       boxShadow: open ? '0 4px 20px rgba(79,70,229,.1)' : '0 1px 4px rgba(79,70,229,.05)' }}>
 
       {/* ── collapsed row ── */}
@@ -656,6 +656,8 @@ export default function Notes() {
   const [editNote,     setEditNote]     = useState(null);  // note being edited
   const [editSaving,   setEditSaving]   = useState(false);
   const editorApi = useRef(null);
+  const pageRef   = useRef(null);
+  const [pageH,   setPageH] = useState('70vh');
 
   useEffect(() => {
     try {
@@ -663,6 +665,19 @@ export default function Notes() {
       setCurrentUid(u.user_id || null);
       setIsSA((u.permissions || []).includes('__superadmin__'));
     } catch{}
+  }, []);
+
+  /* size the page to exactly fill the space below it — measured, not guessed,
+     so it works regardless of header / layout padding */
+  useEffect(() => {
+    const recalc = () => {
+      if (!pageRef.current) return;
+      const top = pageRef.current.getBoundingClientRect().top;
+      setPageH(`${Math.max(360, window.innerHeight - top - 16)}px`);
+    };
+    recalc();
+    window.addEventListener('resize', recalc);
+    return () => window.removeEventListener('resize', recalc);
   }, []);
 
   const loadNotes = useCallback(async () => {
@@ -741,8 +756,9 @@ export default function Notes() {
         .sp { display:inline-block;width:16px;height:16px;border:2px solid #ede9fe;border-top-color:#4f46e5;border-radius:50%;animation:sp .7s linear infinite; }
       `}</style>
 
-      <div className="notes-pg" style={{ display:'flex', flexDirection:'column',
-        height:'calc(100vh - 62px)', background:'#f5f3ff', overflow:'hidden' }}>
+      <div className="notes-pg" ref={pageRef} style={{ display:'flex', flexDirection:'column',
+        minHeight:pageH,
+        background:'#f5f3ff', overflow:'visible', borderRadius:12 }}>
 
         {/* ── Header ── */}
         <div style={{ background:'#fff', borderBottom:'1.5px solid #ede9fe',
@@ -798,7 +814,7 @@ export default function Notes() {
 
         {/* ══ SEE NOTES TAB — full-width collapsible list ══ */}
         {tab==='see' && (
-          <div style={{ flex:1, overflowY:'auto', padding:'16px 20px', display:'flex', flexDirection:'column', gap:8 }}>
+          <div style={{ flex:1, minHeight:0, overflowY:'auto', padding:'16px 20px', display:'flex', flexDirection:'column', gap:8 }}>
             {loading ? (
               <div style={{ textAlign:'center', padding:60, color:'#94a3b8' }}>
                 <span className="sp" style={{ width:28,height:28,borderWidth:3,display:'inline-block' }}/>
