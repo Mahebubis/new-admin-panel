@@ -1029,7 +1029,8 @@
 
 
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import RestrictedPopup from '../components/RestrictedPopup';
@@ -1194,6 +1195,9 @@ const sidebarMenu = [
   },
 ];
 
+// Routes that need maximum table width — collapse sidebar on entry.
+const AUTO_COLLAPSE_ROUTES = ['/reports/meta-old', '/reports/agency-2'];
+
 export default function AdminLayout() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebarCollapsed') === '1');
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -1206,6 +1210,32 @@ export default function AdminLayout() {
   const { user, logout, hasPermission, isAdmin, isSuperadmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Auto-collapse sidebar when entering wide-table routes. Does not touch
+  // localStorage, so user's saved preference is preserved for other pages.
+  useEffect(() => {
+    if (AUTO_COLLAPSE_ROUTES.some(p => location.pathname.startsWith(p))) {
+      setCollapsed(true);
+    }
+  }, [location.pathname]);
+
+  // Collapsed-sidebar tooltip flyout — rendered via portal so it escapes
+  // the sidebar's overflow-hidden clipping.
+  const [hoverGroup,  setHoverGroup]  = useState(null);   // { key, items, group, top }
+  const hideTimerRef = useRef(null);
+  const showTooltip = (group, evt) => {
+    if (!collapsed) return;
+    clearTimeout(hideTimerRef.current);
+    const r = evt.currentTarget.getBoundingClientRect();
+    setHoverGroup({ ...group, top: r.top, left: r.right + 8 });
+  };
+  const scheduleHide = () => {
+    clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => setHoverGroup(null), 120);
+  };
+  const cancelHide = () => clearTimeout(hideTimerRef.current);
+  // Hide on collapse change or route change
+  useEffect(() => { setHoverGroup(null); }, [collapsed, location.pathname]);
 
   const handleNavSearch = (e) => {
     if (e.key !== 'Enter') return;
@@ -1355,7 +1385,10 @@ export default function AdminLayout() {
             const isOpen = openGroup === group.key || !!searchQuery;
 
             return (
-              <div key={group.key} className="relative group/sb">
+              <div key={group.key}
+                className="relative"
+                onMouseEnter={(e) => showTooltip(group, e)}
+                onMouseLeave={scheduleHide}>
                 <button
                   onClick={() => { if (!collapsed) setOpenGroup(isOpen && !searchQuery ? '' : group.key); }}
                   className="w-full flex items-center gap-2.5 rounded-lg cursor-pointer select-none transition-all"
@@ -1389,24 +1422,8 @@ export default function AdminLayout() {
                   )}
                 </button>
 
-                {/* Collapsed tooltip flyout */}
-                {collapsed && (
-                  <div
-                    className="absolute left-[52px] top-0 min-w-[200px] bg-white border rounded-xl shadow-xl z-[9000] p-1.5 opacity-0 pointer-events-none -translate-x-2 transition-all group-hover/sb:opacity-100 group-hover/sb:pointer-events-auto group-hover/sb:translate-x-0"
-                    style={{ borderColor: '#e2e8f0' }}>
-                    <div className="text-[11px] font-bold uppercase tracking-wider px-2.5 py-1.5" style={{ color: '#94a3b8' }}>
-                      {group.group}
-                    </div>
-                    {group.items.map(item => (
-                      <NavLink key={item.link} to={item.link}
-                        className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs font-medium transition whitespace-nowrap ${isActive(item.link, item.exact) ? 'text-indigo-600 font-semibold' : 'text-gray-500 hover:bg-gray-50 hover:text-indigo-600'}`}
-                        style={isActive(item.link, item.exact) ? { background: '#eef2ff' } : {}}>
-                        <i className={`${item.icon} text-[11px] w-3.5`} />
-                        {item.text}
-                      </NavLink>
-                    ))}
-                  </div>
-                )}
+                {/* Tooltip flyout for collapsed mode is rendered at the bottom of
+                    AdminLayout via createPortal — see hoverGroup state. */}
 
                 {/* Expanded items */}
                 {!collapsed && (
@@ -1590,6 +1607,70 @@ export default function AdminLayout() {
           <Outlet />
         </main>
       </div>
+
+      {/* ══════ Collapsed-sidebar tooltip flyout (portaled to body so it
+              escapes the aside's overflow-hidden) ══════ */}
+      {collapsed && hoverGroup && createPortal(
+        <div
+          onMouseEnter={cancelHide}
+          onMouseLeave={scheduleHide}
+          style={{
+            position: 'fixed',
+            top: hoverGroup.top,
+            left: hoverGroup.left,
+            minWidth: 210,
+            background: '#fff',
+            borderRadius: 12,
+            border: '1px solid #e2e8f0',
+            padding: 6,
+            zIndex: 9999,
+            boxShadow: '0 12px 32px -8px rgba(79,70,229,.22), 0 4px 14px rgba(0,0,0,.06)',
+            animation: 'sb-flyout-in .18s ease-out',
+          }}>
+          <style>{`
+            @keyframes sb-flyout-in {
+              from { opacity: 0; transform: translateX(-6px) scale(.97); }
+              to   { opacity: 1; transform: translateX(0) scale(1); }
+            }
+          `}</style>
+          {/* Triangle pointer */}
+          <span aria-hidden style={{
+            position: 'absolute', top: 14, left: -6, width: 12, height: 12,
+            transform: 'rotate(45deg)', background: '#fff',
+            borderLeft: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0',
+          }} />
+          {/* Header */}
+          <div style={{
+            fontSize: 10.5, fontWeight: 700, color: '#94a3b8',
+            textTransform: 'uppercase', letterSpacing: '.05em',
+            padding: '6px 10px 8px', borderBottom: '1px solid #f1f5f9', marginBottom: 4,
+          }}>
+            {hoverGroup.group}
+          </div>
+          {/* Items */}
+          {hoverGroup.items.map(item => {
+            const active = isActive(item.link, item.exact);
+            return (
+              <NavLink key={item.link} to={item.link}
+                onClick={() => setHoverGroup(null)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '8px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                  textDecoration: 'none', whiteSpace: 'nowrap',
+                  background: active ? '#eef2ff' : 'transparent',
+                  color: active ? '#4f46e5' : '#475569',
+                  transition: 'all .15s',
+                }}
+                onMouseEnter={e => { if (!active) { e.currentTarget.style.background = '#f5f3ff'; e.currentTarget.style.color = '#4f46e5'; }}}
+                onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#475569'; }}}>
+                <i className={item.icon} style={{ fontSize: 11, width: 14, textAlign: 'center' }} />
+                {item.text}
+              </NavLink>
+            );
+          })}
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

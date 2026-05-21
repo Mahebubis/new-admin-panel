@@ -1106,6 +1106,16 @@ function RichEditor({ html, onChange, height = 240 }) {
   const btnS = { padding: '4px 8px', border: '1px solid #e2e8f0', background: '#fff', borderRadius: 5, fontSize: 11, fontWeight: 700, cursor: 'pointer', color: '#475569', minWidth: 26 };
   return (
     <div style={{ border: '1.5px solid #e2e8f0', borderRadius: 8, overflow: 'hidden', background: '#fff', display: 'flex', flexDirection: 'column', height }}>
+      {/* Scoped styles — give <p>/<div> blocks visible spacing between lines */}
+      <style>{`
+        .rf-rich-body p,
+        .rf-rich-body div { margin: 0 0 14px; }
+        .rf-rich-body p:last-child,
+        .rf-rich-body div:last-child { margin-bottom: 0; }
+        .rf-rich-body ul, .rf-rich-body ol { margin: 0 0 14px; padding-left: 22px; }
+        .rf-rich-body li { margin-bottom: 6px; }
+        .rf-rich-body br { content: ""; display: block; margin: 6px 0; }
+      `}</style>
       <div style={{ display: 'flex', gap: 4, padding: '6px 8px', background: '#faf9ff', borderBottom: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
         <button type="button" style={{ ...btnS, fontStyle: 'italic' }} onMouseDown={e => { e.preventDefault(); exec('bold'); }} title="Bold"><b>B</b></button>
         <button type="button" style={{ ...btnS, fontStyle: 'italic' }} onMouseDown={e => { e.preventDefault(); exec('italic'); }} title="Italic"><i>I</i></button>
@@ -1118,8 +1128,9 @@ function RichEditor({ html, onChange, height = 240 }) {
         <button type="button" style={btnS} onMouseDown={e => { e.preventDefault(); exec('removeFormat'); }} title="Clear formatting">⌫</button>
       </div>
       <div ref={ref} contentEditable suppressContentEditableWarning
+        className="rf-rich-body"
         onInput={e => onChange?.(e.currentTarget.innerHTML)}
-        style={{ flex: 1, padding: '10px 14px', fontSize: 12.5, lineHeight: 1.55, color: '#1e293b', outline: 'none', overflowY: 'auto' }}
+        style={{ flex: 1, padding: '14px 16px', fontSize: 12.5, lineHeight: 1.6, color: '#1e293b', outline: 'none', overflowY: 'auto' }}
       />
     </div>
   );
@@ -1228,7 +1239,7 @@ export default function RefundList() {
       <p style="margin:0 0 14px;">Greetings from <strong>Internship Studio</strong>!</p>
       <p style="margin:0 0 18px;">We are pleased to inform you that your internship project submission for <strong style="color:#00bfa6;">${m.internship_name}</strong> has been successfully <strong>evaluated and approved</strong>. Thank you for submitting your project.</p>
       <div style="background:#e0f7f4;border-left:4px solid #00bfa6;border-radius:8px;padding:14px 18px;margin:18px 0;text-align:left;font-size:13.5px;color:#0d2137;line-height:1.65;">
-        You will be able to <strong>download your internship certificates after your internship duration ends</strong>. Once you receive your <strong>internship completion certificates</strong>, you will be eligible to <strong>apply for stipend-based internships</strong> and further career opportunities through Internship Studio.
+        You will be able to <strong>download your internship certificates after your internship duration ends</strong>. Once you receive your <strong>internship completion certificates.
       </div>
       <p style="margin:18px 0 4px;">Warm regards,</p>
       <p style="margin:0;"><strong>Internship Studio Team</strong></p>
@@ -1241,11 +1252,15 @@ export default function RefundList() {
 
   /* Project Decline — pre-written body fragment (sent with wrap:true so the
      existing list.php wrapper applies). Admin can edit before sending. */
+  // Reference doc attached to every project-decline email.
+  const DECLINE_REFERENCE_DOC = 'https://docs.google.com/document/d/1NCquhpUb0FMDJxmn95MIZjIE1Jmvx6WSSppaxe9Eu90/edit?tab=t.0#heading=h.2d4qvg9juok3';
+
   const tmplDeclineProject = (m) => `
 <p>Dear <strong>${m.name}</strong>,</p>
 <p>Thank you for submitting your project for the <strong>${m.internship_name}</strong> internship program.</p>
 <p>After careful review, we regret to inform you that your project submission has <strong>not been approved</strong> at this time.</p>
 <p>Please review the feedback provided and resubmit an updated version at your earliest convenience.</p>
+<p>For detailed guidelines and project requirements, please refer to this document: <a href="${DECLINE_REFERENCE_DOC}" target="_blank" rel="noopener" style="color:#4f46e5;font-weight:600;text-decoration:underline;">View Project Guidelines</a></p>
 <p>If you have any questions, feel free to reach out to our support team.</p>
 <p>Warm regards,<br><strong>Internship Studio Team</strong></p>`;
 
@@ -1309,11 +1324,18 @@ export default function RefundList() {
     try {
       await callApi({ action:'decline_project', user_id:m.user_id, internship_id:m.internship_id, reason:m.reason });
       patchRow(m.user_id, m.internship_id, { project_status:'rejected' });
-      if (!m.skipEmail) await sendEmail(
-        m.email,
-        m.emailSubject || `Update on Your Project Submission - ${m.internship_name}`,
-        m.emailBody || tmplDeclineProject(m)
-      );
+      if (!m.skipEmail) {
+        // Ensure the reference doc link is always included, even if admin edited it out.
+        let body = m.emailBody || tmplDeclineProject(m);
+        if (!body.includes(DECLINE_REFERENCE_DOC)) {
+          body += `\n<p>For detailed guidelines and project requirements, please refer to this document: <a href="${DECLINE_REFERENCE_DOC}" target="_blank" rel="noopener" style="color:#4f46e5;font-weight:600;text-decoration:underline;">View Project Guidelines</a></p>`;
+        }
+        await sendEmail(
+          m.email,
+          m.emailSubject || `Update on Your Project Submission - ${m.internship_name}`,
+          body
+        );
+      }
       toast.success('Project declined');
       setDeclineModal(null);
     } catch { toast.error('Failed to decline'); }
@@ -1748,7 +1770,7 @@ export default function RefundList() {
                       <div><strong>To:</strong> {rejectModal.email}</div>
                       <div><strong>Subject:</strong> {rejectModal.emailSubject}</div>
                     </div>
-                    <div dangerouslySetInnerHTML={{ __html: rejectModal.emailBody || '' }} />
+                    <div className="rf-rich-body" dangerouslySetInnerHTML={{ __html: rejectModal.emailBody || '' }} />
                   </div>
                 </div>
               </div>
@@ -1893,7 +1915,7 @@ export default function RefundList() {
                       <div><strong>To:</strong> {declineModal.email}</div>
                       <div><strong>Subject:</strong> {declineModal.emailSubject}</div>
                     </div>
-                    <div dangerouslySetInnerHTML={{ __html: declineModal.emailBody || '' }} />
+                    <div className="rf-rich-body" dangerouslySetInnerHTML={{ __html: declineModal.emailBody || '' }} />
                   </div>
                 </div>
               </div>

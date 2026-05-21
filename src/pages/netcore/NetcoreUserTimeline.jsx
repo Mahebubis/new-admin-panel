@@ -21,6 +21,11 @@ const EVENT_LABELS = {
   company_vacancy_post: 'Company Vacancy Post',
   mark_attendance: 'Mark Attendance',
   came_on_dashboard: 'Came on Dashboard',
+  link_assigned: 'Link Assigned',
+  exam_reminder: 'Exam Reminder',
+  project_submission_reminder: 'Project Submission Reminder',
+  one_day_before_batch_start: 'One Day Before Batch Start',
+  batch_end_reminder: 'Batch End Reminder',
 };
 
 /* small dotted circle */
