@@ -12,7 +12,7 @@ const fmtNum = n => (n || 0).toLocaleString('en-IN');
 const YEAR_OPTIONS = ['1st Year', '2nd Year', '3rd Year', '4th Year', 'Postgraduate'];
 
 /* ─── Stat Card ─── */
-function StatCard({ label, value, icon, variant = 'indigo' }) {
+export function StatCard({ label, value, icon, variant = 'indigo' }) {
   const cfg = {
     indigo: { bg: '#ede9fe', color: '#4f46e5', border: '#c4b5fd', dot: '#4f46e5' },
     amber: { bg: '#fef3c7', color: '#b45309', border: '#fde68a', dot: '#f59e0b' },
@@ -58,7 +58,7 @@ const InCollegeBadge = ({ val }) => val == 1
   : <span style={{ background: '#fff7ed', color: '#c2410c', padding: '3px 11px', borderRadius: 99, fontSize: 11, fontWeight: 700 }}>✗ No</span>;
 
 /* ─── pagination ─── */
-function Pagination({ page, totalPages, onChange }) {
+export function Pagination({ page, totalPages, onChange }) {
   if (totalPages <= 1) return null;
   const pages = [];
   if (totalPages <= 7) {
@@ -100,6 +100,7 @@ export default function UserCollegeDetails() {
   const [totalPages, setTotalPages] = useState(1);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   /* filters */
   const [search, setSearch] = useState('');
@@ -154,25 +155,44 @@ export default function UserCollegeDetails() {
     setPage(1); loadData(1, '', '', '', 25);
   };
 
-  /* ── CSV export ── */
-  const exportCSV = () => {
-    if (!data.length) { toast.error('No data to export'); return; }
-    const headers = ['ID', 'User ID', 'Name', 'Email', 'In College', 'College Name', 'Current Year',
-      'TPO Name', 'TPO Email', 'TPO Phone', 'HOD Name', 'HOD Email', 'Created At'];
-    const rows = data.map(r => [
-      r.id, r.user_id, r.name || r.username, r.email,
-      r.is_in_college == 1 ? 'Yes' : 'No',
-      r.college_name || '', r.current_year || '',
-      r.tpo_name || '', r.tpo_email || '', r.tpo_phone || '',
-      r.hod_name || '', r.hod_email || '',
-      r.created_at
-    ]);
-    const csv = [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    a.download = `college_details_p${page}.csv`;
-    a.click();
-    toast.success('CSV exported!');
+  /* ── CSV export — pulls ALL filtered rows from the server, not just this page ── */
+  const exportCSV = async () => {
+    setExporting(true);
+    const t = toast.loading('Preparing export…');
+    try {
+      const params = { action: 'export' };
+      if (search) params.search = search;
+      if (inCollege !== '') params.is_in_college = inCollege;
+      if (year) params.current_year = year;
+      const res = await post(params);
+      if (!res.success) { toast.error(res.message || 'Export failed', { id: t }); return; }
+      const rows = res.data || [];
+      if (!rows.length) { toast.error('No records match the current filters', { id: t }); return; }
+
+      const headers = ['ID', 'User ID', 'Name', 'Email', 'Phone', 'In College', 'College Name',
+        'Current Year', 'TPO Name', 'TPO Email', 'TPO Phone', 'HOD Name', 'HOD Email', 'HOD Phone', 'Created At'];
+      const body = rows.map(r => [
+        r.id, r.user_id, r.name || r.username || '', r.email || '', r.phone || '',
+        r.is_in_college == 1 ? 'Yes' : 'No',
+        r.college_name || '', r.current_year || '',
+        r.tpo_name || '', r.tpo_email || '', r.tpo_phone || '',
+        r.hod_name || '', r.hod_email || '', r.hod_phone || '',
+        r.created_at || ''
+      ]);
+      const csv = [headers, ...body]
+        .map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','))
+        .join('\r\n');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }));
+      a.download = `tpo_hod_details_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast.success(`Exported ${rows.length.toLocaleString('en-IN')} record${rows.length > 1 ? 's' : ''}`, { id: t });
+    } catch (e) {
+      toast.error(e.message || 'Export failed', { id: t });
+    } finally {
+      setExporting(false);
+    }
   };
 
   const thS = {
@@ -225,14 +245,14 @@ export default function UserCollegeDetails() {
               <div style={{ fontSize: 20, fontWeight: 800 }}>🎓 User College Details</div>
               <div style={{ fontSize: 12.5, opacity: .65, marginTop: 4 }}>Manage and filter user college registration data</div>
             </div>
-            <button onClick={exportCSV}
+            <button onClick={exportCSV} disabled={exporting}
               style={{
                 padding: '8px 16px', border: '1.5px solid rgba(255,255,255,.25)', borderRadius: 8,
                 background: 'rgba(255,255,255,.1)', color: '#fff', fontSize: 12.5, fontWeight: 600,
-                cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 6,
-                backdropFilter: 'blur(6px)'
+                cursor: exporting ? 'wait' : 'pointer', fontFamily: 'inherit', display: 'flex',
+                alignItems: 'center', gap: 6, backdropFilter: 'blur(6px)', opacity: exporting ? .6 : 1
               }}>
-              ⬇️ Export CSV
+              {exporting ? '⏳ Exporting…' : '⬇️ Export All (CSV)'}
             </button>
           </div>
         </div>
@@ -327,8 +347,8 @@ export default function UserCollegeDetails() {
           background: '#fff', border: '1.5px solid #d4efeb', borderRadius: 14,
           overflow: 'hidden', boxShadow: '0 1px 6px rgba(0,191,166,.06)', flexShrink: 0
         }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 1200 }}>
+          <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 430px)', minHeight: 240 }}>
+            <table style={{ borderCollapse: 'separate', borderSpacing: 0, width: '100%', minWidth: 1200 }}>
               <thead>
                 <tr>
                   {['#', 'ID', 'User', 'In College', 'College Details', 'TPO Info', 'HOD Info', 'Created At'].map(h => (

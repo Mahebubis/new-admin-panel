@@ -235,7 +235,7 @@ import MatchingData from './pages/reports/MatchingData';
 import ClarityData from './pages/reports/ClarityData';
 import CompanyList from './pages/companies/CompanyList';
 import IITCompanies from './pages/companies/IITCompanies';
-import TPODetails from './pages/companies/TPODetails';
+import CompanySurveyTabs from './pages/companies/CompanySurveyTabs';
 import WALinks from './pages/support/WALinks';
 import PlacementLinks from './pages/support/PlacementLinks';
 import SupportTickets from './pages/support/SupportTickets';
@@ -381,7 +381,7 @@ export default function App() {
         {/* Companies */}
         <Route path="companies" element={G('all_companies', <CompanyList />)} />
         <Route path="companies/iit" element={G('all_iit_companies', <IITCompanies />)} />
-        <Route path="companies/tpo-hod" element={G('tpo_hod_details', <TPODetails />)} />
+        <Route path="companies/tpo-hod" element={G('tpo_hod_details', <CompanySurveyTabs />)} />
 
         {/* Support */}
         <Route path="support/wa-links" element={G('whatsapp_community_links', <WALinks />)} />

@@ -1150,7 +1150,7 @@ const sidebarMenu = [
     key: 'company_management', group: 'Company Management', icon: 'fas fa-building', items: [
       { text: 'All Companies', link: '/companies', icon: 'fas fa-city', perm: 'all_companies', exact: true },
       { text: 'All IIT Companies', link: '/companies/iit', icon: 'fas fa-university', perm: 'all_iit_companies' },
-      { text: 'TPO & HOD Details', link: '/companies/tpo-hod', icon: 'fas fa-address-card', perm: 'tpo_hod_details' },
+      { text: 'Survey Q & A', link: '/companies/tpo-hod', icon: 'fas fa-clipboard-list', perm: 'tpo_hod_details' },
     ]
   },
   {
