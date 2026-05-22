@@ -1239,7 +1239,7 @@ export default function RefundList() {
       <p style="margin:0 0 14px;">Greetings from <strong>Internship Studio</strong>!</p>
       <p style="margin:0 0 18px;">We are pleased to inform you that your internship project submission for <strong style="color:#00bfa6;">${m.internship_name}</strong> has been successfully <strong>evaluated and approved</strong>. Thank you for submitting your project.</p>
       <div style="background:#e0f7f4;border-left:4px solid #00bfa6;border-radius:8px;padding:14px 18px;margin:18px 0;text-align:left;font-size:13.5px;color:#0d2137;line-height:1.65;">
-        You will be able to <strong>download your internship certificates after your internship duration ends</strong>. Once you receive your <strong>internship completion certificates.
+        You will be able to <strong>download your internship certificates after your internship duration ends</strong>.
       </div>
       <p style="margin:18px 0 4px;">Warm regards,</p>
       <p style="margin:0;"><strong>Internship Studio Team</strong></p>

@@ -198,7 +198,7 @@ export default function PurchasedInternships() {
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
               <thead>
                 <tr style={{ background:'linear-gradient(135deg,#4f46e5,#7c3aed)' }}>
-                  {['#','Name','Email','Mobile','Internship','Batch','Days','Amount','Plan','Payment ID','Paid At','Action'].map(h => (
+                  {['#','Name','Email','Mobile','Internship','Batch','Days','Amount','Plan','Refund','Payment ID','Paid At','Action'].map(h => (
                     <th key={h} style={{ color:'#fff', fontSize:11, fontWeight:600, padding:'11px 12px',
                       textAlign:'left', textTransform:'uppercase', letterSpacing:'.3px',
                       borderRight:'1px solid rgba(255,255,255,.15)', whiteSpace:'nowrap' }}>{h}</th>
@@ -207,14 +207,14 @@ export default function PurchasedInternships() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={12} style={{ textAlign:'center', padding:40 }}>
+                  <tr><td colSpan={13} style={{ textAlign:'center', padding:40 }}>
                     <div style={{ display:'inline-block', width:28, height:28, border:'3px solid #ede9fe',
                       borderTop:'3px solid #4f46e5', borderRadius:'50%',
                       animation:'pi_spin .7s linear infinite' }}/>
                     <style>{`@keyframes pi_spin{to{transform:rotate(360deg)}}`}</style>
                   </td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan={12} style={{ textAlign:'center', color:'#94a3b8', padding:36, fontSize:13 }}>
+                  <tr><td colSpan={13} style={{ textAlign:'center', color:'#94a3b8', padding:36, fontSize:13 }}>
                     No records found
                   </td></tr>
                 ) : rows.map((r, i) => (
@@ -244,6 +244,13 @@ export default function PurchasedInternships() {
                         background: r.internship_level?.toLowerCase() === 'gold' ? '#fef3c7' : '#f1f5f9',
                         color: r.internship_level?.toLowerCase() === 'gold' ? '#b45309' : '#475569' }}>
                         {r.internship_level || 'Silver'}
+                      </span>
+                    </td>
+                    <td style={tdS}>
+                      <span style={{ padding:'2px 9px', borderRadius:99, fontSize:10.5, fontWeight:700,
+                        background: r.refund === 'yes' ? '#dcfce7' : '#fee2e2',
+                        color: r.refund === 'yes' ? '#15803d' : '#dc2626' }}>
+                        {r.refund === 'yes' ? 'Refund' : 'Non Refund'}
                       </span>
                     </td>
                     <td style={{ ...tdS, fontSize:11, color:'#64748b' }}>{r.payment_id}</td>
@@ -515,20 +522,45 @@ function EditModal({ data, internships, batches, onCancel, onSaved }) {
     upgraded_payment_id: data.upgraded_payment_id || '',
   });
   const [saving, setSaving] = useState(false);
+  const [refundOn,      setRefundOn]      = useState(data.refund === 'yes');
+  const [refundConfirm, setRefundConfirm] = useState(false); // false | 'yes' | 'no'
+  const [refundBusy,    setRefundBusy]    = useState(false);
   const set = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
+
+  /* immediate, confirmed refund toggle — updates internship_payment.refund right away */
+  const doRefundUpdate = async () => {
+    const target = refundConfirm;                       // 'yes' | 'no'
+    setRefundBusy(true);
+    try {
+      const res = await api.post(API, mk({
+        action:     'update_refund_status',
+        payment_id: data.payment_id,
+        user_id:    data.user_id,
+        refund:     target,
+      }), FH);
+      if (res.data.status === 'success') {
+        setRefundOn(target === 'yes');
+        data.refund = target;            // keep the in-memory row in sync
+        toast.success(res.data.message || 'Refund status updated');
+        setRefundConfirm(false);
+      } else {
+        toast.error(res.data.message || 'Failed to update refund status');
+      }
+    } catch { toast.error('Error updating refund status'); }
+    finally { setRefundBusy(false); }
+  };
 
   const submit = async () => {
     setSaving(true);
     try {
-      let batch, refund;
+      let batch;
       if (form.batch === 'custom') {
         batch = form.custom_batch_date;
-        refund = 'no';
       } else {
         const sep = form.batch.lastIndexOf('|');
-        batch  = sep >= 0 ? form.batch.slice(0, sep) : form.batch;
-        refund = sep >= 0 ? form.batch.slice(sep + 1) : 'no';
+        batch = sep >= 0 ? form.batch.slice(0, sep) : form.batch;
       }
+      const refund = refundOn ? 'yes' : 'no';
       const res = await api.post(API, mk({
         action: 'update_internship',
         payment_id: data.payment_id,
@@ -607,6 +639,23 @@ function EditModal({ data, internships, batches, onCancel, onSaved }) {
           </select>
         </FL>
 
+        <FL label="In Refund" full>
+          <div onClick={() => { if (!refundBusy) setRefundConfirm(refundOn ? 'no' : 'yes'); }}
+            style={{ display:'flex', alignItems:'center', gap:11, height:38,
+              cursor: refundBusy ? 'wait' : 'pointer', userSelect:'none' }}>
+            <div style={{
+              width:46, height:24, borderRadius:99, padding:3, flexShrink:0,
+              background: refundOn ? '#16a34a' : '#cbd5e1', transition:'background .2s',
+              display:'flex', justifyContent: refundOn ? 'flex-end' : 'flex-start' }}>
+              <div style={{ width:18, height:18, borderRadius:'50%', background:'#fff',
+                boxShadow:'0 1px 3px rgba(0,0,0,.35)' }} />
+            </div>
+            <span style={{ fontSize:12.5, fontWeight:700, color: refundOn ? '#15803d' : '#64748b' }}>
+              {refundOn ? 'Yes — this internship is in refund' : 'No — not in refund'}
+            </span>
+          </div>
+        </FL>
+
         <FL label="Upgraded Payment ID" full>
           <input className="pi-inp" style={inp} value={form.upgraded_payment_id}
             onChange={set('upgraded_payment_id')} placeholder="Leave blank if no upgrade"/>
@@ -617,6 +666,41 @@ function EditModal({ data, internships, batches, onCancel, onSaved }) {
       </div>
 
       <Btns onCancel={onCancel} onSave={submit} saving={saving} label="Update Internship"/>
+
+      {/* ── confirm popup for the refund toggle ── */}
+      {refundConfirm && (
+        <div onMouseDown={() => { if (!refundBusy) setRefundConfirm(false); }}
+          style={{ position:'fixed', inset:0, background:'rgba(15,23,42,.55)', zIndex:1200,
+            display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+          <div onMouseDown={e => e.stopPropagation()}
+            style={{ background:'#fff', borderRadius:14, width:400, maxWidth:'100%',
+              padding:'22px 24px', boxShadow:'0 24px 60px rgba(0,0,0,.4)' }}>
+            <div style={{ fontSize:15.5, fontWeight:800, color:'#1e293b', marginBottom:8,
+              display:'flex', alignItems:'center', gap:8 }}>
+              <span>{refundConfirm === 'no' ? '⚠️' : '🔄'}</span>
+              {refundConfirm === 'no' ? 'Remove from refund?' : 'Mark as in refund?'}
+            </div>
+            <div style={{ fontSize:13, color:'#475569', lineHeight:1.65, marginBottom:20 }}>
+              This will set <strong>refund = &quot;{refundConfirm}&quot;</strong> for{' '}
+              <strong>{data.name}</strong> — {data.internship_name}.
+            </div>
+            <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
+              <button onClick={() => setRefundConfirm(false)} disabled={refundBusy}
+                style={{ padding:'8px 16px', background:'#fff', color:'#475569',
+                  border:'1.5px solid #e2e8f0', borderRadius:8, fontSize:12, fontWeight:700,
+                  cursor:'pointer', fontFamily:'inherit' }}>Cancel</button>
+              <button onClick={doRefundUpdate} disabled={refundBusy}
+                style={{ padding:'8px 18px', border:'none', borderRadius:8, fontSize:12, fontWeight:700,
+                  cursor: refundBusy ? 'wait' : 'pointer', fontFamily:'inherit', color:'#fff',
+                  background: refundConfirm === 'no'
+                    ? 'linear-gradient(135deg,#dc2626,#b91c1c)'
+                    : 'linear-gradient(135deg,#16a34a,#15803d)' }}>
+                {refundBusy ? 'Updating…' : 'Yes, confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }

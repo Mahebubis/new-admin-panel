@@ -1066,6 +1066,7 @@ const sidebarMenu = [
     key: 'refund_management', group: 'Refund Management', icon: 'fas fa-rotate-left', items: [
       { text: 'Manage Refund', link: '/refunds', icon: 'fas fa-receipt', perm: 'manage_refund', exact: true },
       { text: 'Refund (New)', link: '/refunds/new', icon: 'fas fa-gift', perm: 'manage_refund' },
+      { text: 'Refund Map List', link: '/refunds/map-list', icon: 'fas fa-filter', perm: 'refund_map_list' },
     ]
   },
   {

@@ -195,6 +195,7 @@ import ReferralList from './pages/referrals/ReferralList';
 import WithdrawalList from './pages/referrals/WithdrawalList';
 import RefundList from './pages/refunds/RefundList';
 import RefundNew from './pages/refunds/RefundNew';
+import RefundMapList from './pages/refunds/RefundMapList';
 import Attendance from './pages/attendance/Attendance';
 import DomainList from './pages/domains/DomainList';
 import NetcoreBehaviour from './pages/netcore/NetcoreBehaviour';
@@ -306,6 +307,7 @@ export default function App() {
         {/* Refund Management */}
         <Route path="refunds" element={G('manage_refund', <RefundList />)} />
         <Route path="refunds/new" element={G('manage_refund', <RefundNew />)} />
+        <Route path="refunds/map-list" element={G('refund_map_list', <RefundMapList />)} />
 
         {/* Attendance */}
         <Route path="attendance" element={G('attendance', <Attendance />)} />
