@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { Helmet } from "react-helmet-async";
 
@@ -24,6 +24,31 @@ const PROTECTED_PASSWORD = 'PASSWORD'; // matches PHP const
 /* keys exclusive to the Pricing tab */
 const PRICING_KEYS = ['price', 'result_page_price'];
 
+/* keys that belong inside the Payment-Paused accordion (hidden from main grid) */
+const PAUSED_POPUP_KEYS = [
+  'payment_paused_title',
+  'payment_paused_subtitle',
+  'payment_paused_content',
+];
+const PAUSED_DEFAULTS = {
+  payment_paused_title: 'Payments Temporarily Paused',
+  payment_paused_subtitle: "We're working on it",
+  payment_paused_content:
+    '<p><strong>Due to high demand, internship allocations are currently on hold.</strong></p>'
+    + '<p>New refund batches will be released soon.</p>'
+    + '<p>We will keep you updated.</p>',
+};
+
+/* convert legacy plain-text content into HTML on the fly */
+const toHtml = (raw) => {
+  if (!raw) return '';
+  if (/<[a-z][\s\S]*>/i.test(raw)) return raw; // already HTML
+  return raw
+    .split(/\n\s*\n/)
+    .map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`)
+    .join('');
+};
+
 const humanLabel = k =>
   k.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 
@@ -32,7 +57,9 @@ const getFieldType = (key, value) => {
   if (Object.prototype.hasOwnProperty.call(DROPDOWNS, key)) return 'select';
   if (key.includes('date')) return 'date';
   if (key === 'meta_access_token') return 'password';
-  if (key === 'refund_program') return 'toggle';
+  // if (key === 'refund_program') return 'toggle';
+  if (['refund_program', 'show_payment_paused_popup'].includes(key))
+    return 'toggle';
   if ((value || '').length > 80) return 'textarea';
   if (!isNaN(value) && value !== '') return 'number';
   return 'text';
@@ -283,6 +310,296 @@ function SettingField({ fieldKey, value, onChange, onProtectedChange }) {
   return <FocusInput type="text" value={value} onChange={onChange} />;
 }
 
+/* ─── Payment Paused popup card (toggle + accordion editor + live preview) ─── */
+function PausedPopupCard({ draft, changed, onChange }) {
+  const isOn = draft.show_payment_paused_popup === 'on';
+  const toggleChanged = changed.has('show_payment_paused_popup');
+  const fieldChanged = PAUSED_POPUP_KEYS.some(k => changed.has(k));
+  const cardChanged = toggleChanged || (isOn && fieldChanged);
+
+  const title = draft.payment_paused_title ?? '';
+  const subtitle = draft.payment_paused_subtitle ?? '';
+  const content = draft.payment_paused_content ?? '';
+
+  const [contentFocused, setContentFocused] = useState(false);
+
+  /* ── contentEditable WYSIWYG plumbing ── */
+  const editorRef = useRef(null);
+  const lastSetRef = useRef(null);
+
+  // Sync external content → editor DOM, but only when not actively typing,
+  // so the cursor doesn't jump on every keystroke.
+  useEffect(() => {
+    const el = editorRef.current;
+    if (!el) return;
+    const isFocused = document.activeElement === el;
+    const normalized = toHtml(content);
+    if (!isFocused && normalized !== lastSetRef.current) {
+      el.innerHTML = normalized;
+      lastSetRef.current = normalized;
+    }
+  }, [content, isOn]);
+
+  const exec = (cmd, value = null) => {
+    const el = editorRef.current;
+    if (!el) return;
+    el.focus();
+    try { document.execCommand('styleWithCSS', false, true); } catch { /* noop */ }
+    document.execCommand(cmd, false, value);
+    const html = el.innerHTML;
+    lastSetRef.current = html;
+    onChange('payment_paused_content', html);
+  };
+
+  const handleEditorInput = () => {
+    const el = editorRef.current;
+    if (!el) return;
+    const html = el.innerHTML;
+    lastSetRef.current = html;
+    onChange('payment_paused_content', html);
+  };
+
+  return (
+    <div className={`as-card${cardChanged ? ' changed' : ''}`}
+      style={{ gridColumn: '1 / -1' }}>
+      {/* header row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
+        <label style={{ fontSize: 12, fontWeight: 700, color: '#475569', flex: 1 }}>
+          Show Payment Paused Popup
+        </label>
+        <div style={{ display: 'flex', gap: 5 }}>
+          <span style={{
+            background: '#ede9fe', color: '#4f46e5', padding: '1px 7px',
+            borderRadius: 5, fontSize: 10, fontWeight: 700
+          }}>Toggle + Editor</span>
+          {cardChanged && (
+            <span style={{
+              background: '#fef9c3', color: '#854d0e', padding: '1px 7px',
+              borderRadius: 5, fontSize: 10, fontWeight: 700
+            }}>● Unsaved</span>
+          )}
+        </div>
+      </div>
+      <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 10, fontFamily: 'monospace' }}>
+        show_payment_paused_popup
+      </div>
+
+      {/* toggle */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+        <div onClick={() => onChange('show_payment_paused_popup', '__toggle__')}
+          style={{ position: 'relative', width: 54, height: 28, cursor: 'pointer' }}>
+          <div style={{
+            width: '100%', height: '100%', borderRadius: 14,
+            background: isOn ? '#16a34a' : '#d1d5db', transition: 'background .3s'
+          }} />
+          <div style={{
+            position: 'absolute', top: 4, left: isOn ? 30 : 4, width: 20, height: 20,
+            borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,.2)',
+            transition: 'left .3s'
+          }} />
+        </div>
+        <span style={{ fontSize: 13, fontWeight: 700, color: isOn ? '#15803d' : '#6b7280' }}>
+          {isOn ? 'On — popup is showing to users' : 'Off — popup is hidden'}
+        </span>
+      </div>
+
+      {/* accordion: only shown when ON */}
+      <div style={{
+        maxHeight: isOn ? 2000 : 0,
+        overflow: 'hidden',
+        transition: 'max-height .35s ease',
+        marginTop: isOn ? 18 : 0,
+      }}>
+        <div style={{
+          borderTop: '1.5px dashed #ede9fe', paddingTop: 16,
+          display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 18
+        }}>
+          {/* ─── left: editor ─── */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: '#475569',
+                display: 'block', marginBottom: 5, textTransform: 'uppercase', letterSpacing: .4 }}>
+                Title
+              </label>
+              <FocusInput value={title}
+                onChange={v => onChange('payment_paused_title', v)}
+                placeholder="Payments Temporarily Paused" />
+            </div>
+
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: '#475569',
+                display: 'block', marginBottom: 5, textTransform: 'uppercase', letterSpacing: .4 }}>
+                Subtitle
+              </label>
+              <FocusInput value={subtitle}
+                onChange={v => onChange('payment_paused_subtitle', v)}
+                placeholder="We're working on it" />
+            </div>
+
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: '#475569',
+                display: 'block', marginBottom: 5, textTransform: 'uppercase', letterSpacing: .4 }}>
+                Content
+              </label>
+              <div style={{
+                border: `1.5px solid ${contentFocused ? '#4f46e5' : '#e2e8f0'}`,
+                borderRadius: 10, background: '#fafafe', overflow: 'hidden',
+                boxShadow: contentFocused ? '0 0 0 3px rgba(79,70,229,.08)' : 'none',
+                transition: 'border .15s, box-shadow .15s',
+              }}>
+                <div style={{
+                  display: 'flex', gap: 4, padding: '6px 8px',
+                  borderBottom: '1px solid #ede9fe', background: '#fff',
+                  flexWrap: 'wrap', alignItems: 'center'
+                }}>
+                  {[
+                    { label: 'B', cmd: 'bold', title: 'Bold',
+                      btnStyle: { fontWeight: 800 } },
+                    { label: 'I', cmd: 'italic', title: 'Italic',
+                      btnStyle: { fontStyle: 'italic', fontWeight: 600 } },
+                    { label: 'U', cmd: 'underline', title: 'Underline',
+                      btnStyle: { textDecoration: 'underline', fontWeight: 600 } },
+                  ].map(btn => (
+                    <button key={btn.label} type="button" title={btn.title}
+                      onMouseDown={e => { e.preventDefault(); exec(btn.cmd); }}
+                      style={{
+                        width: 30, height: 28, border: '1px solid #e2e8f0',
+                        background: '#fff', borderRadius: 6, cursor: 'pointer',
+                        fontSize: 12.5, color: '#1e293b', fontFamily: 'inherit',
+                        ...btn.btnStyle
+                      }}>{btn.label}</button>
+                  ))}
+
+                  {/* highlight colour swatches */}
+                  <div style={{
+                    display: 'flex', gap: 3, alignItems: 'center',
+                    marginLeft: 4, paddingLeft: 8, borderLeft: '1px solid #ede9fe'
+                  }}>
+                    <span style={{ fontSize: 10, color: '#94a3b8', marginRight: 2 }}>
+                      Highlight
+                    </span>
+                    {[
+                      { c: '#fef08a', n: 'Yellow' },
+                      { c: '#bbf7d0', n: 'Green' },
+                      { c: '#fecaca', n: 'Red' },
+                      { c: '#bfdbfe', n: 'Blue' },
+                      { c: 'transparent', n: 'Clear', border: true },
+                    ].map(s => (
+                      <button key={s.n} type="button" title={`Highlight: ${s.n}`}
+                        onMouseDown={e => {
+                          e.preventDefault();
+                          // hiliteColor works in most browsers; some fall back to backColor
+                          try {
+                            document.execCommand('styleWithCSS', false, true);
+                          } catch { /* noop */ }
+                          editorRef.current?.focus();
+                          const ok = document.execCommand('hiliteColor', false, s.c);
+                          if (!ok) document.execCommand('backColor', false, s.c);
+                          handleEditorInput();
+                        }}
+                        style={{
+                          width: 22, height: 22, borderRadius: '50%',
+                          background: s.c === 'transparent' ? '#fff' : s.c,
+                          border: s.border ? '1.5px dashed #cbd5e1' : '1px solid #e2e8f0',
+                          cursor: 'pointer', padding: 0,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 10, color: '#64748b'
+                        }}>{s.border ? '×' : ''}</button>
+                    ))}
+                  </div>
+
+                  {/* clear formatting */}
+                  <button type="button" title="Clear formatting"
+                    onMouseDown={e => { e.preventDefault(); exec('removeFormat'); }}
+                    style={{
+                      marginLeft: 4, height: 28, padding: '0 8px',
+                      border: '1px solid #e2e8f0', background: '#fff',
+                      borderRadius: 6, cursor: 'pointer', fontSize: 11,
+                      color: '#64748b', fontFamily: 'inherit', fontWeight: 600
+                    }}>Clear</button>
+
+                  <div style={{ marginLeft: 'auto', alignSelf: 'center',
+                    fontSize: 10, color: '#94a3b8' }}>
+                    {(editorRef.current?.innerText || '').length} chars
+                  </div>
+                </div>
+
+                <div
+                  ref={editorRef}
+                  contentEditable
+                  suppressContentEditableWarning
+                  onInput={handleEditorInput}
+                  onFocus={() => setContentFocused(true)}
+                  onBlur={() => setContentFocused(false)}
+                  style={{
+                    minHeight: 160, padding: '12px 14px', outline: 'none',
+                    fontSize: 13.5, lineHeight: 1.6, color: '#1e293b',
+                    fontFamily: 'inherit', background: 'transparent'
+                  }}
+                />
+              </div>
+              <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 4 }}>
+                Select text, then click <strong>B</strong> / <em>I</em> / U or a highlight swatch.
+              </div>
+            </div>
+          </div>
+
+          {/* ─── right: live preview ─── */}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#475569',
+              marginBottom: 8, textTransform: 'uppercase', letterSpacing: .4 }}>
+              Live Preview
+            </div>
+            <div style={{
+              borderRadius: 14, overflow: 'hidden',
+              boxShadow: '0 18px 50px rgba(0,0,0,.12)',
+              border: '1px solid #ede9fe', background: '#fff'
+            }}>
+              {/* orange gradient header */}
+              <div style={{
+                background: 'linear-gradient(135deg,#f59e0b,#ea580c)',
+                padding: '18px 20px', position: 'relative', color: '#fff'
+              }}>
+                <div style={{ fontSize: 16, fontWeight: 800, lineHeight: 1.2 }}>
+                  {title || 'Payments Temporarily Paused'}
+                </div>
+                <div style={{ fontSize: 12, marginTop: 4, opacity: .95 }}>
+                  {subtitle || "We're working on it"}
+                </div>
+                <div style={{
+                  position: 'absolute', top: 12, right: 14,
+                  width: 22, height: 22, display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', color: '#fff', fontSize: 18, opacity: .85
+                }}>×</div>
+              </div>
+              {/* body */}
+              <div style={{ padding: '18px 20px', color: '#1e293b' }}>
+                <div className="paused-preview-body"
+                  style={{ fontSize: 13.5, lineHeight: 1.6 }}
+                  dangerouslySetInnerHTML={{
+                    __html: toHtml(content || PAUSED_DEFAULTS.payment_paused_content)
+                  }} />
+                <button type="button" disabled
+                  style={{
+                    marginTop: 6, width: '100%', padding: '12px 16px',
+                    background: '#0d2137', color: '#fff', border: 'none',
+                    borderRadius: 10, fontSize: 14, fontWeight: 700,
+                    fontFamily: 'inherit', cursor: 'default'
+                  }}>
+                  Okay, got it
+                </button>
+              </div>
+            </div>
+            <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 6, textAlign: 'center' }}>
+              This is how the popup will appear to users.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ════════════════════════════════════
    MAIN COMPONENT
 ════════════════════════════════════ */
@@ -310,6 +627,16 @@ export default function AdminSettings() {
         const merged = { ...res.settings };
         // ensure pricing keys exist in draft so the field always renders
         PRICING_KEYS.forEach(k => { if (merged[k] === undefined) merged[k] = ''; });
+        // ensure toggle exists by default
+        if (merged.show_payment_paused_popup === undefined) {
+          merged.show_payment_paused_popup = 'off';
+        }
+        // seed paused-popup editable defaults if missing
+        PAUSED_POPUP_KEYS.forEach(k => {
+          if (merged[k] === undefined || merged[k] === '') {
+            merged[k] = PAUSED_DEFAULTS[k];
+          }
+        });
         setSettings(merged);
         setDraft({ ...merged });
         setChanged(new Set());
@@ -325,9 +652,32 @@ export default function AdminSettings() {
     const fieldType = getFieldType(key, draft[key]);
 
     // Toggle: open refund confirmation
+    // if (fieldType === 'toggle' && rawValue === '__toggle__') {
+    //   const turningOn = draft[key] !== 'on';
+    //   setRefundModal({ turningOn });
+    //   return;
+    // }
+
+
     if (fieldType === 'toggle' && rawValue === '__toggle__') {
       const turningOn = draft[key] !== 'on';
-      setRefundModal({ turningOn });
+
+      // Only refund_program needs confirmation modal
+      if (key === 'refund_program') {
+        setRefundModal({ turningOn });
+        return;
+      }
+
+      // Other toggles switch instantly
+      const newVal = turningOn ? 'on' : 'off';
+
+      setDraft(p => ({ ...p, [key]: newVal }));
+      setChanged(p => {
+        const s = new Set(p);
+        s.add(key);
+        return s;
+      });
+
       return;
     }
 
@@ -386,12 +736,40 @@ export default function AdminSettings() {
   };
 
   /* ── filtered keys (per active tab + search) ── */
-  const keys = Object.keys(draft)
-    .filter(k => activeTab === 'pricing' ? PRICING_KEYS.includes(k) : !PRICING_KEYS.includes(k))
+  // const keys = Object.keys(draft)
+  //   .filter(k => activeTab === 'pricing' ? PRICING_KEYS.includes(k) : !PRICING_KEYS.includes(k))
+  //   .filter(k =>
+  //     !search.trim() || k.toLowerCase().includes(search.toLowerCase()) ||
+  //     humanLabel(k).toLowerCase().includes(search.toLowerCase())
+  //   );
+
+  let keys = Object.keys(draft)
+    .filter(k => activeTab === 'pricing'
+      ? PRICING_KEYS.includes(k)
+      : !PRICING_KEYS.includes(k))
+    // hide paused-popup sub-fields: they are edited inside the toggle's accordion
+    .filter(k => !PAUSED_POPUP_KEYS.includes(k))
     .filter(k =>
-      !search.trim() || k.toLowerCase().includes(search.toLowerCase()) ||
+      !search.trim() ||
+      k.toLowerCase().includes(search.toLowerCase()) ||
       humanLabel(k).toLowerCase().includes(search.toLowerCase())
     );
+
+  // place new toggle after refund_program
+  const refundIndex = keys.indexOf('refund_program');
+
+  if (
+    refundIndex !== -1 &&
+    keys.includes('show_payment_paused_popup')
+  ) {
+    keys = keys.filter(k => k !== 'show_payment_paused_popup');
+
+    keys.splice(
+      refundIndex + 1,
+      0,
+      'show_payment_paused_popup'
+    );
+  }
 
   if (loading) return (
     <div style={{
@@ -412,7 +790,7 @@ export default function AdminSettings() {
 
   return (
     <>
-    <Helmet>
+      <Helmet>
         <title>Settings | Admin Panel</title>
       </Helmet>
       <style>{`
@@ -425,6 +803,19 @@ export default function AdminSettings() {
         .as-inp:focus { border-color:#4f46e5!important; box-shadow:0 0 0 3px rgba(79,70,229,.1)!important; }
         @keyframes as_spin { to { transform:rotate(360deg); } }
         .as-spin { display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:as_spin .7s linear infinite; }
+        /* paused-popup editor + preview content */
+        .as-root [contenteditable] p, .paused-preview-body p { margin: 0 0 8px; }
+        .as-root [contenteditable] p:last-child, .paused-preview-body p:last-child { margin-bottom: 0; }
+        .as-root [contenteditable] strong, .paused-preview-body strong { font-weight: 700; }
+        .as-root [contenteditable] em, .paused-preview-body em { font-style: italic; }
+        .as-root [contenteditable] span[style*="background"],
+        .paused-preview-body span[style*="background"] {
+          padding: 1px 4px; border-radius: 4px;
+        }
+        .as-root [contenteditable]:empty:before {
+          content: 'Type the popup content here…';
+          color: #94a3b8;
+        }
       `}</style>
 
       <div className="as-root" style={{
@@ -544,6 +935,17 @@ export default function AdminSettings() {
               gap: 14
             }}>
               {keys.map(key => {
+                // special-case: paused popup gets its own card with accordion editor
+                if (key === 'show_payment_paused_popup') {
+                  return (
+                    <PausedPopupCard
+                      key={key}
+                      draft={draft}
+                      changed={changed}
+                      onChange={handleChange}
+                    />
+                  );
+                }
                 const isChanged = changed.has(key);
                 const isProtected = PROTECTED_FIELDS.includes(key);
                 const type = getFieldType(key, draft[key]);

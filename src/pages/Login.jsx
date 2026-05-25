@@ -181,7 +181,7 @@ export default function Login() {
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [emailHint, setEmailHint] = useState('');
-  const { login, verifyOtp, resendOtp } = useAuth();
+  const { login, verifyOtp, resendOtp, loginDirect } = useAuth();
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
@@ -191,6 +191,13 @@ export default function Login() {
     try {
       const res = await login(email, password);
       if (res.success) {
+        // Bypass: backend returned a token directly (admin_users.bypass_otp = 1)
+        if (res.data?.bypass && res.data?.token) {
+          loginDirect(res.data);
+          toast.success('Welcome back!');
+          setTimeout(() => navigate('/'), 300);
+          return;
+        }
         const parts = email.split('@');
         setEmailHint(parts[0].substring(0, 3) + '***@' + parts[1]);
         setStep('otp');

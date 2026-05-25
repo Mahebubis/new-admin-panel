@@ -137,6 +137,16 @@ export function AuthProvider({ children }) {
     return res.data;
   }, []);
 
+  /* Used when send-otp returns a token directly (bypass_otp = 1) */
+  const loginDirect = useCallback((payload) => {
+    const { token: jwt, user: userData } = payload || {};
+    if (jwt) {
+      setToken(jwt);
+      localStorage.setItem('token', jwt);
+    }
+    if (userData) persist(userData);
+  }, []);
+
   const verifyOtp = useCallback(async (email, otp) => {
     const res = await api.post('/api/auth/verify-otp.php', { email, otp });
     if (res.data?.success) {
@@ -197,7 +207,7 @@ export function AuthProvider({ children }) {
     <AuthContext.Provider value={{
       user, token, loading, isAuthenticated,
       isAdmin, isSuperadmin,
-      login, verifyOtp, resendOtp, logout, refreshUser, hasPermission,
+      login, loginDirect, verifyOtp, resendOtp, logout, refreshUser, hasPermission,
     }}>
       {children}
     </AuthContext.Provider>

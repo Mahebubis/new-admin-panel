@@ -541,6 +541,8 @@ export default function RefundMapList() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [perPage, setPerPage] = useState(20);
+  const [sortBy, setSortBy] = useState(null);   // null = default funnel-depth order
+  const [sortDir, setSortDir] = useState('asc');
 
   const [modal, setModal] = useState(null); // { batch, stage }
   const debounceRef = useRef(null);
@@ -564,7 +566,10 @@ export default function RefundMapList() {
   }, []);
 
   const filterParams = (over = {}) => {
-    const f = { search, batch, date_from: dateFrom, date_to: dateTo, ...over };
+    const f = {
+      search, batch, date_from: dateFrom, date_to: dateTo,
+      sort: sortBy || '', dir: sortBy ? sortDir : '', ...over,
+    };
     const out = {};
     Object.entries(f).forEach(([k, v]) => { if (v) out[k] = v; });
     return out;
@@ -594,9 +599,20 @@ export default function RefundMapList() {
   const apply = over => { setPage(1); load(1, { perPage, params: filterParams(over) }); };
   const goto = p => { setPage(p); load(p, { perPage, params: filterParams() }); };
   const clearFilters = () => {
-    setSearch(''); setBatch(''); setDateFrom(''); setDateTo(''); setPerPage(20); setPage(1);
+    setSearch(''); setBatch(''); setDateFrom(''); setDateTo(''); setPerPage(20);
+    setSortBy(null); setSortDir('asc'); setPage(1);
     load(1, { perPage: 20, params: {} });
   };
+
+  /* column-header sort — click toggles asc ⇄ desc on that column */
+  const handleSort = (key) => {
+    const dir = (sortBy === key && sortDir === 'asc') ? 'desc' : 'asc';
+    setSortBy(key); setSortDir(dir); setPage(1);
+    load(1, { perPage, params: filterParams({ sort: key, dir }) });
+  };
+  const sortArrow = (key) => sortBy !== key
+    ? <span style={{ opacity: .3, fontSize: 9, marginLeft: 3 }}>⇅</span>
+    : <span style={{ fontSize: 9, marginLeft: 3 }}>{sortDir === 'asc' ? '▲' : '▼'}</span>;
 
   const exportCSV = async () => {
     setExporting(true);
@@ -616,7 +632,7 @@ export default function RefundMapList() {
     finally { setExporting(false); }
   };
 
-  const filtersActive = search || batch || dateFrom || dateTo;
+  const filtersActive = search || batch || dateFrom || dateTo || sortBy;
   const from = total === 0 ? 0 : (page - 1) * perPage + 1;
   const to = Math.min(page * perPage, total);
 
@@ -756,8 +772,12 @@ export default function RefundMapList() {
               <thead>
                 <tr>
                   <th style={{ ...thS, textAlign: 'left' }}>#</th>
-                  <th style={{ ...thS, textAlign: 'left' }}>Batch</th>
-                  {STAGES.map(s => <th key={s.key} style={{ ...thS, textAlign: 'center' }}>{s.label}</th>)}
+                  <th style={{ ...thS, textAlign: 'left', cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => handleSort('batch')}>Batch{sortArrow('batch')}</th>
+                  {STAGES.map(s => (
+                    <th key={s.key} style={{ ...thS, textAlign: 'center', cursor: 'pointer', userSelect: 'none' }}
+                      onClick={() => handleSort(s.key)}>{s.label}{sortArrow(s.key)}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>

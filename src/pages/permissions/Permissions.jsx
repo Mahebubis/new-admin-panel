@@ -250,6 +250,17 @@ export default function ManagePermissions() {
     } else toast.error('Error');
   };
 
+  /* ── toggle OTP bypass (login skips OTP step when enabled) ── */
+  const toggleBypassOtp = async (bypass) => {
+    const res = await post({ action: 'toggle_bypass_otp', user_id: currentUser.user_id, bypass_otp: bypass ? 1 : 0 });
+    if (res.success) {
+      const val = bypass ? 1 : 0;
+      setCurrentUser(p => ({ ...p, bypass_otp: val }));
+      setAdminUsers(prev => prev.map(u => u.user_id == currentUser.user_id ? { ...u, bypass_otp: val } : u));
+      toast.success(bypass ? 'OTP bypass enabled' : 'OTP bypass disabled', { duration: 2000 });
+    } else toast.error(res.message || 'Error');
+  };
+
   /* ── search user ── */
   // const searchUser = async () => {
 
@@ -620,6 +631,23 @@ export default function ManagePermissions() {
                   </div>
                   {/* actions */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    {/* OTP bypass — available for every user (including superadmin) */}
+                    <div
+                      title="When enabled, this user skips the OTP step during login"
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5,
+                        fontWeight: 600, color: '#64748b',
+                        padding: '4px 10px', borderRadius: 8,
+                        background: Number(currentUser.bypass_otp) === 1 ? 'rgba(16,185,129,.08)' : '#f8fafc',
+                        border: '1.5px solid ' + (Number(currentUser.bypass_otp) === 1 ? '#a7f3d0' : '#e2e8f0')
+                      }}
+                    >
+                      <span>🔓 Bypass OTP</span>
+                      <Toggle
+                        checked={Number(currentUser.bypass_otp) === 1}
+                        onChange={e => toggleBypassOtp(e.target.checked)}
+                      />
+                    </div>
                     {isSA ? (
                       <span style={{
                         display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 12px',
