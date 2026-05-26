@@ -2,77 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
+import { ALL_EVENTS, PAYLOAD_OPTIONS, PAYLOAD_VALUES } from './eventsConfig';
 
 const API = '/api/netcore/segments.php';
 const FORM = { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } };
 
-/* events grouped for the picker tabs (mirrors Netcore UI) */
-const EVENT_GROUPS = {
-  Behaviour: [
-    { key: 'register',                 label: 'Register' },
-    { key: 'signin',                   label: 'Signin' },
-    { key: 'exam_success',             label: 'Exam Success' },
-    { key: 'course_purchase',          label: 'Course Purchase' },
-    { key: 'payment_success',          label: 'Payment Success' },
-    { key: 'preferred_domain',         label: 'Preferred Domain' },
-    { key: 'visited_iap',              label: 'Visited IAP' },
-    { key: 'result_view',              label: 'Result View' },
-    { key: 'placement_community_link', label: 'Placement Community Link' },
-    { key: 'instantexam_reminder',     label: 'Instantexam Reminder' },
-    { key: 'course_edit',              label: 'Course Edit' },
-  ],
-};
-
-/* payload options per event — feeds the filter dropdown */
-const PAYLOAD_OPTIONS = {
-  register:                 ['country','mobile','last_name','state','first_name','email','method','source','referral','express','instantexam','instantresult','setreminder','campaign','adset','ad','medium','is_from_refund','full_url','register_type','device'],
-  signin:                   ['email'],
-  exam_success:             ['status','result_score'],
-  course_purchase:          ['amount','internship_name','batch_date','coupon_applied'],
-  payment_success:          ['paid_amount','paid_internship_name','paid_batch_date','coupon_applied_success','order_id'],
-  preferred_domain:         ['preferred_domain'],
-  visited_iap:              ['visited'],
-  result_view:              ['score'],
-  placement_community_link: ['refund_non_refund'],
-  instantexam_reminder:     ['time_slot'],
-  course_edit:              ['edit_internship_name','edit_page_url','edit_batch_date','edit_type'],
-  register_company:         ['company_logo','company_mobile','company_name','company_email'],
-  company_signin:           ['company_signin_email','company_signin_status','company_signin_ip'],
-  company_vacancy_post:     ['vp_email','vp_job_type','vp_job_title','vp_mode','vp_comp_type','vp_comp_period','vp_method','vp_source'],
-};
-
-/* preset value options per payload key — when set, the value input becomes a searchable custom dropdown */
-const PAYLOAD_VALUES = {
-  /* yes/no flags */
-  is_from_refund:        ['yes', 'no'],
-  referral:              ['yes', 'no'],
-  express:               ['yes', 'no'],
-  setreminder:           ['yes', 'no'],
-  visited:               ['yes', 'no'],
-  refund_non_refund:     ['Non Refund', 'Refund'],
-  coupon_applied:        ['yes', 'no'],
-  coupon_applied_success:['yes', 'no'],
-  company_logo:          ['Has Logo', 'No Logo'],
-
-  /* on/off flags */
-  instantexam:           ['on', 'off'],
-  instantresult:         ['on', 'off'],
-
-  /* enum values */
-  method:                ['Google', 'Manual'],
-  source:                ['web', 'app', 'organic', 'paid'],
-  device:                ['mobile', 'desktop', 'tablet'],
-  register_type:         ['normal', 'agency', 'iit'],
-  status:                ['Completed', 'In Progress'],
-  edit_type:             ['UPDATE', 'EXTEND', 'CREATE'],
-  company_signin_status: ['success', 'failed'],
-  vp_job_type:           ['internship', 'full-time', 'part-time'],
-  vp_mode:               ['wfo', 'wfh', 'hybrid'],
-  vp_comp_type:          ['Fixed', 'Range', 'Performance'],
-  vp_comp_period:        ['hour', 'month', 'year'],
-  vp_method:             ['full-time', 'part-time', 'contract', 'freelance'],
-  vp_source:             ['Direct', 'is_cit'],
-};
+/* events grouped for the picker tabs — sourced from shared config so
+   adding an event in eventsConfig.js makes it appear here automatically */
+const EVENT_GROUPS = { Behaviour: ALL_EVENTS };
 
 const COMP_OPS  = ['is greater than or equal to', 'is greater than', 'is less than or equal to', 'is less than', 'is'];
 const COMP_MAP  = { 'is greater than or equal to':'>=', 'is greater than':'>', 'is less than or equal to':'<=', 'is less than':'<', 'is':'=' };

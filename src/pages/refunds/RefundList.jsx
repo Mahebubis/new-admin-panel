@@ -1153,6 +1153,7 @@ export default function RefundList() {
   const [status,       setStatus]       = useState('');
   const [batch,        setBatch]        = useState('');
   const [hasVideo,     setHasVideo]     = useState(false);
+  const [resubmitted,  setResubmitted]  = useState(false);
   const [loading,      setLoading]      = useState(true);
   const [actionLoading,setActionLoading]= useState(false);
   const jumpRef = useRef(null);
@@ -1168,7 +1169,9 @@ export default function RefundList() {
     setLoading(true);
     try {
       const res = await api.get('/api/refunds/list.php', {
-        params: { page, per_page: perPage, search, status, batch, has_video: hasVideo ? 1 : 0 }
+        params: { page, per_page: perPage, search, status, batch,
+          has_video: hasVideo ? 1 : 0,
+          resubmitted: resubmitted ? 1 : 0 }
       });
       if (res.data.success) {
         const d = res.data.data;
@@ -1179,7 +1182,7 @@ export default function RefundList() {
         if (d.batches) setBatches(d.batches);
       }
     } catch {} finally { setLoading(false); }
-  }, [page, perPage, search, status, batch, hasVideo]);
+  }, [page, perPage, search, status, batch, hasVideo, resubmitted]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -1343,7 +1346,7 @@ export default function RefundList() {
   };
 
   const doSearch  = () => { setSearch(searchInput); setPage(1); };
-  const doClear   = () => { setSearchInput(''); setSearch(''); setStatus(''); setBatch(''); setHasVideo(false); setPage(1); };
+  const doClear   = () => { setSearchInput(''); setSearch(''); setStatus(''); setBatch(''); setHasVideo(false); setResubmitted(false); setPage(1); };
   const jumpToPage = () => {
     const v = parseInt(jumpRef.current?.value);
     if (v >= 1 && v <= totalPages) setPage(v); else toast.error('Invalid page');
@@ -1490,6 +1493,18 @@ export default function RefundList() {
               style={{ accentColor: '#6d28d9', cursor: 'pointer' }} />
             Has Video
           </label>
+          <label style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+            padding: '0 11px', height: 32, borderRadius: 8, fontSize: 12, fontWeight: 600,
+            border: `1.5px solid ${resubmitted ? '#7c3aed' : '#e2e8f0'}`,
+            background: resubmitted ? '#f3e8ff' : '#fff',
+            color: resubmitted ? '#7c3aed' : '#334155', userSelect: 'none', whiteSpace: 'nowrap'
+          }}>
+            <input type="checkbox" checked={resubmitted}
+              onChange={e => { setResubmitted(e.target.checked); setPage(1); }}
+              style={{ accentColor: '#7c3aed', cursor: 'pointer' }} />
+            Resubmitted
+          </label>
           <button className="rl-btn-p" onClick={doSearch}><Ico d={P.search} size={12} /> Search</button>
           <button className="rl-btn-o" onClick={doClear}><Ico d={P.x} size={12} /> Clear</button>
         </div>
@@ -1581,7 +1596,12 @@ export default function RefundList() {
                               </div>
                               {row.project_submitted_date && (
                                 <span style={{ fontSize: 9.5, color: '#94a3b8', whiteSpace: 'nowrap' }}>
-                                  {fmtDateTime(row.project_submitted_date)}
+                                  Submitted: {fmtDateTime(row.project_submitted_date)}
+                                </span>
+                              )}
+                              {row.project_resubmitted_date && (
+                                <span style={{ fontSize: 9.5, color: '#7c3aed', whiteSpace: 'nowrap', fontWeight: 600 }}>
+                                  Resubmitted: {fmtDateTime(row.project_resubmitted_date)}
                                 </span>
                               )}
                             </div>
@@ -1603,10 +1623,17 @@ export default function RefundList() {
 
                         {/* Claim Status */}
                         <td>
-                          <span className="pill" style={{ background: cs.bg, color: cs.color, borderColor: cs.border }}>
-                            <svg width="5" height="5" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill={cs.dot}/></svg>
-                            {cs.label}
-                          </span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <span className="pill" style={{ background: cs.bg, color: cs.color, borderColor: cs.border }}>
+                              <svg width="5" height="5" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill={cs.dot}/></svg>
+                              {cs.label}
+                            </span>
+                            {row.claim_requested_date && (
+                              <span style={{ fontSize: 9.5, color: '#94a3b8', whiteSpace: 'nowrap' }}>
+                                Requested: {fmtDateTime(row.claim_requested_date)}
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         {/* Payment Info — green date above payment ID */}

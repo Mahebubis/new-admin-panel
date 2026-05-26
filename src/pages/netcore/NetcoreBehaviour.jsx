@@ -2,62 +2,20 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
+import {
+  CONVERSION_EVENTS as EVENT_LIST,
+  OTHER_EVENTS as OTHER_EVENT_LIST,
+  PAYLOAD_OPTIONS as PAYLOAD_OPTIONS_RAW,
+} from './eventsConfig';
 
 const API = '/api/netcore/behaviour.php';
 const FORM_HEADERS = { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } };
 
-/* fixed conversion cards (always shown) */
-const EVENT_LIST = [
-  { key: 'register', label: 'Register' },
-  { key: 'signin', label: 'Signin' },
-  { key: 'exam_success', label: 'Exam Success' },
-  { key: 'course_purchase', label: 'Course Purchase' },
-  { key: 'payment_success', label: 'Payment Success' },
-];
-
-/* "Other events" — picked one at a time via the edit-icon dropdown */
-const OTHER_EVENT_LIST = [
-  { key: 'preferred_domain', label: 'Preferred Domain' },
-  { key: 'result_view', label: 'Result View' },
-  { key: 'visited_iap', label: 'Visited IAP' },
-  { key: 'placement_community_link', label: 'Placement Community Link' },
-  { key: 'instantexam_reminder', label: 'Instantexam Reminder' },
-  { key: 'course_edit', label: 'Course Edit' },
-  { key: 'register_company', label: 'Register Company' },
-  { key: 'company_signin', label: 'Company Signin' },
-  { key: 'company_vacancy_post', label: 'Company Vacancy Post' },
-  { key: 'mark_attendance', label: 'Mark Attendance' },
-  { key: 'came_on_dashboard', label: 'Came on Dashboard' },
-  { key: 'link_assigned', label: 'Link Assigned' },
-  { key: 'exam_reminder', label: 'Exam Reminder' },
-  { key: 'project_submission_reminder', label: 'Project Submission Reminder' },
-  { key: 'one_day_before_batch_start', label: 'One Day Before Batch Start' },
-  { key: 'batch_end_reminder', label: 'Batch End Reminder' },
-];
-
-const PAYLOAD_OPTIONS = {
-  register: ['select parameter', 'country', 'mobile', 'last_name', 'state', 'first_name', 'email', 'method', 'source', 'referral', 'express', 'instantexam', 'instantresult', 'setreminder', 'campaign', 'adset', 'ad', 'medium', 'is_from_refund', 'register_type', 'device'],
-  signin: ['select parameter', 'email'],
-  exam_success: ['select parameter', 'status', 'result_score'],
-  course_purchase: ['select parameter', 'amount', 'internship_name', 'batch_date', 'coupon_applied', 'initiated_at'],
-  payment_success: ['select parameter', 'paid_amount', 'coupon_applied_success', 'order_id', 'paid_internship_name', 'paid_batch_date', 'paid_at'],
-  preferred_domain: ['select parameter', 'preferred_domain'],
-  visited_iap: ['select parameter', 'visited', 'visited_time'],
-  result_view: ['select parameter', 'score', 'viewed_at'],
-  placement_community_link: ['select parameter', 'assigned_links', 'refund_non_refund'],
-  instantexam_reminder: ['select parameter', 'date_time', 'time_slot'],
-  course_edit: ['select parameter', 'edit_internship_name', 'edit_page_url', 'edit_batch_date', 'edit_type'],
-  register_company: ['select parameter', 'company_logo', 'company_mobile', 'company_name', 'company_email'],
-  company_signin: ['select parameter', 'company_signin_email', 'company_signin_status', 'company_signin_ip', 'company_signin_user_agent'],
-  company_vacancy_post: ['select parameter', 'vp_email', 'vp_job_type', 'vp_job_title', 'vp_mode', 'vp_openings', 'vp_start_date', 'vp_duration', 'vp_salary', 'vp_comp_amount', 'vp_comp_min', 'vp_comp_max', 'vp_comp_type', 'vp_comp_period', 'vp_experience', 'vp_method', 'vp_source'],
-  mark_attendance: ['select parameter', 'internship_id', 'attendance_date', 'note', 'character_count', 'marked_at', 'ip_address', 'user_agent'],
-  came_on_dashboard: ['select parameter', 'login_date', 'activity_level'],
-  link_assigned: ['select parameter', 'wa_link', 'wa_community', 'link_user_type', 'la_assigned_at'],
-  exam_reminder: ['select parameter', 'er_exam_date', 'er_time_slot', 'er_status', 'er_email', 'er_cron_run_id'],
-  project_submission_reminder: ['select parameter', 'psr_internship_name', 'psr_batch', 'psr_duration_label', 'psr_status', 'psr_email', 'psr_cron_run_id'],
-  one_day_before_batch_start: ['select parameter', 'odb_internship_name', 'odb_batch', 'odb_duration_label', 'odb_status', 'odb_email', 'odb_cron_run_id'],
-  batch_end_reminder: ['select parameter', 'ber_internship_name', 'ber_batch', 'ber_end_date', 'ber_project_status', 'ber_resubmitted', 'ber_status', 'ber_email', 'ber_cron_run_id'],
-};
+/* Prepend the 'select parameter' sentinel that the behaviour-page dropdown
+   expects as its initial option — the shared config holds raw keys only. */
+const PAYLOAD_OPTIONS = Object.fromEntries(
+  Object.entries(PAYLOAD_OPTIONS_RAW).map(([k, v]) => [k, ['select parameter', ...v]])
+);
 
 const CARD_COLORS = ['#4f46e5', '#7c3aed', '#0369a1', '#059669', '#dc2626', '#d97706'];
 const OTHER_CARD_COLOR = '#d97706';
