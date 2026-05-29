@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
    downloads (?type=...), and student reminder (?action=student_reminder).
    ────────────────────────────────────────────────────────── */
 const META_API   = '/api/reports/reports.php?action=meta';
+const EXAM_VER_API = '/api/reports/reports.php?action=exam_versions';
 const DL_BASE    = (import.meta.env.VITE_API_URL || 'https://cit3.internshipstudio.com/admin/react-api')
                  + '/api/reports/reports.php';
 const COMPANY_DL = 'https://portal.internshipstudio.com/api/generate_companies_excel.php';
@@ -101,6 +102,132 @@ function BatchModal({ batches, onConfirm, onClose }) {
   );
 }
 
+/* ─── Exam Data (Version & Date wise) modal ─────────────────── */
+function ExamDataModal({ versions, loading, onConfirm, onClose }) {
+  const [mode, setMode] = useState('version');           // 'version' | 'date'
+  const [sel, setSel]   = useState(new Set());           // selected cit_version strings
+  const [from, setFrom] = useState('');
+  const [to, setTo]     = useState('');
+
+  const allSel = versions.length > 0 && sel.size === versions.length;
+  const toggleAll = (c) => setSel(c ? new Set(versions.map(v => v.cit_version)) : new Set());
+  const toggle = (v) => setSel(p => { const n = new Set(p); n.has(v) ? n.delete(v) : n.add(v); return n; });
+
+  const submit = () => {
+    if (mode === 'version') {
+      if (!sel.size) { toast.error('Select at least one version'); return; }
+      onConfirm({ mode, versions: [...sel] });
+    } else {
+      if (!from && !to) { toast.error('Pick a from and/or to date'); return; }
+      if (from && to && from > to) { toast.error('"From" date must be before "To" date'); return; }
+      onConfirm({ mode, from, to });
+    }
+  };
+
+  const tabBtn = (key, label) => (
+    <button
+      type="button"
+      onClick={() => setMode(key)}
+      style={{
+        flex: 1, padding: '9px 12px', border: 'none', cursor: 'pointer',
+        fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit',
+        background: mode === key ? '#fff' : 'transparent',
+        color: mode === key ? '#b45309' : '#94a3b8',
+        borderBottom: mode === key ? '2px solid #f59e0b' : '2px solid transparent',
+      }}
+    >{label}</button>
+  );
+
+  return (
+    <div className="rep-modal-ovl" onClick={onClose}>
+      <div className="rep-modal" onClick={e => e.stopPropagation()}>
+        <div className="rep-modal-head" style={{ background: 'linear-gradient(135deg,#f59e0b,#d97706)' }}>
+          <span>📝 Exam Data — Version &amp; Date Wise</span>
+          <button className="rep-modal-close" onClick={onClose}>×</button>
+        </div>
+
+        {/* mode tabs */}
+        <div style={{ display: 'flex', borderBottom: '1.5px solid #f1f5f9', background: '#fafafa' }}>
+          {tabBtn('version', '📦 By Version')}
+          {tabBtn('date', '📅 By Date')}
+        </div>
+
+        <div className="rep-modal-body">
+          {mode === 'version' ? (
+            loading ? (
+              <div className="rep-loader" style={{ padding: '40px 20px', minHeight: 0 }}>
+                <div className="rep-spinner" /> Loading versions...
+              </div>
+            ) : versions.length === 0 ? (
+              <p className="rep-modal-sub">No CIT versions found in exam results.</p>
+            ) : (
+              <>
+                <p className="rep-modal-sub">
+                  Select CIT version(s). <b>Days</b> = distinct calendar dates students sat that
+                  version's exam (not the raw first→last span).
+                </p>
+
+                <label className="rep-chk-all" style={{ background: '#fff7ed', color: '#b45309' }}>
+                  <input type="checkbox" checked={allSel} onChange={e => toggleAll(e.target.checked)}
+                    style={{ accentColor: '#f59e0b' }} />
+                  <span>Select All ({versions.length})</span>
+                </label>
+
+                <div className="rep-chk-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+                  {versions.map(v => (
+                    <label key={v.cit_version}
+                      className={`rep-chk-pill ${sel.has(v.cit_version) ? 'on' : ''}`}
+                      style={sel.has(v.cit_version)
+                        ? { background: '#fff7ed', borderColor: '#fcd34d', color: '#b45309' } : {}}>
+                      <input type="checkbox" checked={sel.has(v.cit_version)}
+                        onChange={() => toggle(v.cit_version)} style={{ accentColor: '#f59e0b' }} />
+                      <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                        <b style={{ fontSize: 12 }}>{v.cit_version}</b>
+                        <span style={{ fontSize: 10, fontWeight: 500, color: '#94a3b8' }}>
+                          {v.attempts.toLocaleString()} attempts · {v.exam_days} day{v.exam_days === 1 ? '' : 's'}
+                        </span>
+                        <span style={{ fontSize: 9.5, fontWeight: 500, color: '#cbd5e1' }}>
+                          {v.first_day} → {v.last_day}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            )
+          ) : (
+            <>
+              <p className="rep-modal-sub">
+                Export every exam attempt whose date falls in this range (across all versions).
+                Leave one side empty for an open-ended range.
+              </p>
+              <div className="rep-date-row">
+                <div className="rep-date-grp">
+                  <label>From:</label>
+                  <input type="date" value={from} onChange={e => setFrom(e.target.value)} />
+                </div>
+                <div className="rep-date-grp">
+                  <label>To:</label>
+                  <input type="date" value={to} onChange={e => setTo(e.target.value)} />
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="rep-modal-foot">
+          <button className="rep-btn-cancel" onClick={onClose}>Cancel</button>
+          <button className="rep-btn-primary"
+            style={{ background: 'linear-gradient(135deg,#f59e0b,#d97706)', boxShadow: '0 4px 14px rgba(245,158,11,.35)' }}
+            onClick={submit}>
+            ⬇️ Download CSV
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Section card — distinct accent + icon + description ──── */
 const ACCENTS = {
   indigo: { from: '#4f46e5', to: '#7c3aed', tint: '#f5f3ff', border: '#e0e7ff', text: '#4338ca' },
@@ -163,6 +290,9 @@ export default function AllReports() {
   const [loading,  setLoading]  = useState(true);
   const [modal,    setModal]    = useState(null);
   const [companyDates, setCompanyDates] = useState({ from: '', to: '' });
+  const [examVersions, setExamVersions] = useState([]);
+  const [examVerLoading, setExamVerLoading] = useState(false);
+  const [examVerLoaded, setExamVerLoaded] = useState(false);
 
   useEffect(() => {
     api.get(META_API)
@@ -212,6 +342,29 @@ export default function AllReports() {
     let batch = val, refund = 'no';
     if (val.includes('||refund')) { [batch] = val.split('||'); refund = 'yes'; }
     window.open(dlUrl({ type: 'learnyst_internship_sheet', batch, refund }), '_blank');
+  };
+
+  /* Exam Data (version & date wise) — lazy-load versions on first open */
+  const openExamData = () => {
+    setModal({ kind: 'exam_vd' });
+    if (!examVerLoaded && !examVerLoading) {
+      setExamVerLoading(true);
+      api.get(EXAM_VER_API)
+        .then(res => {
+          if (res.data.status === 'success') setExamVersions(res.data.versions || []);
+          else toast.error(res.data.message || 'Failed to load exam versions');
+        })
+        .catch(() => toast.error('Failed to load exam versions'))
+        .finally(() => { setExamVerLoading(false); setExamVerLoaded(true); });
+    }
+  };
+
+  const confirmExamData = ({ mode, versions, from, to }) => {
+    setModal(null);
+    const params = { type: 'exam_version_date' };
+    if (mode === 'version') params.versions = versions.join(',');
+    else { if (from) params.from = from; if (to) params.to = to; }
+    window.open(dlUrl(params), '_blank');
   };
 
   const downloadCompany = () => {
@@ -523,10 +676,11 @@ export default function AllReports() {
               title="Exam Data"
               description="Exam credentials and result sheets across both DBs"
               accent="amber"
-              count={2}
+              count={3}
             >
               <DLBtn accent="amber" href={dlUrl({ type: 'user_exam_credentials' })}>Exam Credentials</DLBtn>
               <DLBtn accent="amber" href={dlUrl({ type: 'user_exam_result' })}>Exam Result</DLBtn>
+              <DLBtn accent="amber" onClick={openExamData}>Download Exam Data Version &amp; Date Wise</DLBtn>
             </Section>
 
             {/* Internship Data */}
@@ -602,6 +756,15 @@ export default function AllReports() {
           title="Select CIT Versions (New)"
           items={citNew.map(c => ({ id: c.id, label: c.cit_name }))}
           onConfirm={confirmNew}
+          onClose={() => setModal(null)}
+        />
+      )}
+
+      {modal?.kind === 'exam_vd' && (
+        <ExamDataModal
+          versions={examVersions}
+          loading={examVerLoading}
+          onConfirm={confirmExamData}
           onClose={() => setModal(null)}
         />
       )}
