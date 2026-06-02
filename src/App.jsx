@@ -213,6 +213,7 @@ import ProjectSubmission from './pages/internships/ProjectSubmission';
 import CheckPayments from './pages/internships/CheckPayments';
 import ManageCoupons from './pages/internships/ManageCoupons';
 import InternshipSimulation2 from './pages/internships/InternshipSimulation2';
+import ProblemStatements from './pages/internships/ProblemStatements';
 import AddBlog from './pages/blogs/AddBlog';
 import ManageBlogs from './pages/blogs/ManageBlogs';
 import ManageFaqs from './pages/faqs/ManageFaqs';
@@ -258,6 +259,7 @@ import MetaAdsDashboardOld from './pages/reports/MetaOld';
 import MetaAdsNew from './pages/reports/MetaNew';
 import UserAvailability from './pages/reports/UserAvailibility';
 import PlacementLinksForRefund from './pages/support/PlacementLinksForRefund';
+import PlacementLinksForNonQualified from './pages/support/PlacementLinksForNonQualified';
 import ViewTicket from './pages/support/ViewTicket';
 import InstantExamWALinks from './pages/support/InstantExamWaLink';
 import CustomPlacementDates from './pages/support/CustomPlacementDate';
@@ -268,6 +270,7 @@ import CareerRoadmapDashboard from './pages/admin-panel/CareerRoadMapDashboard';
 import DomainManagement from './pages/admin-panel/ResultPageData';
 import { SkillEditSkill, SkillSegments, SkillSegmentSkills } from './pages/admin-panel/Skills';
 import Notes from './pages/notes/Notes';
+import FunnelEconomicsView from './pages/reports/FunnelEconomics';
 
 // Helper to keep the route table readable
 const G = (perm, Element) => (
@@ -337,6 +340,8 @@ export default function App() {
         <Route path="internships/payments" element={G('check_payments', <CheckPayments />)} />
         <Route path="internships/coupons" element={G('manage_coupons', <ManageCoupons />)} />
         <Route path="internships/simulation" element={G('internship_simulation', <InternshipSimulation2 />)} />
+        <Route path="internships/problem-statements" element={G('problem_statement', <ProblemStatements />)} />
+        <Route path="internships/problem-statements/:internshipId" element={G('problem_statement', <ProblemStatements />)} />
 
         {/* Blogs */}
         <Route path="blogs/add" element={G('add_blogs', <AddBlog />)} />
@@ -376,6 +381,7 @@ export default function App() {
         <Route path="reports/agency-2" element={G('agency_reports_2', <AgencyReport2 />)} />
         <Route path="reports/meta-old" element={G('meta_reports_old', <MetaAdsDashboardOld user={user} canAccessRemark2={hasPermission('meta_remark2_access')} />)} />
         <Route path="reports/meta-new" element={G('meta_reports_new', <MetaAdsNew />)} />
+        <Route path="reports/funnel-economy" element={G('funnel_economics', <FunnelEconomicsView />)} />
         <Route path="reports/matching" element={G('matching_data', <MatchingData />)} />
         <Route path="reports/clarity" element={G('clarity_data', <ClarityData />)} />
         <Route path="reports/availability" element={G('user_availability', <UserAvailability />)} />
@@ -389,6 +395,7 @@ export default function App() {
         <Route path="support/wa-links" element={G('whatsapp_community_links', <WALinks />)} />
         <Route path="support/placement-links" element={G('whatsapp_placement_club_links', <PlacementLinks />)} />
         <Route path="support/placement-links_for_refund" element={G('whatsapp_placement_club_links_for_refund', <PlacementLinksForRefund />)} />
+        <Route path="support/placement-links_for_non_qualified" element={G('whatsapp_placement_club_links_for_non_qualified', <PlacementLinksForNonQualified />)} />
         <Route path="support" element={G('support_tickets', <SupportTickets />)} />
         <Route path="support/agents" element={G('support_agents', <SupportAgents />)} />
         <Route path="/support/ticket/:ticket_id" element={G('support_tickets', <ViewTicket />)} />

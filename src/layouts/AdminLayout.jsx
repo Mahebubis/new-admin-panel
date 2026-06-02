@@ -1093,6 +1093,7 @@ const sidebarMenu = [
       { text: 'Check Payments', link: '/internships/payments', icon: 'fas fa-money-check-dollar', perm: 'check_payments' },
       { text: 'Manage Coupons', link: '/internships/coupons', icon: 'fas fa-tag', perm: 'manage_coupons' },
       { text: 'Internship Simulation 2.2', link: '/internships/simulation', icon: 'fas fa-gamepad', perm: 'internship_simulation' },
+      { text: 'Problem Statement', link: '/internships/problem-statements', icon: 'fas fa-file-lines', perm: 'problem_statement' },
     ]
   },
   {
@@ -1144,6 +1145,7 @@ const sidebarMenu = [
       // { text: 'Meta Reports (New)', link: '/reports/meta-new', icon: 'fas fa-bolt', perm: 'meta_reports_new' },
       { text: 'Matching Data', link: '/reports/matching', icon: 'fas fa-database', perm: 'matching_data' },
       { text: 'Clarity Data', link: '/reports/clarity', icon: 'fas fa-eye', perm: 'clarity_data' },
+      { text: 'Funnel Economics', link: '/reports/funnel-economy', icon: 'fas fa-funnel-dollar', perm: 'funnel_economics' },
       // { text: 'User Availability', link: '/reports/availability', icon: 'fas fa-user-clock', perm: 'user_availability' },
     ]
   },
@@ -1159,6 +1161,7 @@ const sidebarMenu = [
       // { text: 'WhatsApp Community Links', link: '/support/wa-links', icon: 'fab fa-whatsapp', perm: 'whatsapp_community_links' },
       { text: 'Whatsapp Placement Club Links', link: '/support/placement-links', icon: 'fab fa-whatsapp', perm: 'whatsapp_placement_club_links' },
       { text: 'Whatsapp For Refund', link: '/support/placement-links_for_refund', icon: 'fab fa-whatsapp', perm: 'whatsapp_placement_club_links_for_refund' },
+      { text: 'Whatsapp For Non Qualified', link: '/support/placement-links_for_non_qualified', icon: 'fab fa-whatsapp', perm: 'whatsapp_placement_club_links_for_non_qualified' },
       { text: 'Support Tickets', link: '/support', icon: 'fas fa-life-ring', perm: 'support_tickets', exact: true },
       { text: 'Support Agents', link: '/support/agents', icon: 'fas fa-user-tie', perm: 'support_agents' },
       { text: 'Instant Exam WA Link', link: '/support/instant-wa', icon: 'fas fa-link', perm: 'instant_exam_wa_link' },

@@ -895,6 +895,7 @@ const P = {
   check:  'M20 6 9 17l-5-5',
   eye:    'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
   down:   'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
+  calendar: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z',
 };
 
 /* ── Proof circle thumbnail + popup ── */
@@ -1081,6 +1082,162 @@ const Field = ({ label, children }) => (
   </div>
 );
 
+/* ─── full date format: "02 June, 2026 at 3:04 pm" ─── */
+const fmtFull = (d) => {
+  if (!d) return '—';
+  const dt = new Date(String(d).replace(' ', 'T'));
+  if (isNaN(dt.getTime())) return String(d);
+  const day   = String(dt.getDate()).padStart(2, '0');
+  const month = dt.toLocaleString('en-US', { month: 'long' });
+  const year  = dt.getFullYear();
+  let h = dt.getHours();
+  const m = String(dt.getMinutes()).padStart(2, '0');
+  const ap = h >= 12 ? 'pm' : 'am';
+  h = h % 12 || 12;
+  return `${day} ${month}, ${year} at ${h}:${m} ${ap}`;
+};
+
+/* ─── date-only format: "20 May, 2026" (parses Y-M-D as a local day, no TZ shift) ─── */
+const fmtDay = (d) => {
+  if (!d) return '—';
+  const md = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const dt = md ? new Date(Number(md[1]), Number(md[2]) - 1, Number(md[3]))
+                : new Date(String(d).replace(' ', 'T'));
+  if (isNaN(dt.getTime())) return String(d);
+  return `${String(dt.getDate()).padStart(2, '0')} ${dt.toLocaleString('en-US', { month: 'long' })}, ${dt.getFullYear()}`;
+};
+
+/* ─── timeline event styling per type (sober, clear status colours) ─── */
+const TL_STYLE = {
+  submitted:        { label: 'Submitted',        bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe', dot: '#3b82f6' },
+  resubmitted:      { label: 'Resubmitted',      bg: '#f5f3ff', color: '#6d28d9', border: '#ddd6fe', dot: '#8b5cf6' },
+  pending:          { label: 'Pending',          bg: '#fff7ed', color: '#c2410c', border: '#fed7aa', dot: '#fb923c' },
+  approved:         { label: 'Approved',          bg: '#f0fdf4', color: '#15803d', border: '#bbf7d0', dot: '#22c55e' },
+  rejected:         { label: 'Rejected',          bg: '#fef2f2', color: '#b91c1c', border: '#fecaca', dot: '#ef4444' },
+  refund_requested: { label: 'Refund Requested',  bg: '#fffbeb', color: '#b45309', border: '#fde68a', dot: '#f59e0b' },
+  refund_rejected:  { label: 'Refund Rejected',   bg: '#fef2f2', color: '#b91c1c', border: '#fecaca', dot: '#ef4444' },
+  refund_approved:  { label: 'Refunded',   bg: '#ecfdf5', color: '#047857', border: '#a7f3d0', dot: '#10b981' },
+};
+
+/* ─── Project timeline popup (view-only) ─── */
+function TimelineModal({ row, onClose }) {
+  const [events, setEvents]   = useState(null);   // null = loading
+  const [curStatus, setCurStatus] = useState(row.project_status || null);
+  const [deadline, setDeadline] = useState(null);
+  const [error, setError]     = useState('');
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const res = await api.get('/api/refunds/list.php', {
+          params: { action: 'project_timeline', user_id: row.user_id, internship_id: row.internship_id }
+        });
+        if (!active) return;
+        if (res.data.success) {
+          setEvents(res.data.data.events || []);
+          setCurStatus(res.data.data.current_status || null);
+          setDeadline(res.data.data.deadline || null);
+        } else { setError(res.data.message || 'Failed to load'); setEvents([]); }
+      } catch (e) {
+        if (active) { setError(e?.response?.data?.message || 'Failed to load timeline'); setEvents([]); }
+      }
+    })();
+    return () => { active = false; };
+  }, [row.user_id, row.internship_id]);
+
+  const curStyle = curStatus ? (TL_STYLE[curStatus] || null) : null;
+
+  return (
+    <div onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, backdropFilter: 'blur(4px)' }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ background: '#fff', borderRadius: 14, width: '100%', maxWidth: 600, maxHeight: '90vh', boxShadow: '0 25px 60px rgba(0,0,0,0.25)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+        {/* header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', background: 'linear-gradient(135deg,#0f172a,#1e293b)' }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>Project Detail & Timeline</div>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,.7)', marginTop: 2 }}>{row.name} — {row.internship_name}</div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {deadline && (
+              <span title="Last day of the internship duration (deadline)"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 11px', borderRadius: 20, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.25)', fontSize: 11, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>
+                <Ico d={P.calendar} size={12} color="#fff" />
+                Deadline: {fmtDay(deadline)}
+              </span>
+            )}
+            {curStyle && (
+              <span className="pill" style={{ background: curStyle.bg, color: curStyle.color, borderColor: curStyle.border }}>
+                <svg width="5" height="5" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill={curStyle.dot} /></svg>
+                {curStyle.label}
+              </span>
+            )}
+            <button onClick={onClose}
+              style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 6, width: 28, height: 28, cursor: 'pointer', fontSize: 18 }}>×</button>
+          </div>
+        </div>
+
+        {/* body */}
+        <div style={{ padding: '18px 20px', overflowY: 'auto', flex: 1 }}>
+          {/* timeline */}
+          {events === null ? (
+            <div style={{ textAlign: 'center', padding: 30, color: '#94a3b8', fontSize: 12 }}>Loading timeline…</div>
+          ) : error ? (
+            <div style={{ textAlign: 'center', padding: 24, color: '#b91c1c', fontSize: 12 }}>{error}</div>
+          ) : events.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 24, color: '#94a3b8', fontSize: 12 }}>No activity recorded yet.</div>
+          ) : (
+            <div style={{ position: 'relative', paddingLeft: 26 }}>
+              {/* vertical rail */}
+              <div style={{ position: 'absolute', left: 9, top: 6, bottom: 6, width: 2, background: '#e2e8f0' }} />
+              {events.map((ev, i) => {
+                const s = TL_STYLE[ev.type] || TL_STYLE.submitted;
+                return (
+                  <div key={i} style={{ position: 'relative', marginBottom: i === events.length - 1 ? 0 : 16 }}>
+                    <span style={{ position: 'absolute', left: -22, top: 3, width: 14, height: 14, borderRadius: '50%', background: '#fff', border: `3px solid ${s.dot}`, boxSizing: 'border-box' }} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span className="pill" style={{ background: s.bg, color: s.color, borderColor: s.border }}>
+                        <svg width="5" height="5" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill={s.dot} /></svg>
+                        {s.label}
+                      </span>
+                      <span style={{ fontSize: 11.5, color: '#475569', fontWeight: 600 }}>{fmtFull(ev.at)}</span>
+                      {ev.admin && <span style={{ fontSize: 10.5, color: '#94a3b8' }}>by {ev.admin}</span>}
+                      {ev.legacy && <span style={{ fontSize: 9.5, color: '#cbd5e1' }}>(pre-log)</span>}
+                    </div>
+                    {ev.reason && (
+                      <div style={{ marginTop: 4, fontSize: 11.5, color: '#7f1d1d', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 7, padding: '6px 10px', lineHeight: 1.5 }}>
+                        <strong>Reason:</strong> {ev.reason}
+                      </div>
+                    )}
+                    {(ev.file_link || ev.video_link) && (
+                      <div style={{ marginTop: 4, display: 'flex', gap: 12 }}>
+                        {ev.file_link && /^https?:\/\//i.test(String(ev.file_link).trim()) && (
+                          <a href={String(ev.file_link).trim()} target="_blank" rel="noopener"
+                            style={{ fontSize: 11, color: '#4f46e5', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
+                            <Ico d={P.link} size={11} /> File
+                          </a>
+                        )}
+                        {ev.video_link && /^https?:\/\//i.test(String(ev.video_link).trim()) && (
+                          <a href={String(ev.video_link).trim()} target="_blank" rel="noopener"
+                            style={{ fontSize: 11, color: '#6d28d9', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
+                            <Ico d={P.video} size={11} /> Video
+                          </a>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ──────── Rich text editor (contentEditable + toolbar) ────────
    Lightweight inline editor — no external dependency. Uses execCommand
    for formatting; deprecated but still universally supported and
@@ -1163,6 +1320,7 @@ export default function RefundList() {
   const [rejectModal,   setRejectModal]   = useState(null);
   const [approveModal,  setApproveModal]  = useState(null);
   const [declineModal,  setDeclineModal]  = useState(null);
+  const [timelineModal, setTimelineModal] = useState(null);
 
   /* ── fetch ── */
   const fetchData = useCallback(async () => {
@@ -1516,14 +1674,14 @@ export default function RefundList() {
               <table className="rl-t">
                 <thead>
                   <tr>
-                    {['#','Student','Contact','Internship','Duration','Batch','Paid At','Attendance','Project','Video Link','Claim Status','Payment Info','Proof','Refund Action','Project Action'].map(h => (
+                    {['#','Student','Contact','Internship','Duration','Batch','Paid At','Attendance','Project','Detail','Video Link','Claim Status','Payment Info','Proof','Refund Action','Project Action'].map(h => (
                       <th key={h}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {!loading && data.length === 0 && (
-                    <tr><td colSpan={15} className="no-data">No refund records found</td></tr>
+                    <tr><td colSpan={16} className="no-data">No refund records found</td></tr>
                   )}
                   {data.map((row, i) => {
                     const claimSt = row.refund_claim_status || 'active';
@@ -1606,6 +1764,23 @@ export default function RefundList() {
                               )}
                             </div>
                           ) : <span style={{ color: '#cbd5e1', fontSize: 10 }}>—</span>}
+                        </td>
+
+                        {/* Detail — opens the project timeline; disabled if nothing submitted */}
+                        <td>
+                          {row.ps_id ? (
+                            <button onClick={() => setTimelineModal(row)} title="See submission timeline"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 6, fontSize: 10.5, fontWeight: 700, cursor: 'pointer', border: '1.5px solid #c7d2fe', fontFamily: 'inherit', background: '#eef2ff', color: '#4338ca', whiteSpace: 'nowrap', transition: 'all .15s' }}
+                              onMouseEnter={e => { e.currentTarget.style.background = '#4f46e5'; e.currentTarget.style.color = '#fff'; }}
+                              onMouseLeave={e => { e.currentTarget.style.background = '#eef2ff'; e.currentTarget.style.color = '#4338ca'; }}>
+                              <Ico d={P.eye} size={11} /> See Detail
+                            </button>
+                          ) : (
+                            <button disabled title="No project submitted yet"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 6, fontSize: 10.5, fontWeight: 700, cursor: 'not-allowed', border: '1.5px solid #e2e8f0', fontFamily: 'inherit', background: '#f1f5f9', color: '#cbd5e1', whiteSpace: 'nowrap' }}>
+                              <Ico d={P.eye} size={11} /> See Detail
+                            </button>
+                          )}
                         </td>
 
                         {/* Video Link */}
@@ -1737,6 +1912,11 @@ export default function RefundList() {
             Skip email notification to student
           </label>
         </Modal>
+      )}
+
+      {/* Project Detail & Timeline (view-only) */}
+      {timelineModal && (
+        <TimelineModal row={timelineModal} onClose={() => setTimelineModal(null)} />
       )}
 
       {/* Reject Refund — split-view editor + live preview */}
