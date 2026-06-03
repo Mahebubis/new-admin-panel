@@ -51,6 +51,7 @@ const METRIC_STYLE = {
   Leads: { bg:'#eff6ff', bd:'#bfdbfe' }, // blue
   CPL:   { bg:'#fdf2f8', bd:'#fbcfe8' }, // pink
   CPM:   { bg:'#eef2ff', bd:'#c7d2fe' }, // indigo
+  'C/Exam': { bg:'#f0fdfa', bd:'#99f6e4' }, // teal
   // ROI uses a dynamic heatmap color set inline.
 };
 const chipStyle = (lbl, bgOverride) => ({
@@ -65,12 +66,14 @@ const chipStyle = (lbl, bgOverride) => ({
 function DateCell({ d, maxRoi }) {
   const roiBg = roiColor(d.roi, maxRoi);
   const cpm = d.cpm ?? (d.impressions > 0 ? (d.cost / d.impressions) * 1000 : 0);
+  const cpe = (d.exams > 0) ? (d.cost / d.exams) : 0;
   const lines = [
     ['Cost',  fmtINR(d.cost),    null],
     ['Rev',   fmtINR(d.revenue), null],
     ['Leads', d.leads,           null],
     ['CPL',   fmt(d.cpl),        null],
     ['CPM',   fmt(cpm),          null],
+    ['C/Exam', fmt(cpe),         null],
     ['ROI',   fmt(d.roi),        roiBg], // heatmap-coloured
   ];
   return (
@@ -91,16 +94,18 @@ function DateCell({ d, maxRoi }) {
 }
 
 /* ─── Summary cell (avg/total) ─── */
-function SummaryCell({ totalCost, totalRevenue, totalLeads, totalImpressions = 0 }) {
+function SummaryCell({ totalCost, totalRevenue, totalLeads, totalImpressions = 0, totalExams = 0 }) {
   const roi = totalCost   > 0 ? totalRevenue / totalCost           : 0;
   const cpl = totalLeads  > 0 ? totalCost    / totalLeads          : 0;
   const cpm = totalImpressions > 0 ? (totalCost / totalImpressions) * 1000 : 0;
+  const cpe = totalExams  > 0 ? totalCost    / totalExams          : 0;
   const lines = [
     ['Cost',  fmtINR(totalCost)],
     ['Rev',   fmtINR(totalRevenue)],
     ['Leads', totalLeads],
     ['CPL',   fmt(cpl)],
     ['CPM',   fmt(cpm)],
+    ['C/Exam', fmt(cpe)],
     ['ROI',   fmt(roi)],
   ];
   return (
@@ -177,6 +182,12 @@ export default function AgencyReport2() {
       const d = await r.json();
       if (d.error) throw new Error(d.error);
       setAdData(d.data || []);
+      // Meta failures are non-fatal: registrations/revenue/exams still load.
+      // Flag it so a zero ad-spend view isn't mistaken for "no spend".
+      if (d.meta_error) {
+        toast(`Ad spend data unavailable (${d.meta_error}). Showing registrations, revenue & exams.`,
+          { icon: '⚠️', duration: 5000 });
+      }
     } catch(e) { toast.error(e.message); }
     finally { setLoading(false); }
   }, [startDate, endDate]);
@@ -204,19 +215,20 @@ export default function AgencyReport2() {
   const isNoCampaign = (c) => !c || c === '-' || c.toLowerCase() === 'direct/unknown';
 
   /* ── single-pass aggregation: campaign / campaign+adset / campaign+adset+ad ── */
-  const { campAgg, adsetAgg, adAgg, counts, globalCost, globalRevenue, globalImpr, globalLeads } = useMemo(() => {
-    const campAgg  = {}; // { camp: { date: {cost,revenue,leads,impressions} } }
+  const { campAgg, adsetAgg, adAgg, counts, globalCost, globalRevenue, globalImpr, globalLeads, globalExams } = useMemo(() => {
+    const campAgg  = {}; // { camp: { date: {cost,revenue,leads,impressions,exams} } }
     const adsetAgg = {}; // { camp: { adset: { date: ... } } }
     const adAgg    = {}; // { camp: { adset: { ad: { date: ... } } } }
     const counts   = {};
-    let gC = 0, gR = 0, gI = 0, gL = 0;
+    let gC = 0, gR = 0, gI = 0, gL = 0, gE = 0;
 
     const bump = (bucket, date, row) => {
-      if (!bucket[date]) bucket[date] = { cost:0, revenue:0, leads:0, impressions:0 };
+      if (!bucket[date]) bucket[date] = { cost:0, revenue:0, leads:0, impressions:0, exams:0 };
       bucket[date].cost        += +row.cost        || 0;
       bucket[date].revenue     += +row.revenue     || 0;
       bucket[date].leads       += +row.leads       || 0;
       bucket[date].impressions += +row.impressions || 0;
+      bucket[date].exams       += +row.exams       || 0;
     };
 
     for (const row of adData) {
@@ -249,6 +261,7 @@ export default function AgencyReport2() {
       gR += +row.revenue     || 0;
       gI += +row.impressions || 0;
       gL += +row.leads       || 0;
+      gE += +row.exams       || 0;
     }
 
     for (const k of Object.keys(counts)) {
@@ -259,13 +272,14 @@ export default function AgencyReport2() {
     }
     return {
       campAgg, adsetAgg, adAgg, counts,
-      globalCost: gC, globalRevenue: gR, globalImpr: gI, globalLeads: gL,
+      globalCost: gC, globalRevenue: gR, globalImpr: gI, globalLeads: gL, globalExams: gE,
     };
   }, [adData]);
 
   const globalRoi = globalCost > 0 ? globalRevenue / globalCost : 0;
   const globalCpl = globalLeads > 0 ? globalCost / globalLeads : 0;
   const globalCpm = globalImpr  > 0 ? (globalCost / globalImpr) * 1000 : 0;
+  const globalCpe = globalExams > 0 ? globalCost / globalExams : 0;
 
   /* sorted campaign names — "No Campaign" sinks to bottom */
   const campaigns = useMemo(() => {
@@ -297,21 +311,178 @@ export default function AgencyReport2() {
     return grps;
   };
 
-  /* ── Excel export ── */
+  /* ── Excel export — structured grid that mirrors the dashboard table:
+        3 hierarchy columns (Campaign / AdSet / Ad), then every date expanded
+        into its own metric columns (Cost, Rev, Leads, CPL, CPM, C/Exam, ROI),
+        followed by Average and Total groups. Built from data, not the DOM, so
+        each metric lands in its own cell instead of one concatenated blob. ── */
   const exportXlsx = () => {
-    const table = document.getElementById('da-export-table');
-    if (!table) { toast.error('No data'); return; }
+    if (!campaigns.length || !allDates.length) { toast.error('No data to export'); return; }
+
+    // xlsx-js-style = drop-in SheetJS with cell-style (fill/font/border) support.
     const loadXLSX = () => new Promise(resolve => {
-      if (window.XLSX) { resolve(); return; }
+      if (window.XLSX && window.XLSX.__styled) { resolve(); return; }
       const s = document.createElement('script');
-      s.src = 'https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js';
-      s.onload = resolve; document.head.appendChild(s);
+      s.src = 'https://cdn.jsdelivr.net/npm/xlsx-js-style/dist/xlsx.bundle.js';
+      s.onload = () => { try { window.XLSX.__styled = true; } catch { /* noop */ } resolve(); };
+      document.head.appendChild(s);
     });
+
+    // Light campaign tints — each campaign group (campaign + its adsets + ads)
+    // gets one hue so adjacent campaigns read as separate blocks. `head` = the
+    // campaign row, `body` = its adset/ad rows (a lighter shade of the same hue).
+    const PALETTE = [
+      { head: 'DBEAFE', body: 'EFF6FF' }, // blue
+      { head: 'DCFCE7', body: 'F0FDF4' }, // green
+      { head: 'FEF3C7', body: 'FFFBEB' }, // amber
+      { head: 'F3E8FF', body: 'FAF5FF' }, // purple
+      { head: 'FCE7F3', body: 'FDF2F8' }, // pink
+      { head: 'CCFBF1', body: 'F0FDFA' }, // teal
+      { head: 'FFE4E6', body: 'FFF1F2' }, // rose
+      { head: 'E0E7FF', body: 'EEF2FF' }, // indigo
+      { head: 'FEF9C3', body: 'FEFCE8' }, // yellow
+      { head: 'D1FAE5', body: 'ECFDF5' }, // emerald
+    ];
+
+    const METRICS = ['Cost', 'Rev', 'Leads', 'CPL', 'CPM', 'C/Exam', 'ROI'];
+    const D = allDates.length;
+
+    // 7 metric values for one bucket (or zeros).
+    const calc = (b = {}) => {
+      const cost = +b.cost || 0, rev = +b.revenue || 0, leads = +b.leads || 0,
+            impr = +b.impressions || 0, exams = +b.exams || 0;
+      return [
+        Math.round(cost),
+        Math.round(rev),
+        Math.round(leads),
+        +(leads > 0 ? cost / leads : 0).toFixed(2),
+        +(impr  > 0 ? (cost / impr) * 1000 : 0).toFixed(2),
+        +(exams > 0 ? cost / exams : 0).toFixed(2),
+        +(cost  > 0 ? rev / cost : 0).toFixed(2),
+      ];
+    };
+    const sumBuckets = (dateMap) => {
+      let cost = 0, revenue = 0, leads = 0, impressions = 0, exams = 0;
+      for (const d of allDates) {
+        const x = dateMap[d]; if (!x) continue;
+        cost += x.cost; revenue += x.revenue; leads += x.leads;
+        impressions += x.impressions || 0; exams += x.exams || 0;
+      }
+      return { cost, revenue, leads, impressions, exams };
+    };
+    // One full row: hierarchy cols + per-date metrics + Average + Total.
+    const rowForAgg = (camp, adset, ad, dateMap = {}) => {
+      const cells = [camp, adset, ad];
+      for (const d of allDates) cells.push(...calc(dateMap[d]));
+      const tot = sumBuckets(dateMap);
+      const n = Math.max(D, 1);
+      const avg = { cost: tot.cost / n, revenue: tot.revenue / n,
+        leads: Math.round(tot.leads / n), impressions: Math.round(tot.impressions / n),
+        exams: Math.round(tot.exams / n) };
+      cells.push(...calc(avg));
+      cells.push(...calc(tot));
+      return cells;
+    };
+
+    const totalCols = 3 + (D + 2) * 7;
+    const blank = () => new Array(totalCols).fill('');
+
+    // Row 0: title.  Row 1: group header (dates / Average / Total).  Row 2: metric sub-headers.
+    const titleRow = blank();
+    titleRow[0] = `${selBatch || 'Report'}  ·  ${formatDate(startDate)} – ${formatDate(endDate)}`;
+
+    const groupRow = blank();
+    groupRow[0] = 'Campaign'; groupRow[1] = 'AdSet'; groupRow[2] = 'Ad';
+    allDates.forEach((d, i) => { groupRow[3 + i * 7] = formatDate(d); });
+    groupRow[3 + D * 7]       = 'Average';
+    groupRow[3 + (D + 1) * 7] = 'Total';
+
+    const subRow = blank();
+    const putMetrics = (base) => METRICS.forEach((m, j) => { subRow[base + j] = m; });
+    allDates.forEach((d, i) => putMetrics(3 + i * 7));
+    putMetrics(3 + D * 7);
+    putMetrics(3 + (D + 1) * 7);
+
+    const aoa = [titleRow, groupRow, subRow];
+    // Parallel to the DATA rows only — { fill, kind } so we can colour by group.
+    const rowMeta = [];
+
+    // Data rows — full hierarchy (campaign → adsets → ads), like the dashboard.
+    campaigns.forEach((camp, ci) => {
+      const pal = PALETTE[ci % PALETTE.length];
+      aoa.push(rowForAgg(isNoCampaign(camp) ? 'No Campaign' : camp, '', '', campAgg[camp] || {}));
+      rowMeta.push({ fill: pal.head, kind: 'campaign' });
+      const adsetMap = adsetAgg[camp] || {};
+      Object.keys(adsetMap).sort((a, b) => a.localeCompare(b)).forEach(aName => {
+        aoa.push(rowForAgg('', aName, '', adsetMap[aName]));
+        rowMeta.push({ fill: pal.body, kind: 'adset' });
+        const adMap = (adAgg[camp] && adAgg[camp][aName]) || {};
+        Object.keys(adMap).sort((a, b) => a.localeCompare(b)).forEach(adName => {
+          aoa.push(rowForAgg('', '', adName, adMap[adName]));
+          rowMeta.push({ fill: pal.body, kind: 'ad' });
+        });
+      });
+    });
+
     loadXLSX().then(() => {
-      const wb = window.XLSX.utils.book_new();
-      const ws = window.XLSX.utils.table_to_sheet(table);
-      window.XLSX.utils.book_append_sheet(wb, ws, 'Analytics');
-      window.XLSX.writeFile(wb, 'Detailed_Analytics.xlsx');
+      const XLSX = window.XLSX;
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+      // Merges: title across all; hierarchy headers span the 2 header rows;
+      // each date / Average / Total label spans its 7 metric columns.
+      const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } }];
+      for (let c = 0; c < 3; c++) merges.push({ s: { r: 1, c }, e: { r: 2, c } });
+      const bases = allDates.map((d, i) => 3 + i * 7);
+      bases.push(3 + D * 7, 3 + (D + 1) * 7);
+      bases.forEach(base => merges.push({ s: { r: 1, c: base }, e: { r: 1, c: base + 6 } }));
+      ws['!merges'] = merges;
+
+      // Column widths.
+      const cols = [{ wch: 30 }, { wch: 24 }, { wch: 24 }];
+      for (let i = 0; i < (D + 2) * 7; i++) cols.push({ wch: 9 });
+      ws['!cols'] = cols;
+      ws['!freeze'] = { xSplit: 3, ySplit: 3 };
+      ws['!rows'] = [{ hpt: 24 }, { hpt: 18 }, { hpt: 16 }];
+
+      /* ── Cell styling ── */
+      const thin   = { style: 'thin', color: { rgb: 'E2E8F0' } };
+      const border = { top: thin, bottom: thin, left: thin, right: thin };
+      const setStyle = (r, c, style) => {
+        const ref = XLSX.utils.encode_cell({ r, c });
+        if (!ws[ref]) ws[ref] = { t: 's', v: '' };
+        ws[ref].s = style;
+      };
+      const titleStyle = { fill: { patternType: 'solid', fgColor: { rgb: '4338CA' } },
+        font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 13 },
+        alignment: { horizontal: 'left', vertical: 'center' } };
+      const headerStyle = { fill: { patternType: 'solid', fgColor: { rgb: '4F46E5' } },
+        font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 10 },
+        alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border };
+      const subStyle = { fill: { patternType: 'solid', fgColor: { rgb: '6366F1' } },
+        font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 9 },
+        alignment: { horizontal: 'center', vertical: 'center' }, border };
+
+      for (let c = 0; c < totalCols; c++) {
+        setStyle(0, c, titleStyle);
+        setStyle(1, c, headerStyle);
+        setStyle(2, c, subStyle);
+      }
+      rowMeta.forEach((m, i) => {
+        const r = 3 + i;
+        for (let c = 0; c < totalCols; c++) {
+          const hier = c < 3;
+          setStyle(r, c, {
+            fill: { patternType: 'solid', fgColor: { rgb: m.fill } },
+            font: { bold: m.kind === 'campaign' && hier, color: { rgb: '1E293B' }, sz: 10 },
+            alignment: { horizontal: hier ? 'left' : 'center', vertical: 'center', wrapText: hier },
+            border,
+          });
+        }
+      });
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Agency Report');
+      XLSX.writeFile(wb, `Agency_Report_${(selBatch || 'data').replace(/\s+/g, '_')}.xlsx`);
       toast.success('Downloaded!');
     });
   };
@@ -387,6 +558,9 @@ export default function AgencyReport2() {
 
       <div className="da-root" style={{
         display:'flex', flexDirection:'column', height:'calc(100vh - 62px)',
+        /* Full-bleed: cancel AdminLayout <main> padding (16px 20px) so the page
+           spans the entire content area width on any screen (laptop/desktop). */
+        width:'auto', margin:'-16px -20px',
         padding:20, gap:12, overflow:'hidden', background:'#f5f3ff',
       }}>
 
@@ -444,6 +618,9 @@ export default function AgencyReport2() {
             <span style={{ padding:'4px 8px', background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:6, fontWeight:700, color:'#1d4ed8' }}>
               Leads: {globalLeads} · CPL: {fmt(globalCpl)} · CPM: {fmt(globalCpm)}
             </span>
+            <span style={{ padding:'4px 8px', background:'#f0fdfa', border:'1px solid #99f6e4', borderRadius:6, fontWeight:700, color:'#0f766e' }}>
+              Exams: {globalExams} · Cost/Exam: {fmt(globalCpe)}
+            </span>
           </div>
         </div>
 
@@ -500,11 +677,11 @@ export default function AgencyReport2() {
                   const mode      = expanded[campId]; // null | 'adsets' | 'ads'
 
                   // Campaign totals + per-row max ROI
-                  let totCost=0, totRev=0, totLeads=0, totImp=0, campMaxRoi=0;
+                  let totCost=0, totRev=0, totLeads=0, totImp=0, totExams=0, campMaxRoi=0;
                   for (const d of allDates) {
                     const x = dateMap[d];
                     if (!x) continue;
-                    totCost += x.cost; totRev += x.revenue; totLeads += x.leads; totImp += x.impressions || 0;
+                    totCost += x.cost; totRev += x.revenue; totLeads += x.leads; totImp += x.impressions || 0; totExams += x.exams || 0;
                     if (x.cost > 0) {
                       const r = x.revenue / x.cost;
                       if (r > campMaxRoi) campMaxRoi = r;
@@ -549,8 +726,9 @@ export default function AgencyReport2() {
                       <SummaryCell totalCost={totCost/Math.max(allDates.length,1)}
                         totalRevenue={totRev/Math.max(allDates.length,1)}
                         totalLeads={Math.round(totLeads/Math.max(allDates.length,1))}
-                        totalImpressions={Math.round(totImp/Math.max(allDates.length,1))}/>
-                      <SummaryCell totalCost={totCost} totalRevenue={totRev} totalLeads={totLeads} totalImpressions={totImp}/>
+                        totalImpressions={Math.round(totImp/Math.max(allDates.length,1))}
+                        totalExams={Math.round(totExams/Math.max(allDates.length,1))}/>
+                      <SummaryCell totalCost={totCost} totalRevenue={totRev} totalLeads={totLeads} totalImpressions={totImp} totalExams={totExams}/>
                     </tr>
                   );
 
@@ -561,11 +739,11 @@ export default function AgencyReport2() {
 
                     adsetNames.forEach((aName, aIdx) => {
                       const aDates = adsetMap[aName];
-                      let aC=0, aR=0, aL=0, aI=0, aMx=0;
+                      let aC=0, aR=0, aL=0, aI=0, aE=0, aMx=0;
                       for (const d of allDates) {
                         const x = aDates[d];
                         if (!x) continue;
-                        aC += x.cost; aR += x.revenue; aL += x.leads; aI += x.impressions || 0;
+                        aC += x.cost; aR += x.revenue; aL += x.leads; aI += x.impressions || 0; aE += x.exams || 0;
                         if (x.cost > 0) { const r = x.revenue/x.cost; if (r>aMx) aMx=r; }
                       }
                       const moreAdsetsAfter = aIdx < adsetNames.length - 1;
@@ -591,8 +769,9 @@ export default function AgencyReport2() {
                           <SummaryCell totalCost={aC/Math.max(allDates.length,1)}
                             totalRevenue={aR/Math.max(allDates.length,1)}
                             totalLeads={Math.round(aL/Math.max(allDates.length,1))}
-                            totalImpressions={Math.round(aI/Math.max(allDates.length,1))}/>
-                          <SummaryCell totalCost={aC} totalRevenue={aR} totalLeads={aL} totalImpressions={aI}/>
+                            totalImpressions={Math.round(aI/Math.max(allDates.length,1))}
+                            totalExams={Math.round(aE/Math.max(allDates.length,1))}/>
+                          <SummaryCell totalCost={aC} totalRevenue={aR} totalLeads={aL} totalImpressions={aI} totalExams={aE}/>
                         </tr>
                       );
 
@@ -603,11 +782,11 @@ export default function AgencyReport2() {
 
                         adNames.forEach((adName, adIdx) => {
                           const dDates = adMap[adName];
-                          let dC=0, dR=0, dL=0, dI=0, dMx=0;
+                          let dC=0, dR=0, dL=0, dI=0, dE=0, dMx=0;
                           for (const d of allDates) {
                             const x = dDates[d];
                             if (!x) continue;
-                            dC += x.cost; dR += x.revenue; dL += x.leads; dI += x.impressions || 0;
+                            dC += x.cost; dR += x.revenue; dL += x.leads; dI += x.impressions || 0; dE += x.exams || 0;
                             if (x.cost > 0) { const r = x.revenue/x.cost; if (r>dMx) dMx=r; }
                           }
                           const moreAdsAfter = adIdx < adNames.length - 1;
@@ -632,8 +811,9 @@ export default function AgencyReport2() {
                               <SummaryCell totalCost={dC/Math.max(allDates.length,1)}
                                 totalRevenue={dR/Math.max(allDates.length,1)}
                                 totalLeads={Math.round(dL/Math.max(allDates.length,1))}
-                                totalImpressions={Math.round(dI/Math.max(allDates.length,1))}/>
-                              <SummaryCell totalCost={dC} totalRevenue={dR} totalLeads={dL} totalImpressions={dI}/>
+                                totalImpressions={Math.round(dI/Math.max(allDates.length,1))}
+                                totalExams={Math.round(dE/Math.max(allDates.length,1))}/>
+                              <SummaryCell totalCost={dC} totalRevenue={dR} totalLeads={dL} totalImpressions={dI} totalExams={dE}/>
                             </tr>
                           );
                         });

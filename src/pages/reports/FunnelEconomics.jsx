@@ -65,9 +65,11 @@ function compute({ spend, cpm, ctr, lpCvr, examRate, checkoutCvr, aov, repeat })
     const rev   = purch * aov;
     const roas  = spend > 0 ? rev / spend : 0;
     const cac   = purch > 0 ? spend / purch : 0;
+    const costPerReg  = reg  > 0 ? spend / reg  : 0;
+    const costPerExam = exam > 0 ? spend / exam : 0;
     const ltv   = repeat < 100 ? aov * (1 / (1 - repeat / 100)) : 0;
     const ltvCac = cac > 0 ? ltv / cac : 0;
-    return { imp, clk, reg, exam, purch, rev, roas, cac, ltv, ltvCac };
+    return { imp, clk, reg, exam, purch, rev, roas, cac, costPerReg, costPerExam, ltv, ltvCac };
 }
 
 const roasHealth = (r) =>
@@ -788,6 +790,8 @@ export default function FunnelEconomicsApp({ apiUrl = DEFAULT_API_URL }) {
                                 <Metric label="LTV : CAC"   value={`${base.ltvCac.toFixed(2)}x`}  health={lh} />
                                 <Metric label="MONTHLY REV" value={fmtINR(base.rev)} />
                                 <Metric label="CAC"         value={fmtINR(base.cac)} />
+                                <Metric label="COST / EXAM" value={fmtINR(base.costPerExam)} />
+                                <Metric label="COST / REG"  value={fmtINR(base.costPerReg)} />
                                 <Metric label="LTV"         value={fmtINR(base.ltv)} />
                                 <Metric label="PURCHASES"   value={fmt(base.purch)} />
                             </div>
