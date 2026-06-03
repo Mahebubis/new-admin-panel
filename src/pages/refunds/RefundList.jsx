@@ -1368,14 +1368,29 @@ export default function RefundList() {
   };
 
   /* ── Email templates (HTML fragments — list.php wraps with rl_wrapEmail) ── */
+  /* Refund Processed — full standalone HTML (sent with wrap:false). Professional
+     success design. */
   const tmplRefund = (m) => `
-    <h2 style="color:#0d2137;margin:0 0 12px;">Refund Processed</h2>
-    <p>Dear ${m.name},</p>
-    <p>Your refund claim for the internship <strong>${m.internship_name}</strong> has been <strong style="color:#16a34a;">successfully processed</strong>.</p>
-    <p>The amount will reflect in your original payment method within 5–7 working days.</p>
-    ${m.adminNotes ? `<p style="background:#f5f3ff;border-left:3px solid #4f46e5;padding:10px 14px;border-radius:6px;"><strong>Note from the team:</strong><br>${m.adminNotes.replace(/\n/g,'<br>')}</p>` : ''}
-    <p>If you have any questions, simply reply to this email.</p>
-    <p style="margin-top:20px;">Best regards,<br><strong>Team Internship Studio</strong></p>`;
+<div style="font-family:'Segoe UI',Arial,sans-serif;background:#f0faf8;margin:0;padding:24px 12px;">
+  <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 6px 28px rgba(13,33,55,.10);">
+    <div style="background:linear-gradient(135deg,#0d2137,#15803d);padding:38px 32px;text-align:center;">
+      <div style="display:inline-block;width:64px;height:64px;line-height:64px;background:rgba(255,255,255,.16);border-radius:50%;margin-bottom:16px;color:#fff;font-size:32px;font-weight:800;">&#10003;</div>
+      <h1 style="color:#fff;font-size:24px;margin:0 0 6px;font-weight:800;">Refund Processed</h1>
+      <p style="color:rgba(255,255,255,.78);font-size:13px;margin:0;">Your refund has been approved &amp; initiated</p>
+    </div>
+    <div style="padding:30px 34px;font-size:14px;color:#1a2e2b;line-height:1.7;">
+      <p style="margin:0 0 14px;">Dear <strong>${m.name || 'Student'}</strong>,</p>
+      <p style="margin:0 0 18px;">Good news! Your refund request for the internship <strong style="color:#15803d;">${m.internship_name || ''}</strong> has been reviewed and <strong>approved</strong>.</p>
+      <p style="margin:0 0 16px;">The refund has been initiated to your original payment method. Please wait, it might take 5-7 working days for the amount to be credited to your account.</p>
+      ${m.adminNotes ? `<div style="background:#f5f3ff;border-left:4px solid #4f46e5;padding:12px 16px;border-radius:0 8px 8px 0;margin:0 0 16px;font-size:13.5px;color:#475569;"><strong style="color:#1e293b;">Note from the team:</strong><br>${String(m.adminNotes).replace(/\n/g,'<br>')}</div>` : ''}
+      <p style="margin:0 0 4px;">If you have any questions, simply reply to this email and our team will help you out.</p>
+      <p style="margin:20px 0 0;">Warm regards,<br><strong>Team Internship Studio</strong></p>
+    </div>
+    <div style="background:#f0faf8;padding:16px;text-align:center;font-size:11px;color:#6b8f8a;border-top:1px solid #d4efeb;">
+      &copy; ${new Date().getFullYear()} Internship Studio &middot; This is an automated email.
+    </div>
+  </div>
+</div>`;
 
   const tmplReject = (m) => `
     <h2 style="color:#0d2137;margin:0 0 12px;">Refund Claim Update</h2>
@@ -1436,7 +1451,7 @@ export default function RefundList() {
       }
       await callApi({ action:'update_refund_claim', user_id:m.user_id, internship_id:m.internship_id, status:'refunded', admin_notes:m.adminNotes, proof_url:proofUrl });
       patchRow(m.user_id, m.internship_id, { refund_claim_status:'refunded', proof_url:proofUrl });
-      if (!m.skipEmail) await sendEmail(m.email, 'Refund Processed – Internship Studio', tmplRefund(m));
+      if (!m.skipEmail) await sendEmail(m.email, 'Refund Processed – Internship Studio', tmplRefund(m), false /* full-design template */);
       toast.success('Refund confirmed');
       setConfirmModal(null);
     } catch { toast.error('Failed to confirm refund'); }

@@ -272,8 +272,10 @@ function CalendarModal({ data, onClose }) {
 /* ════════════════════════════════════════
    DRILL-DOWN POPUP — records at batch + stage
 ════════════════════════════════════════ */
-function StageModal({ batch, stage, onClose }) {
+function StageModal({ batch, stage, duration, onClose }) {
   const cfg = STAGE_BY_KEY[stage];
+  /* compact label for the active duration filter (matches the cell chip) */
+  const durLabel = duration ? (duration % 30 === 0 ? `${duration / 30}M` : `${Math.max(1, Math.round(duration / 7))}W`) : '';
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -292,7 +294,7 @@ function StageModal({ batch, stage, onClose }) {
     setLoading(true);
     api.get(ENDPOINT, { params: {
       action: 'stage_records', batch, stage, page: p, per_page: PER_PAGE,
-      search: s || '', internship: intn || '',
+      search: s || '', internship: intn || '', duration: duration || '',
     } })
       .then(r => {
         const d = r.data?.data || {};
@@ -304,7 +306,7 @@ function StageModal({ batch, stage, onClose }) {
       })
       .catch(() => toast.error('Failed to load records'))
       .finally(() => setLoading(false));
-  }, [batch, stage]);
+  }, [batch, stage, duration]);
 
   useEffect(() => { load(1, '', ''); }, [load]);
 
@@ -333,7 +335,7 @@ function StageModal({ batch, stage, onClose }) {
     const t = toast.loading('Preparing export…');
     try {
       const r = await api.get(ENDPOINT, { params: {
-        action: 'export_stage', batch, stage, search: search || '', internship: internship || '',
+        action: 'export_stage', batch, stage, search: search || '', internship: internship || '', duration: duration || '',
       } });
       if (!r.data?.success) { toast.error(r.data?.message || 'Export failed', { id: t }); return; }
       const all = r.data.data?.rows || [];
@@ -380,7 +382,9 @@ function StageModal({ batch, stage, onClose }) {
               <span>{cfg?.icon}</span> {cfg?.label}
             </div>
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,.6)', marginTop: 3 }}>
-              Batch: <strong style={{ color: '#fff' }}>{batch}</strong> · {fmtNum(total)} record{total === 1 ? '' : 's'}
+              Batch: <strong style={{ color: '#fff' }}>{batch}</strong>
+              {durLabel && <> · Duration: <strong style={{ color: '#fff' }}>{durLabel}</strong></>}
+              {' · '}{fmtNum(total)} record{total === 1 ? '' : 's'}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -643,10 +647,32 @@ export default function RefundMapList() {
   };
   const tdS = { padding: '10px 14px', fontSize: 12.5, color: '#1e293b', borderBottom: '1px solid #f0faf8', verticalAlign: 'middle' };
 
+  /* Per-duration breakdown for a stage cell. Accepts either:
+     - row.durations[stageKey] = { "30": 12, "60": 5, ... }  OR
+     - row[`${stageKey}_by_duration`] = [{ duration:30, count:12 }, ...]
+     Returns a sorted [{ d, c }] array (only positive counts) or null. */
+  const durationBreakdown = (row, key) => {
+    const src = (row.durations && row.durations[key]) ?? row[`${key}_by_duration`];
+    if (!src) return null;
+    let arr;
+    if (Array.isArray(src)) {
+      arr = src.map(x => ({ d: +(x.duration ?? x.d ?? x.days ?? 0), c: +(x.count ?? x.c ?? 0) }));
+    } else {
+      arr = Object.entries(src).map(([d, c]) => ({ d: +d, c: +c }));
+    }
+    arr = arr.filter(x => x.c > 0 && x.d > 0).sort((a, b) => a.d - b.d);
+    return arr.length ? arr : null;
+  };
+
+  /* duration-days → compact label: multiples of 30 as months (30→1M, 90→3M),
+     anything shorter as weeks (15→2W, 7→1W). */
+  const fmtDur = (d) => (d % 30 === 0 ? `${d / 30}M` : `${Math.max(1, Math.round(d / 7))}W`);
+
   /* clickable funnel count cell */
   const CountCell = ({ row, st }) => {
     const n = row[st.key] || 0;
     if (!n) return <td style={{ ...tdS, textAlign: 'center', color: '#cbd5e1', fontWeight: 600 }}>0</td>;
+    const bd = durationBreakdown(row, st.key);
     return (
       <td style={{ ...tdS, textAlign: 'center', padding: '8px 10px' }}>
         <button onClick={() => setModal({ batch: row.batch, stage: st.key })}
@@ -660,6 +686,28 @@ export default function RefundMapList() {
           onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'none'; }}>
           {fmtNum(n)}
         </button>
+        {/* duration split — count (bigger) stacked over the duration number (tiny) */}
+        {bd && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, justifyContent: 'center', marginTop: 5 }}
+            title={bd.map(x => `${fmtDur(x.d)}: ${x.c}`).join('  ·  ')}>
+            {bd.map(({ d, c }) => (
+              <button key={d} type="button"
+                onClick={() => setModal({ batch: row.batch, stage: st.key, duration: d })}
+                title={`View ${st.label} — ${row.batch} · ${fmtDur(d)}`}
+                style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1,
+                  padding: '2px 4px', borderRadius: 5, background: '#fff', cursor: 'pointer',
+                  border: `1px solid ${st.color}22`, minWidth: 18, fontFamily: 'inherit',
+                  transition: 'background .12s, border-color .12s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = st.bg; e.currentTarget.style.borderColor = `${st.color}55`; }}
+                onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.borderColor = `${st.color}22`; }}>
+                <span style={{ fontSize: 10, fontWeight: 800, color: st.color }}>{fmtNum(c)}</span>
+                <span style={{ fontSize: 7.5, fontWeight: 600, color: '#94a3b8', marginTop: 1 }}>{fmtDur(d)}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </td>
     );
   };
@@ -678,42 +726,72 @@ export default function RefundMapList() {
 
       <div className="rml-root" style={{ display: 'flex', flexDirection: 'column', padding: 20, gap: 14, background: '#f0faf8' }}>
 
-        {/* ── COMPACT HEADER STRIP (title + inline stats + export) ── */}
+        {/* ── HEADER STRIP — title row, then all funnels on their own row ── */}
         <div style={{
           background: 'linear-gradient(135deg,#0d2137 0%,#164a3e 100%)', borderRadius: 10,
-          padding: '8px 14px', color: '#fff', display: 'flex', alignItems: 'center',
-          gap: 12, flexWrap: 'wrap', flexShrink: 0,
+          padding: '12px 16px', color: '#fff', display: 'flex', flexDirection: 'column',
+          gap: 11, flexShrink: 0,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span style={{ fontSize: 16 }}>🪙</span>
-            <span style={{ fontSize: 14, fontWeight: 800, whiteSpace: 'nowrap' }}>Refund Funnel Map</span>
+          {/* Row 1 — title + export */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 18 }}>🪙</span>
+              <span style={{ fontSize: 15, fontWeight: 800, whiteSpace: 'nowrap' }}>Refund Funnel Map</span>
+            </div>
+            <button onClick={exportCSV} disabled={exporting} style={{
+              padding: '6px 13px', border: '1.5px solid rgba(255,255,255,.25)', borderRadius: 7,
+              background: 'rgba(255,255,255,.1)', color: '#fff', fontSize: 11.5, fontWeight: 600,
+              cursor: exporting ? 'wait' : 'pointer', fontFamily: 'inherit', opacity: exporting ? .6 : 1,
+              whiteSpace: 'nowrap', flexShrink: 0,
+            }}>{exporting ? '⏳ Exporting…' : '⬇️ Export All (CSV)'}</button>
           </div>
 
-          {/* inline mini-stats */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', flex: 1, justifyContent: 'center', minWidth: 0 }}>
+          {/* divider */}
+          <div style={{ height: 1, background: 'rgba(255,255,255,.1)' }} />
+
+          {/* Row 2 — all funnel stages in one row */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 6 }}>
             {STAGES.map((s, i) => (
               <div key={s.key} style={{
-                display: 'flex', alignItems: 'center', gap: 6, padding: '0 11px',
+                flex: '1 1 0', minWidth: 130,
+                display: 'flex', alignItems: 'flex-start', gap: 8, padding: '2px 12px',
                 borderLeft: i ? '1px solid rgba(255,255,255,.13)' : 'none',
               }}>
-                <span style={{ fontSize: 12 }}>{s.icon}</span>
-                <div style={{ lineHeight: 1.05 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 800 }}>{totals ? fmtNum(totals[s.key]) : '—'}</div>
+                <span style={{ fontSize: 14, marginTop: 1 }}>{s.icon}</span>
+                <div style={{ lineHeight: 1.05, minWidth: 0 }}>
+                  <div style={{ fontSize: 16, fontWeight: 800 }}>{totals ? fmtNum(totals[s.key]) : '—'}</div>
                   <div style={{
-                    fontSize: 8, fontWeight: 700, color: 'rgba(255,255,255,.55)',
+                    fontSize: 8.5, fontWeight: 700, color: 'rgba(255,255,255,.55)',
                     textTransform: 'uppercase', letterSpacing: '.03em', whiteSpace: 'nowrap',
                   }}>{s.short}</div>
+                  {/* duration split of this total — count stacked over its label */}
+                  {(() => {
+                    const bd = totals?.durations ? durationBreakdown({ durations: totals.durations }, s.key) : null;
+                    if (!bd) return null;
+                    return (
+                      <div style={{ display: 'flex', gap: 4, marginTop: 5, flexWrap: 'wrap' }}
+                        title={bd.map(x => `${fmtDur(x.d)}: ${x.c}`).join('  ·  ')}>
+                        {bd.map(({ d, c }) => (
+                          <span key={d} style={{
+                            display: 'inline-flex', flexDirection: 'column', alignItems: 'center',
+                            lineHeight: 1.1, background: 'rgba(255,255,255,.1)',
+                            border: '1px solid rgba(255,255,255,.14)', borderRadius: 5,
+                            padding: '2px 6px', minWidth: 26,
+                          }}>
+                            <span style={{ fontSize: 10, fontWeight: 800, color: '#fff' }}>{fmtNum(c)}</span>
+                            <span style={{
+                              fontSize: 7.5, fontWeight: 700, color: 'rgba(255,255,255,.55)',
+                              letterSpacing: '.02em', marginTop: 1,
+                            }}>{fmtDur(d)}</span>
+                          </span>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             ))}
           </div>
-
-          <button onClick={exportCSV} disabled={exporting} style={{
-            padding: '6px 13px', border: '1.5px solid rgba(255,255,255,.25)', borderRadius: 7,
-            background: 'rgba(255,255,255,.1)', color: '#fff', fontSize: 11.5, fontWeight: 600,
-            cursor: exporting ? 'wait' : 'pointer', fontFamily: 'inherit', opacity: exporting ? .6 : 1,
-            whiteSpace: 'nowrap', flexShrink: 0,
-          }}>{exporting ? '⏳ Exporting…' : '⬇️ Export All (CSV)'}</button>
         </div>
 
         {/* ── STICKY TOOLBAR: filter bar + table ── */}
@@ -822,7 +900,7 @@ export default function RefundMapList() {
         </div>
       </div>
 
-      {modal && <StageModal batch={modal.batch} stage={modal.stage} onClose={() => setModal(null)} />}
+      {modal && <StageModal batch={modal.batch} stage={modal.stage} duration={modal.duration} onClose={() => setModal(null)} />}
     </>
   );
 }
