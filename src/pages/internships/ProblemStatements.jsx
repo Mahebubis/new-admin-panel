@@ -24,6 +24,7 @@ import {
   CheckCircle, Save, RefreshCw, Bold, Italic, Underline, Strikethrough,
   AlignLeft, AlignCenter, AlignRight, FileSearch, List, ListOrdered, Link2,
   Table as TableIcon, Highlighter, Baseline, Eraser, Undo, Redo, Heading, Quote,
+  Database, Link as LinkIcon, FileUp,
 } from 'lucide-react';
 
 /* ── API base — same host as the rest of the panel, internship-system folder ── */
@@ -48,6 +49,9 @@ const Api = {
   update:    (d)         => call('action=update', d),
   remove:    (id)        => call('action=delete', { id }),
   uploadImg: (form)      => call('action=upload_image', form, true),
+  itemAddFile: (form)    => call('action=item_add', form, true),   // multipart
+  itemAddLink: (d)       => call('action=item_add', d),            // json
+  itemRemove: (id)       => call('action=item_delete', { id }),
 };
 
 /* ── lightweight client cache (stale-while-revalidate) so revisits are instant ── */
@@ -371,53 +375,186 @@ function FileViewer({ row, onClose }) {
 /* ═══════════════════════════════════════════════════════════════════════════
    Add / Edit modal
 ═══════════════════════════════════════════════════════════════════════════ */
-function StatementModal({ domain, editing, onClose, onSaved }) {
-  const isEdit = !!editing;
-  const [title, setTitle] = useState(editing?.title || '');
-  const [fileType, setFileType] = useState(editing?.file_type || 'pdf');
-  const [file, setFile] = useState(null);
-  const [saving, setSaving] = useState(false);
+let _draftSeq = 1;
+const newDraft = (kind = 'file') => ({ tempId: `d${_draftSeq++}`, persisted: false, kind, label: '', file: null, url: '' });
+
+/* one editable draft row (file or link) inside the modal */
+function DraftRow({ item, isDataset, onChange, onRemove }) {
   const fileRef = useRef(null);
-  const editorApi = useRef(null);
-
-  const meta = typeMeta(fileType);
-
-  const pickFile = (e) => {
+  const set = (k, v) => onChange({ ...item, [k]: v });
+  const pick = (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
     if (f.size > 50 * 1024 * 1024) { toast.error('File must be under 50MB'); return; }
-    setFile(f);
+    set('file', f);
+  };
+  return (
+    <div style={{ border: `1px solid ${C.line}`, borderRadius: 11, padding: 12, background: C.bg,
+      display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        {/* kind toggle */}
+        <div style={{ display: 'inline-flex', background: '#fff', border: `1px solid ${C.line}`, borderRadius: 9, padding: 2 }}>
+          <button type="button" onClick={() => set('kind', 'file')}
+            style={kindTab(item.kind === 'file')}><FileUp size={13} /> Upload</button>
+          <button type="button" onClick={() => set('kind', 'link')}
+            style={kindTab(item.kind === 'link')}><LinkIcon size={13} /> Link</button>
+        </div>
+        <input value={item.label} onChange={(e) => set('label', e.target.value)}
+          placeholder={isDataset ? 'Dataset label (e.g. Sales 2024)' : 'Label (optional)'}
+          style={{ ...inputS, height: 36, flex: 1 }} onFocus={focusBorder} onBlur={blurBorder} />
+        <button type="button" onClick={onRemove} style={iconBtn} title="Remove"><X size={16} /></button>
+      </div>
+      {item.kind === 'link' ? (
+        <input value={item.url} onChange={(e) => set('url', e.target.value)}
+          placeholder="https://… (Google Drive, dataset URL, etc.)"
+          style={{ ...inputS, height: 38 }} onFocus={focusBorder} onBlur={blurBorder} />
+      ) : (
+        <>
+          <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={pick} />
+          {!item.file ? (
+            <button type="button" onClick={() => fileRef.current?.click()}
+              style={{ width: '100%', padding: '14px 16px', borderRadius: 10, cursor: 'pointer',
+                border: `1.5px dashed ${C.accentLine}`, background: '#fff', color: C.muted,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <Upload size={16} color={C.accent} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: C.body }}>Choose a file</span>
+              <span style={{ fontSize: 11, color: C.faint }}>· any type · max 50MB</span>
+            </button>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
+              borderRadius: 10, border: `1px solid ${C.accentLine}`, background: '#fff' }}>
+              <Paperclip size={15} color={C.accent} />
+              <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: C.ink,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.file.name}</div>
+              <span style={{ fontSize: 11.5, color: C.muted }}>{fmtSize(item.file.size)}</span>
+              <button type="button" onClick={() => fileRef.current?.click()} style={{ ...ghostBtn, height: 28 }}>Change</button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* a persisted (already-saved) item shown in edit mode with a remove button */
+function SavedItemRow({ item, onRemove }) {
+  const isLink = item.kind === 'link';
+  const meta = typeMeta(item.file_type);
+  const Ic = isLink ? LinkIcon : meta.icon;
+  const name = item.label || item.file_name || item.url || 'Item';
+  const href = isLink ? item.url : item.file_url;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px',
+      border: `1px solid ${C.line}`, borderRadius: 10, background: '#fff' }}>
+      <span style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, display: 'flex',
+        alignItems: 'center', justifyContent: 'center', background: C.bg, color: isLink ? C.accent : meta.hue }}>
+        <Ic size={16} />
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.ink, whiteSpace: 'nowrap',
+          overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</div>
+        <div style={{ fontSize: 11, color: C.faint }}>{isLink ? 'Link' : (meta.label + (item.file_size ? ` · ${fmtSize(item.file_size)}` : ''))}</div>
+      </div>
+      <a href={href} target="_blank" rel="noopener noreferrer" title="Open"
+        style={{ ...iconBtn, textDecoration: 'none' }}><ExternalLink size={15} /></a>
+      <button type="button" onClick={onRemove} style={iconBtnDanger} title="Remove"><Trash2 size={15} /></button>
+    </div>
+  );
+}
+
+function StatementModal({ domain, editing, onClose, onSaved }) {
+  const isEdit = !!editing;
+  const [title, setTitle] = useState(editing?.title || '');
+  const [saving, setSaving] = useState(false);
+  const editorApi = useRef(null);
+
+  const split = (cat) => (editing?.items || []).filter(it => (it.category || 'resource') === cat)
+    .map(it => ({ ...it, persisted: true }));
+  const [resources, setResources] = useState(() => isEdit ? split('resource') : []);
+  const [datasets, setDatasets]   = useState(() => isEdit ? split('dataset') : []);
+
+  const upd = (setList) => (tempId, next) => setList(list => list.map(x => (x.tempId === tempId || x.id === tempId) ? next : x));
+  const addDraft = (setList) => () => setList(list => [...list, newDraft()]);
+
+  /* remove: persisted → delete on server now; draft → drop locally */
+  const removeItem = (setList) => async (item) => {
+    if (item.persisted) {
+      try { await Api.itemRemove(item.id); toast.success('Removed'); }
+      catch (e) { return toast.error(e.message || 'Remove failed'); }
+    }
+    setList(list => list.filter(x => (x.tempId || x.id) !== (item.tempId || item.id)));
+  };
+
+  const persistDraft = async (statementId, category, d) => {
+    if (d.kind === 'link') {
+      if (!d.url.trim()) throw new Error('A link is missing its URL');
+      await Api.itemAddLink({ statement_id: statementId, category, kind: 'link', label: d.label.trim(), url: d.url.trim() });
+    } else {
+      if (!d.file) throw new Error('An upload item is missing its file');
+      const fd = new FormData();
+      fd.append('action', 'item_add');
+      fd.append('statement_id', statementId);
+      fd.append('category', category);
+      fd.append('kind', 'file');
+      fd.append('label', d.label.trim());
+      fd.append('file', d.file);
+      await Api.itemAddFile(fd);
+    }
   };
 
   const save = async () => {
     const description = editorApi.current?.getHTML?.() || '';
-    if (isEdit) {
-      setSaving(true);
-      try {
-        await Api.update({ id: editing.id, title: title.trim(), description });
-        toast.success('Updated');
-        onSaved();
-      } catch (e) { toast.error(e.message || 'Update failed'); }
-      finally { setSaving(false); }
-      return;
+    const newResources = resources.filter(x => !x.persisted);
+    const newDatasets   = datasets.filter(x => !x.persisted);
+
+    // validate drafts up front so nothing is half-saved
+    for (const d of [...newResources, ...newDatasets]) {
+      if (d.kind === 'link' && !d.url.trim()) return toast.error('Fill the URL for every link, or remove it');
+      if (d.kind === 'file' && !d.file)        return toast.error('Choose a file for every upload, or remove it');
     }
-    // create — file is mandatory
-    if (!file) { toast.error('Please upload a file — it is mandatory'); return; }
+
     setSaving(true);
     try {
-      const fd = new FormData();
-      fd.append('action', 'create');
-      fd.append('internship_id', domain.internship_id);
-      fd.append('title', title.trim());
-      fd.append('description', description);
-      fd.append('file_type', fileType);
-      fd.append('file', file);
-      await Api.create(fd);
-      toast.success('Problem statement added');
+      let statementId = editing?.id;
+      if (isEdit) {
+        await Api.update({ id: statementId, title: title.trim(), description });
+      } else {
+        const fd = new FormData();
+        fd.append('action', 'create');
+        fd.append('internship_id', domain.internship_id);
+        fd.append('title', title.trim());
+        fd.append('description', description);
+        const res = await Api.create(fd);
+        statementId = res.id;
+      }
+      for (const d of newResources) await persistDraft(statementId, 'resource', d);
+      for (const d of newDatasets)   await persistDraft(statementId, 'dataset', d);
+      toast.success(isEdit ? 'Saved' : 'Problem statement added');
       onSaved();
-    } catch (e) { toast.error(e.message || 'Upload failed'); }
+    } catch (e) { toast.error(e.message || 'Save failed'); }
     finally { setSaving(false); }
   };
+
+  /* plain render function (NOT a component) so draft inputs keep focus across re-renders */
+  const section = ({ icon, title: secTitle, hint, list, setList, isDataset }) => (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        {icon}
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: C.body, textTransform: 'uppercase', letterSpacing: '.04em' }}>{secTitle}</span>
+        <span style={{ fontSize: 11, color: C.faint }}>{hint}</span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+        {list.map(it => it.persisted
+          ? <SavedItemRow key={it.id} item={it} onRemove={() => removeItem(setList)(it)} />
+          : <DraftRow key={it.tempId} item={it} isDataset={isDataset}
+              onChange={(next) => upd(setList)(it.tempId, next)} onRemove={() => removeItem(setList)(it)} />)}
+        <button type="button" onClick={addDraft(setList)}
+          style={{ ...ghostBtn, height: 38, alignSelf: 'flex-start', borderStyle: 'dashed', borderColor: C.accentLine, color: C.accent }}>
+          <Plus size={15} /> Add {isDataset ? 'dataset' : 'file or link'}
+        </button>
+      </div>
+    </div>
+  );
 
   return (
     <div style={overlay} onClick={(e) => e.target === e.currentTarget && !saving && onClose()}>
@@ -437,7 +574,7 @@ function StatementModal({ domain, editing, onClose, onSaved }) {
         </div>
 
         {/* body */}
-        <div style={{ padding: 20, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <div style={{ padding: 20, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
           {/* title */}
           <Field label="Title" optional>
@@ -446,74 +583,20 @@ function StatementModal({ domain, editing, onClose, onSaved }) {
               style={inputS} onFocus={focusBorder} onBlur={blurBorder} />
           </Field>
 
-          {/* file type + upload — only on create */}
-          {!isEdit && (
-            <>
-              <Field label="File type" required>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 8 }}>
-                  {FILE_TYPES.map(t => {
-                    const active = t.key === fileType;
-                    const Ic = t.icon;
-                    return (
-                      <button key={t.key} type="button"
-                        onClick={() => { setFileType(t.key); setFile(null); }}
-                        style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '10px 12px',
-                          borderRadius: 10, cursor: 'pointer', textAlign: 'left',
-                          border: `1.5px solid ${active ? C.accent : C.line}`,
-                          background: active ? C.accentSoft : '#fff', transition: 'all .12s' }}>
-                        <span style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          background: active ? '#fff' : C.bg, color: t.hue }}>
-                          <Ic size={16} />
-                        </span>
-                        <span style={{ fontSize: 12.5, fontWeight: 600,
-                          color: active ? C.accent : C.body }}>{t.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </Field>
-
-              <Field label="Upload file" required>
-                <input ref={fileRef} type="file" accept={meta.accept} style={{ display: 'none' }} onChange={pickFile} />
-                {!file ? (
-                  <button type="button" onClick={() => fileRef.current?.click()}
-                    style={{ width: '100%', padding: '26px 16px', borderRadius: 12, cursor: 'pointer',
-                      border: `1.5px dashed ${C.accentLine}`, background: C.bg, color: C.muted,
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                    <Upload size={26} color={C.accent} />
-                    <span style={{ fontSize: 13.5, fontWeight: 600, color: C.body }}>
-                      Click to choose a {meta.label.toLowerCase()} file
-                    </span>
-                    <span style={{ fontSize: 11.5, color: C.faint }}>
-                      Accepted: {meta.accept === '*' ? 'any file' : meta.accept} · max 50MB
-                    </span>
-                  </button>
-                ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px',
-                    borderRadius: 12, border: `1.5px solid ${C.accentLine}`, background: C.accentSoft }}>
-                    <span style={{ width: 38, height: 38, borderRadius: 9, flexShrink: 0, background: '#fff',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', color: meta.hue }}>
-                      <meta.icon size={18} />
-                    </span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: C.ink, whiteSpace: 'nowrap',
-                        overflow: 'hidden', textOverflow: 'ellipsis' }}>{file.name}</div>
-                      <div style={{ fontSize: 11.5, color: C.muted }}>{fmtSize(file.size)}</div>
-                    </div>
-                    <button type="button" onClick={() => fileRef.current?.click()}
-                      style={{ ...ghostBtn, height: 30 }}>Change</button>
-                    <button type="button" onClick={() => setFile(null)} style={iconBtn}><X size={16} /></button>
-                  </div>
-                )}
-              </Field>
-            </>
-          )}
-
           {/* description */}
           <Field label="Description" optional>
             <RichEditor onReady={(a) => (editorApi.current = a)} initialHTML={editing?.description || ''} />
           </Field>
+
+          {/* resources — multiple files / links */}
+          {section({ icon: <Paperclip size={15} color={C.accent} />, title: 'Files & links', isDataset: false,
+            hint: 'add as many uploads or links as you need',
+            list: resources, setList: setResources })}
+
+          {/* datasets — labelled files / links */}
+          {section({ icon: <Database size={15} color={C.accent} />, title: 'Datasets', isDataset: true,
+            hint: 'labelled data files or links',
+            list: datasets, setList: setDatasets })}
         </div>
 
         {/* footer */}
@@ -530,6 +613,13 @@ function StatementModal({ domain, editing, onClose, onSaved }) {
   );
 }
 
+/* kind-toggle tab style */
+const kindTab = (active) => ({
+  display: 'inline-flex', alignItems: 'center', gap: 5, height: 28, padding: '0 10px', borderRadius: 7,
+  border: 'none', background: active ? C.accent : 'transparent', color: active ? '#fff' : C.muted,
+  fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+});
+
 /* ═══════════════════════════════════════════════════════════════════════════
    Domain detail — list of problem statements for one domain
 ═══════════════════════════════════════════════════════════════════════════ */
@@ -538,7 +628,6 @@ function DomainDetail({ domain, onBack, onCountChange }) {
   const [rows, setRows] = useState(() => stmtCache.get(id) || []);
   const [loading, setLoading] = useState(() => !stmtCache.has(id)); // cached → instant
   const [modal, setModal] = useState(null);   // { editing? }
-  const [viewing, setViewing] = useState(null); // row being previewed
   const [confirmDel, setConfirmDel] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -599,13 +688,10 @@ function DomainDetail({ domain, onBack, onCountChange }) {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {rows.map(r => <StatementRow key={r.id} row={r}
-            onView={() => setViewing(r)}
             onEdit={() => setModal({ editing: r })}
             onDelete={() => setConfirmDel(r)} />)}
         </div>
       )}
-
-      {viewing && <FileViewer row={viewing} onClose={() => setViewing(null)} />}
 
       {modal && (
         <StatementModal domain={domain} editing={modal.editing}
@@ -621,52 +707,116 @@ function DomainDetail({ domain, onBack, onCountChange }) {
   );
 }
 
-/* single statement row */
-function StatementRow({ row, onView, onEdit, onDelete }) {
+/* one resource/dataset line within a statement */
+function ItemLine({ item, onView }) {
+  const isLink = item.kind === 'link';
+  const meta = typeMeta(item.file_type);
+  const Ic = isLink ? LinkIcon : meta.icon;
+  const name = item.label || item.file_name || item.url || 'Item';
+  const sub = isLink ? 'Link' : (meta.label + (item.file_size ? ` · ${fmtSize(item.file_size)}` : ''));
+  const inner = (
+    <>
+      <span style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, display: 'flex',
+        alignItems: 'center', justifyContent: 'center', background: '#fff', color: isLink ? C.accent : meta.hue,
+        border: `1px solid ${C.line}` }}>
+        <Ic size={16} />
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.ink, whiteSpace: 'nowrap',
+          overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</div>
+        <div style={{ fontSize: 11, color: C.faint }}>{sub}</div>
+      </div>
+      {isLink ? <ExternalLink size={15} color={C.faint} /> : <Eye size={15} color={C.accent} />}
+    </>
+  );
+  const baseStyle = { display: 'flex', alignItems: 'center', gap: 11, padding: '9px 11px',
+    border: `1px solid ${C.line}`, borderRadius: 10, background: C.bg, textDecoration: 'none', cursor: 'pointer' };
+  return isLink
+    ? <a href={item.url} target="_blank" rel="noopener noreferrer" style={baseStyle}>{inner}</a>
+    : <div style={baseStyle} onClick={() => onView(item)}>{inner}</div>;
+}
+
+/* single statement row — header + grouped resources & datasets + description */
+function StatementRow({ row, onEdit, onDelete }) {
   const [open, setOpen] = useState(false);
-  const meta = typeMeta(row.file_type);
-  const Ic = meta.icon;
+  const [viewItem, setViewItem] = useState(null);
   const hasDesc = row.description && row.description.replace(/<[^>]+>/g, '').trim().length > 0;
+
+  const items = row.items || [];
+  /* legacy single file stored on the parent → show as a resource */
+  const legacy = row.file_url
+    ? [{ id: `legacy-${row.id}`, kind: 'file', category: 'resource', label: row.file_name,
+         file_url: row.file_url, file_name: row.file_name, file_type: row.file_type,
+         file_size: row.file_size, mime_type: row.mime_type }]
+    : [];
+  const resources = [...legacy, ...items.filter(i => (i.category || 'resource') === 'resource')];
+  const datasets  = items.filter(i => i.category === 'dataset');
+  const total = resources.length + datasets.length;
+
   return (
     <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, background: '#fff', overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px' }}>
         <span style={{ width: 44, height: 44, borderRadius: 11, flexShrink: 0, display: 'flex',
-          alignItems: 'center', justifyContent: 'center', background: C.bg, color: meta.hue }}>
-          <Ic size={20} />
+          alignItems: 'center', justifyContent: 'center', background: C.accentSoft, color: C.accent }}>
+          <FileText size={20} />
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: C.ink, whiteSpace: 'nowrap',
             overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {row.title || row.file_name || 'Untitled'}
+            {row.title || 'Untitled problem statement'}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 3, flexWrap: 'wrap' }}>
-            <span style={chip}>{meta.label}</span>
-            {row.file_size > 0 && <span style={{ fontSize: 11.5, color: C.faint }}>{fmtSize(row.file_size)}</span>}
+            {resources.length > 0 && <span style={chip}>{resources.length} file{resources.length === 1 ? '' : 's'}/link{resources.length === 1 ? '' : 's'}</span>}
+            {datasets.length > 0 && <span style={{ ...chip, background: C.accentSoft, color: C.accent }}>{datasets.length} dataset{datasets.length === 1 ? '' : 's'}</span>}
             <span style={{ fontSize: 11.5, color: C.faint }}>{fmtDate(row.created_at)}</span>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0 }}>
-          <button title="View file" onClick={onView} style={{ ...iconBtnSubtle(false),
-            borderColor: C.accentLine, background: C.accentSoft, color: C.accent }}>
-            <Eye size={16} />
-          </button>
-          {hasDesc && (
-            <button title={open ? 'Hide description' : 'Show description'} onClick={() => setOpen(o => !o)}
-              style={iconBtnSubtle(open)}><FileText size={16} /></button>
+          {(total > 0 || hasDesc) && (
+            <button title={open ? 'Collapse' : 'Expand'} onClick={() => setOpen(o => !o)}
+              style={iconBtnSubtle(open)}><ChevronRight size={16}
+                style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} /></button>
           )}
           <button title="Edit" onClick={onEdit} style={iconBtnSubtle(false)}><Pencil size={16} /></button>
           <button title="Delete" onClick={onDelete} style={iconBtnDanger}><Trash2 size={16} /></button>
         </div>
       </div>
-      {open && hasDesc && (
-        <div style={{ borderTop: `1px solid ${C.line2}`, padding: '14px 18px', background: C.bg }}>
-          <div className="ps-rich" style={{ fontSize: 13.5, lineHeight: 1.8, color: C.body }}
-            dangerouslySetInnerHTML={{ __html: row.description }} />
+
+      {open && (
+        <div style={{ borderTop: `1px solid ${C.line2}`, padding: '14px 18px', background: C.bg,
+          display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {hasDesc && (
+            <div className="ps-rich" style={{ fontSize: 13.5, lineHeight: 1.8, color: C.body }}
+              dangerouslySetInnerHTML={{ __html: row.description }} />
+          )}
+          {resources.length > 0 && (
+            <div>
+              <div style={subHead}><Paperclip size={13} /> Files & links</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {resources.map(it => <ItemLine key={it.id} item={it} onView={setViewItem} />)}
+              </div>
+            </div>
+          )}
+          {datasets.length > 0 && (
+            <div>
+              <div style={subHead}><Database size={13} /> Datasets</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {datasets.map(it => <ItemLine key={it.id} item={it} onView={setViewItem} />)}
+              </div>
+            </div>
+          )}
+          {total === 0 && !hasDesc && (
+            <div style={{ fontSize: 12.5, color: C.faint }}>No files, links or datasets yet — use Edit to add some.</div>
+          )}
         </div>
       )}
+
+      {viewItem && <FileViewer row={viewItem} onClose={() => setViewItem(null)} />}
     </div>
   );
 }
+const subHead = { display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700,
+  color: C.muted, textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 };
 
 /* domain logo with graceful fallback */
 function DomainLogo({ domain, size = 48 }) {

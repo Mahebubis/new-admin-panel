@@ -1094,6 +1094,7 @@ const sidebarMenu = [
       { text: 'Manage Coupons', link: '/internships/coupons', icon: 'fas fa-tag', perm: 'manage_coupons' },
       { text: 'Internship Simulation 2.2', link: '/internships/simulation', icon: 'fas fa-gamepad', perm: 'internship_simulation' },
       { text: 'Problem Statement', link: '/internships/problem-statements', icon: 'fas fa-file-lines', perm: 'problem_statement' },
+      { text: 'Assignment Panel', link: '/internships/assignment-panel', icon: 'fas fa-clipboard-list', perm: 'assignment_panel' },
     ]
   },
   {

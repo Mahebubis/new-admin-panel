@@ -1119,12 +1119,57 @@ const TL_STYLE = {
   refund_approved:  { label: 'Refunded',   bg: '#ecfdf5', color: '#047857', border: '#a7f3d0', dot: '#10b981' },
 };
 
+/* http(s) link? → render as a view-only link; everything else is plain text. */
+const isHttpUrl = (v) => typeof v === 'string' && /^https?:\/\//i.test(v.trim());
+
+/* Render one submitted answer value — links open in a new tab (view only,
+   never a download). Arrays (multi-select) render each value in turn. */
+function AnswerValue({ value }) {
+  if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) {
+    return <span style={{ color: '#94a3b8' }}>—</span>;
+  }
+  const arr = Array.isArray(value) ? value : [value];
+  return (
+    <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+      {arr.map((v, i) =>
+        isHttpUrl(v) ? (
+          <a key={i} href={String(v).trim()} target="_blank" rel="noopener"
+            style={{ fontSize: 10.5, color: '#4338ca', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4, textDecoration: 'none', background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 6, padding: '2px 8px' }}>
+            <Ico d={P.eye} size={11} /> View
+          </a>
+        ) : (
+          <span key={i} style={{ fontSize: 11.5, color: '#1e293b' }}>
+            {String(v)}{i < arr.length - 1 ? ',' : ''}
+          </span>
+        )
+      )}
+    </span>
+  );
+}
+
+/* Status descriptor for one assignment (used for the pill + the rail dot). */
+const asgStatus = (a) =>
+  !a.submitted
+    ? { label: 'Not submitted',              bg: '#fff7ed', color: '#c2410c', border: '#fed7aa', dot: '#fb923c' }
+    : a.within_deadline === false
+    ? { label: 'Submitted · After deadline', bg: '#fef2f2', color: '#b91c1c', border: '#fecaca', dot: '#ef4444' }
+    : { label: 'Submitted · Within deadline',bg: '#f0fdf4', color: '#15803d', border: '#bbf7d0', dot: '#22c55e' };
+
+/* Normalise a date / datetime string to "YYYY-MM-DD HH:MM:SS" for sorting. */
+const normKey = (s, endOfDay = false) => {
+  const v = String(s || '');
+  if (!v) return endOfDay ? '9999' : '0000';
+  return v.length <= 10 ? `${v} ${endOfDay ? '23:59:59' : '00:00:00'}` : v;
+};
+
 /* ─── Project timeline popup (view-only) ─── */
 function TimelineModal({ row, onClose }) {
   const [events, setEvents]   = useState(null);   // null = loading
   const [curStatus, setCurStatus] = useState(row.project_status || null);
   const [deadline, setDeadline] = useState(null);
   const [error, setError]     = useState('');
+  const [asg, setAsg]         = useState(null);   // assignment status — null = loading
+  const [asgErr, setAsgErr]   = useState('');
 
   useEffect(() => {
     let active = true;
@@ -1146,7 +1191,42 @@ function TimelineModal({ row, onClose }) {
     return () => { active = false; };
   }, [row.user_id, row.internship_id]);
 
+  /* assignment status — submitted? within / after its deadline? */
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const res = await api.get('/api/refunds/list.php', {
+          params: { action: 'assignment_status', user_id: row.user_id, internship_id: row.internship_id }
+        });
+        if (!active) return;
+        if (res.data.success) setAsg(res.data.data.assignments || []);
+        else { setAsgErr(res.data.message || 'Failed to load'); setAsg([]); }
+      } catch (e) {
+        if (active) { setAsgErr(e?.response?.data?.message || 'Failed to load assignments'); setAsg([]); }
+      }
+    })();
+    return () => { active = false; };
+  }, [row.user_id, row.internship_id]);
+
   const curStyle = curStatus ? (TL_STYLE[curStatus] || null) : null;
+
+  /* assignment accordions — closed by default */
+  const [openSteps, setOpenSteps] = useState({});
+  const toggleStep = (step) => setOpenSteps((s) => ({ ...s, [step]: !s[step] }));
+
+  const loading = events === null || asg === null;
+
+  /* Merge project events + assignment items into one chronological rail.
+     Assignments (May) naturally sort before the project events (June). */
+  const merged = loading ? [] : [
+    ...(events || []).map((ev, i) => ({ kind: 'event', key: `e${i}`, sortKey: normKey(ev.at), ev })),
+    ...(asg || []).map((a) => ({
+      kind: 'asg', key: `a${a.step}`,
+      sortKey: a.submitted_at ? normKey(a.submitted_at) : normKey(a.deadline_date, true),
+      a,
+    })),
+  ].sort((x, y) => x.sortKey.localeCompare(y.sortKey));
 
   return (
     <div onClick={onClose}
@@ -1179,58 +1259,130 @@ function TimelineModal({ row, onClose }) {
           </div>
         </div>
 
-        {/* body */}
+        {/* body — one chronological rail of project events + assignments */}
         <div style={{ padding: '18px 20px', overflowY: 'auto', flex: 1 }}>
-          {/* timeline */}
-          {events === null ? (
+          {loading ? (
             <div style={{ textAlign: 'center', padding: 30, color: '#94a3b8', fontSize: 12 }}>Loading timeline…</div>
-          ) : error ? (
-            <div style={{ textAlign: 'center', padding: 24, color: '#b91c1c', fontSize: 12 }}>{error}</div>
-          ) : events.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: 24, color: '#94a3b8', fontSize: 12 }}>No activity recorded yet.</div>
+          ) : merged.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 24, color: error ? '#b91c1c' : '#94a3b8', fontSize: 12 }}>
+              {error || 'No activity recorded yet.'}
+            </div>
           ) : (
             <div style={{ position: 'relative', paddingLeft: 26 }}>
               {/* vertical rail */}
               <div style={{ position: 'absolute', left: 9, top: 6, bottom: 6, width: 2, background: '#e2e8f0' }} />
-              {events.map((ev, i) => {
-                const s = TL_STYLE[ev.type] || TL_STYLE.submitted;
-                return (
-                  <div key={i} style={{ position: 'relative', marginBottom: i === events.length - 1 ? 0 : 16 }}>
-                    <span style={{ position: 'absolute', left: -22, top: 3, width: 14, height: 14, borderRadius: '50%', background: '#fff', border: `3px solid ${s.dot}`, boxSizing: 'border-box' }} />
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <span className="pill" style={{ background: s.bg, color: s.color, borderColor: s.border }}>
-                        <svg width="5" height="5" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill={s.dot} /></svg>
-                        {s.label}
-                      </span>
-                      <span style={{ fontSize: 11.5, color: '#475569', fontWeight: 600 }}>{fmtFull(ev.at)}</span>
-                      {ev.admin && <span style={{ fontSize: 10.5, color: '#94a3b8' }}>by {ev.admin}</span>}
-                      {ev.legacy && <span style={{ fontSize: 9.5, color: '#cbd5e1' }}>(pre-log)</span>}
+
+              {merged.map((item, i) => {
+                const last = i === merged.length - 1;
+
+                /* ── project event ── */
+                if (item.kind === 'event') {
+                  const ev = item.ev;
+                  const s = TL_STYLE[ev.type] || TL_STYLE.submitted;
+                  return (
+                    <div key={item.key} style={{ position: 'relative', marginBottom: last ? 0 : 16 }}>
+                      <span style={{ position: 'absolute', left: -22, top: 3, width: 14, height: 14, borderRadius: '50%', background: '#fff', border: `3px solid ${s.dot}`, boxSizing: 'border-box' }} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span className="pill" style={{ background: s.bg, color: s.color, borderColor: s.border }}>
+                          <svg width="5" height="5" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill={s.dot} /></svg>
+                          {s.label}
+                        </span>
+                        <span style={{ fontSize: 11.5, color: '#475569', fontWeight: 600 }}>{fmtFull(ev.at)}</span>
+                        {ev.admin && <span style={{ fontSize: 10.5, color: '#94a3b8' }}>by {ev.admin}</span>}
+                        {ev.legacy && <span style={{ fontSize: 9.5, color: '#cbd5e1' }}>(pre-log)</span>}
+                      </div>
+                      {ev.reason && (
+                        <div style={{ marginTop: 4, fontSize: 11.5, color: '#7f1d1d', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 7, padding: '6px 10px', lineHeight: 1.5 }}>
+                          <strong>Reason:</strong> {ev.reason}
+                        </div>
+                      )}
+                      {(ev.file_link || ev.video_link) && (
+                        <div style={{ marginTop: 4, display: 'flex', gap: 12 }}>
+                          {ev.file_link && /^https?:\/\//i.test(String(ev.file_link).trim()) && (
+                            <a href={String(ev.file_link).trim()} target="_blank" rel="noopener"
+                              style={{ fontSize: 11, color: '#4f46e5', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
+                              <Ico d={P.link} size={11} /> File
+                            </a>
+                          )}
+                          {ev.video_link && /^https?:\/\//i.test(String(ev.video_link).trim()) && (
+                            <a href={String(ev.video_link).trim()} target="_blank" rel="noopener"
+                              style={{ fontSize: 11, color: '#6d28d9', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
+                              <Ico d={P.video} size={11} /> Video
+                            </a>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    {ev.reason && (
-                      <div style={{ marginTop: 4, fontSize: 11.5, color: '#7f1d1d', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 7, padding: '6px 10px', lineHeight: 1.5 }}>
-                        <strong>Reason:</strong> {ev.reason}
-                      </div>
-                    )}
-                    {(ev.file_link || ev.video_link) && (
-                      <div style={{ marginTop: 4, display: 'flex', gap: 12 }}>
-                        {ev.file_link && /^https?:\/\//i.test(String(ev.file_link).trim()) && (
-                          <a href={String(ev.file_link).trim()} target="_blank" rel="noopener"
-                            style={{ fontSize: 11, color: '#4f46e5', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
-                            <Ico d={P.link} size={11} /> File
-                          </a>
-                        )}
-                        {ev.video_link && /^https?:\/\//i.test(String(ev.video_link).trim()) && (
-                          <a href={String(ev.video_link).trim()} target="_blank" rel="noopener"
-                            style={{ fontSize: 11, color: '#6d28d9', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
-                            <Ico d={P.video} size={11} /> Video
-                          </a>
-                        )}
-                      </div>
-                    )}
+                  );
+                }
+
+                /* ── assignment accordion (collapsed by default) ── */
+                const a = item.a;
+                const st = asgStatus(a);
+                const open = !!openSteps[a.step];
+                return (
+                  <div key={item.key} style={{ position: 'relative', marginBottom: last ? 0 : 16 }}>
+                    <span style={{ position: 'absolute', left: -22, top: 3, width: 14, height: 14, borderRadius: '50%', background: '#fff', border: `3px solid ${st.dot}`, boxSizing: 'border-box' }} />
+                    <div style={{ border: '1.5px solid #eef2ff', borderRadius: 10, background: '#fafaff', overflow: 'hidden' }}>
+                      {/* header — title + status only (closed by default) */}
+                      <button type="button" onClick={() => toggleStep(a.step)}
+                        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 11px', background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                          <span style={{ fontSize: 9, color: '#94a3b8', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s', display: 'inline-block' }}>▶</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            Assignment {a.step}{a.title ? ` — ${a.title}` : ''}
+                          </span>
+                        </span>
+                        <span className="pill" style={{ background: st.bg, color: st.color, borderColor: st.border, flexShrink: 0 }}>
+                          <svg width="5" height="5" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill={st.dot} /></svg>
+                          {st.label}
+                        </span>
+                      </button>
+
+                      {/* expanded — dates + submitted answers (view only) */}
+                      {open && (
+                        <div style={{ padding: '0 11px 11px', borderTop: '1px solid #eef2ff' }}>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', margin: '9px 0', fontSize: 11 }}>
+                            <span style={{ color: '#64748b' }}>
+                              <span style={{ fontWeight: 600, color: '#475569' }}>Start:</span> {fmtDay(a.unlock_date)}
+                            </span>
+                            <span style={{ color: '#64748b' }}>
+                              <span style={{ fontWeight: 600, color: '#475569' }}>Deadline:</span> {fmtDay(a.deadline_date)}
+                            </span>
+                            {a.submitted && a.submitted_at && (
+                              <span style={{ color: '#64748b' }}>
+                                <span style={{ fontWeight: 600, color: '#475569' }}>Submitted:</span>{' '}
+                                <span style={{ color: a.within_deadline === false ? '#b91c1c' : '#15803d', fontWeight: 600 }}>{fmtFull(a.submitted_at)}</span>
+                              </span>
+                            )}
+                          </div>
+
+                          {a.submitted ? (
+                            (a.answers && a.answers.length > 0) ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                                {a.answers.map((ans, idx) => (
+                                  <div key={idx} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6 }}>
+                                    <span style={{ fontSize: 11, fontWeight: 600, color: '#475569' }}>{ans.label}:</span>
+                                    <AnswerValue value={ans.value} />
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>No submission form fields for this assignment.</p>
+                            )
+                          ) : (
+                            <p style={{ fontSize: 11, color: '#c2410c', margin: 0 }}>Not submitted yet.</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
+          )}
+          {asgErr && !loading && (
+            <div style={{ marginTop: 10, fontSize: 10.5, color: '#b91c1c' }}>Assignments: {asgErr}</div>
           )}
         </div>
       </div>
@@ -1781,21 +1933,16 @@ export default function RefundList() {
                           ) : <span style={{ color: '#cbd5e1', fontSize: 10 }}>—</span>}
                         </td>
 
-                        {/* Detail — opens the project timeline; disabled if nothing submitted */}
+                        {/* Detail — opens the project timeline + assignment status.
+                            Always clickable: even with no project submission the
+                            modal still shows the per-assignment deadline compliance. */}
                         <td>
-                          {row.ps_id ? (
-                            <button onClick={() => setTimelineModal(row)} title="See submission timeline"
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 6, fontSize: 10.5, fontWeight: 700, cursor: 'pointer', border: '1.5px solid #c7d2fe', fontFamily: 'inherit', background: '#eef2ff', color: '#4338ca', whiteSpace: 'nowrap', transition: 'all .15s' }}
-                              onMouseEnter={e => { e.currentTarget.style.background = '#4f46e5'; e.currentTarget.style.color = '#fff'; }}
-                              onMouseLeave={e => { e.currentTarget.style.background = '#eef2ff'; e.currentTarget.style.color = '#4338ca'; }}>
-                              <Ico d={P.eye} size={11} /> See Detail
-                            </button>
-                          ) : (
-                            <button disabled title="No project submitted yet"
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 6, fontSize: 10.5, fontWeight: 700, cursor: 'not-allowed', border: '1.5px solid #e2e8f0', fontFamily: 'inherit', background: '#f1f5f9', color: '#cbd5e1', whiteSpace: 'nowrap' }}>
-                              <Ico d={P.eye} size={11} /> See Detail
-                            </button>
-                          )}
+                          <button onClick={() => setTimelineModal(row)} title="See submission timeline & assignment status"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 6, fontSize: 10.5, fontWeight: 700, cursor: 'pointer', border: '1.5px solid #c7d2fe', fontFamily: 'inherit', background: '#eef2ff', color: '#4338ca', whiteSpace: 'nowrap', transition: 'all .15s' }}
+                            onMouseEnter={e => { e.currentTarget.style.background = '#4f46e5'; e.currentTarget.style.color = '#fff'; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = '#eef2ff'; e.currentTarget.style.color = '#4338ca'; }}>
+                            <Ico d={P.eye} size={11} /> See Detail
+                          </button>
                         </td>
 
                         {/* Video Link */}

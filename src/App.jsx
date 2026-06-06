@@ -214,6 +214,7 @@ import CheckPayments from './pages/internships/CheckPayments';
 import ManageCoupons from './pages/internships/ManageCoupons';
 import InternshipSimulation2 from './pages/internships/InternshipSimulation2';
 import ProblemStatements from './pages/internships/ProblemStatements';
+import AssignmentPanel from './pages/internships/AssignmentPanel';
 import AddBlog from './pages/blogs/AddBlog';
 import ManageBlogs from './pages/blogs/ManageBlogs';
 import ManageFaqs from './pages/faqs/ManageFaqs';
@@ -342,6 +343,7 @@ export default function App() {
         <Route path="internships/simulation" element={G('internship_simulation', <InternshipSimulation2 />)} />
         <Route path="internships/problem-statements" element={G('problem_statement', <ProblemStatements />)} />
         <Route path="internships/problem-statements/:internshipId" element={G('problem_statement', <ProblemStatements />)} />
+        <Route path="internships/assignment-panel" element={G('assignment_panel', <AssignmentPanel />)} />
 
         {/* Blogs */}
         <Route path="blogs/add" element={G('add_blogs', <AddBlog />)} />
