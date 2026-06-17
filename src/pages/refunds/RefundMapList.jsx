@@ -209,7 +209,7 @@ function CalendarModal({ data, onClose }) {
                 {data.attendance_pct}%
               </div>
               <div style={{ fontSize: 10, color: '#64748b' }}>
-                {data.present_days}/{data.elapsed_days} days
+                {data.present_days}/{data.total_days} days
               </div>
             </div>
           </div>

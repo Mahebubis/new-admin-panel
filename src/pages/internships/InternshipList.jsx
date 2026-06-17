@@ -21,7 +21,7 @@ const tdS = { padding: '9px 12px', borderBottom: '1px solid #f5f3ff', color: '#3
 
 function Spinner() {
   return (
-    <tr><td colSpan={9} style={{ textAlign: 'center', padding: 40, color: '#94a3b8', fontSize: 13 }}>
+    <tr><td colSpan={10} style={{ textAlign: 'center', padding: 40, color: '#94a3b8', fontSize: 13 }}>
       <div style={{
         display: 'inline-block', width: 28, height: 28, border: '3px solid #ede9fe',
         borderTop: '3px solid #4f46e5', borderRadius: '50%', animation: 'il_spin .7s linear infinite'
@@ -109,6 +109,29 @@ export default function InternshipList() {
     } catch { toast.error('Error'); }
   };
 
+  /* ── toggle show/hide slider ── */
+  const [toggling, setToggling] = useState(null); // id being saved
+  const toggleShow = async (row) => {
+    const newVal = row.is_show == 1 ? 0 : 1;
+    setToggling(row.id);
+    // optimistic update
+    setList(prev => prev.map(r => r.id === row.id ? { ...r, is_show: newVal } : r));
+    try {
+      const res = await api.post(API, mk({ action: 'toggle_show', internship_id: row.id, value: newVal }), FH);
+      if (res.data.status === 'success') {
+        toast.success(newVal ? 'Shown' : 'Hidden');
+      } else {
+        toast.error(res.data.message || 'Failed to update');
+        setList(prev => prev.map(r => r.id === row.id ? { ...r, is_show: row.is_show } : r)); // revert
+      }
+    } catch {
+      toast.error('Error updating');
+      setList(prev => prev.map(r => r.id === row.id ? { ...r, is_show: row.is_show } : r)); // revert
+    } finally {
+      setToggling(null);
+    }
+  };
+
   /* ── drag & drop priority ── */
   const onDragStart = (e, index) => {
     setDragging(index);
@@ -154,6 +177,13 @@ export default function InternshipList() {
         .il-tr:hover td{background:#faf9ff!important;}
         .il-tr.dragging{opacity:.4;}
         .il-inp:focus{border-color:#4f46e5!important;box-shadow:0 0 0 3px rgba(79,70,229,.08)!important;}
+        .il-switch{position:relative;display:inline-block;width:40px;height:22px;cursor:pointer;vertical-align:middle;}
+        .il-switch input{opacity:0;width:0;height:0;}
+        .il-slider{position:absolute;inset:0;background:#cbd5e1;border-radius:99px;transition:.25s;}
+        .il-slider:before{content:'';position:absolute;height:16px;width:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.25s;box-shadow:0 1px 3px rgba(0,0,0,.2);}
+        .il-switch input:checked + .il-slider{background:linear-gradient(135deg,#4f46e5,#7c3aed);}
+        .il-switch input:checked + .il-slider:before{transform:translateX(18px);}
+        .il-switch input:disabled + .il-slider{opacity:.5;cursor:not-allowed;}
       `}</style>
 
       <div className="il-root" style={{ background: '#f5f3ff', minHeight: '100vh', padding: 24 }}>
@@ -203,11 +233,11 @@ export default function InternshipList() {
               <colgroup>
                 <col style={{ width: 70 }} /><col style={{ width: 80 }} /><col style={{ width: 200 }} />
                 <col style={{ width: 130 }} /><col style={{ width: 160 }} /><col style={{ width: 100 }} />
-                <col style={{ width: 100 }} /><col style={{ width: 90 }} /><col style={{ width: 180 }} />
+                <col style={{ width: 100 }} /><col style={{ width: 90 }} /><col style={{ width: 100 }} /><col style={{ width: 180 }} />
               </colgroup>
               <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                 <tr style={{ background: 'linear-gradient(135deg,#4f46e5,#7c3aed)' }}>
-                  {['Priority', 'Image', 'Full Name', 'Short Name', 'Learnyst Name', 'Visibility', 'Best Seller', 'Syllabus', 'Action'].map(h => (
+                  {['Priority', 'Image', 'Full Name', 'Short Name', 'Learnyst Name', 'Visibility', 'Best Seller', 'Syllabus', 'Show/Hide', 'Action'].map(h => (
                     <th key={h} style={{
                       color: '#fff', fontSize: 11, fontWeight: 600, padding: '11px 12px',
                       textAlign: 'left', textTransform: 'uppercase', letterSpacing: '.3px',
@@ -218,7 +248,7 @@ export default function InternshipList() {
               </thead>
               <tbody>
                 {loading ? <Spinner /> : list.length === 0 ? (
-                  <tr><td colSpan={9} style={{ textAlign: 'center', color: '#94a3b8', padding: 36, fontSize: 13 }}>No internships found</td></tr>
+                  <tr><td colSpan={10} style={{ textAlign: 'center', color: '#94a3b8', padding: 36, fontSize: 13 }}>No internships found</td></tr>
                 ) : list.map((row, idx) => (
                   <tr key={row.id}
                     className={`il-tr${dragging === idx ? ' dragging' : ''}`}
@@ -276,6 +306,19 @@ export default function InternshipList() {
                     </td>
                     <td style={{ ...tdS, fontSize: 16, textAlign: 'center' }}>
                       {row.pdf_exists ? '✅' : '❌'}
+                    </td>
+                    <td style={{ ...tdS, textAlign: 'center' }}
+                      draggable={false}
+                      onDragStart={e => { e.preventDefault(); e.stopPropagation(); }}>
+                      <label className="il-switch" title={row.is_show == 1 ? 'Showing — click to hide' : 'Hidden — click to show'}>
+                        <input
+                          type="checkbox"
+                          checked={row.is_show == 1}
+                          disabled={toggling === row.id}
+                          onChange={() => toggleShow(row)}
+                        />
+                        <span className="il-slider" />
+                      </label>
                     </td>
                     <td style={{ ...tdS, whiteSpace: 'nowrap' }}>
                       <button

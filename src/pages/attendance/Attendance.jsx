@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 
 /* API: https://cit3.internshipstudio.com/admin/react-api/api/attendance/attendance.php */
 const API = '/api/attendance/attendance.php';
+const CLICKS_API = '/api/attendance/attendance_clicks.php';
 
 const thS = {
   color: '#fff', fontSize: 11, fontWeight: 600, padding: '11px 12px',
@@ -195,8 +196,212 @@ const navBtn = (disabled) => ({
   cursor: disabled ? 'not-allowed' : 'pointer', fontWeight: 700,
 });
 
+/* ════════ CLICK-LOG VIEW ════════ */
+const fmtDateTime = (d, t) => `${fmtDate(d)}${t ? ' · ' + t : ''}`;
+
+function ResultBadge({ value }) {
+  const ok = String(value).toUpperCase() === 'SUCCESS';
+  return (
+    <span style={{
+      padding: '3px 9px', borderRadius: 99, fontSize: 10.5, fontWeight: 700, whiteSpace: 'nowrap',
+      background: ok ? '#dcfce7' : '#fee2e2', color: ok ? '#15803d' : '#dc2626',
+    }}>{value || '—'}</span>
+  );
+}
+
+function ClickLog() {
+  /* draft filters (the inputs) */
+  const [q, setQ] = useState('');
+  const [dateMode, setDateMode] = useState('all');   // all | single | range
+  const [date, setDate] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [outcome, setOutcome] = useState('all');     // all | success | failed
+
+  /* committed filters (what was actually searched) */
+  const [committed, setCommitted] = useState({ q: '', dateMode: 'all', date: '', from: '', to: '', outcome: 'all' });
+  const [page, setPage] = useState(1);
+  const PER_PAGE = 50;
+
+  const [data, setData] = useState({ records: [], total: 0, shown_total: 0, total_pages: 1, truncated: false, source: '' });
+  const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+
+  /* map a committed-filter object to the query params the API expects */
+  const buildParams = useCallback((c) => {
+    const p = { outcome: c.outcome, phase: 'result' };
+    if (c.q.trim()) p.q = c.q.trim();
+    if (c.dateMode === 'single' && c.date) p.date = c.date;
+    if (c.dateMode === 'range') { if (c.from) p.date_from = c.from; if (c.to) p.date_to = c.to; }
+    return p;
+  }, []);
+
+  const fetchPage = useCallback((c, p) => {
+    setLoading(true);
+    api.get(CLICKS_API, { params: { action: 'search', ...buildParams(c), page: p, per_page: PER_PAGE } })
+      .then(r => {
+        const d = r.data?.data;
+        if (!d) { toast.error(r.data?.message || 'Failed to load log'); return; }
+        setData(d);
+      })
+      .catch(() => toast.error('Failed to load click log'))
+      .finally(() => setLoading(false));
+  }, [buildParams]);
+
+  useEffect(() => { fetchPage(committed, page); }, [committed, page, fetchPage]);
+
+  const runSearch = () => {
+    if (dateMode === 'range' && from && to && from > to) { toast.error('“From” date is after “To” date'); return; }
+    setPage(1);
+    setCommitted({ q, dateMode, date, from, to, outcome });
+  };
+  const resetSearch = () => {
+    setQ(''); setDateMode('all'); setDate(''); setFrom(''); setTo(''); setOutcome('all');
+    setPage(1);
+    setCommitted({ q: '', dateMode: 'all', date: '', from: '', to: '', outcome: 'all' });
+  };
+
+  const exportCSV = async () => {
+    setExporting(true);
+    const t = toast.loading('Preparing CSV…');
+    try {
+      const res = await api.get(CLICKS_API, { params: { action: 'export', ...buildParams(committed) }, responseType: 'blob' });
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `attendance_clicks_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      toast.success('CSV downloaded', { id: t });
+    } catch { toast.error('Export failed', { id: t }); }
+    finally { setExporting(false); }
+  };
+
+  const inp = { border: '1.5px solid #e2e8f0', borderRadius: 8, padding: '8px 11px', fontSize: 12.5, outline: 'none', color: '#1e293b', background: '#fff', fontFamily: 'inherit' };
+  const totalPages = data.total_pages || 1;
+
+  return (
+    <>
+      {/* FILTER BAR */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', flexShrink: 0 }}>
+        <div>
+          <label style={lblS}>Email / User ID / Name</label>
+          <input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && runSearch()}
+            placeholder="e.g. a@b.com or 3268725" style={{ ...inp, width: 250 }} />
+        </div>
+
+        <div>
+          <label style={lblS}>Date</label>
+          <select value={dateMode} onChange={e => setDateMode(e.target.value)} style={{ ...inp, cursor: 'pointer' }}>
+            <option value="all">All dates</option>
+            <option value="single">Single date</option>
+            <option value="range">Date range</option>
+          </select>
+        </div>
+        {dateMode === 'single' && (
+          <div><label style={lblS}>On</label><input type="date" value={date} onChange={e => setDate(e.target.value)} style={inp} /></div>
+        )}
+        {dateMode === 'range' && (
+          <>
+            <div><label style={lblS}>From</label><input type="date" value={from} onChange={e => setFrom(e.target.value)} style={inp} /></div>
+            <div><label style={lblS}>To</label><input type="date" value={to} onChange={e => setTo(e.target.value)} style={inp} /></div>
+          </>
+        )}
+
+        <div>
+          <label style={lblS}>Outcome</label>
+          <select value={outcome} onChange={e => setOutcome(e.target.value)} style={{ ...inp, cursor: 'pointer' }}>
+            <option value="all">All</option>
+            <option value="success">Success</option>
+            <option value="failed">Failed</option>
+          </select>
+        </div>
+
+        <button onClick={runSearch} style={{ ...inp, background: '#4f46e5', color: '#fff', fontWeight: 700, cursor: 'pointer', border: 'none' }}>🔍 Search</button>
+        <button onClick={resetSearch} style={{ ...inp, background: '#f1f5f9', color: '#64748b', fontWeight: 600, cursor: 'pointer' }}>Reset</button>
+        <button onClick={exportCSV} disabled={exporting}
+          style={{ ...inp, background: '#ecfdf5', color: '#15803d', border: '1.5px solid #a7f3d0', fontWeight: 700, cursor: exporting ? 'wait' : 'pointer' }}>
+          {exporting ? '⏳ Exporting…' : '⬇️ Export CSV'}
+        </button>
+      </div>
+
+      {/* count line */}
+      <div style={{ fontSize: 12, color: '#64748b', flexShrink: 0 }}>
+        <strong style={{ color: '#4f46e5' }}>{data.total?.toLocaleString('en-IN')}</strong> matching record{data.total === 1 ? '' : 's'}
+        {data.truncated && (
+          <span style={{ color: '#b45309', marginLeft: 8 }}>
+            · showing newest {data.cap?.toLocaleString('en-IN')} — narrow the filter to page through older ones
+          </span>
+        )}
+      </div>
+
+      {/* TABLE */}
+      <div style={{ flex: 1, minHeight: 0, background: '#fff', borderRadius: 12, border: '1.5px solid #ede9fe',
+        boxShadow: '0 1px 8px rgba(79,70,229,.05)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1100 }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
+              <tr style={{ background: 'linear-gradient(135deg,#4f46e5,#7c3aed)' }}>
+                {['Date / Time', 'User ID', 'Name', 'Email', 'Internship ID', 'Outcome', 'Note', 'Chars', 'IP', 'Device'].map(h => <th key={h} style={thS}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={10} style={{ textAlign: 'center', padding: 48 }}>
+                  <div style={{ display: 'inline-block', width: 28, height: 28, border: '3px solid #ede9fe', borderTop: '3px solid #4f46e5', borderRadius: '50%', animation: 'at_spin .7s linear infinite' }} />
+                </td></tr>
+              ) : data.records.length === 0 ? (
+                <tr><td colSpan={10} style={{ textAlign: 'center', color: '#94a3b8', padding: 40, fontSize: 13 }}>No matching log records</td></tr>
+              ) : data.records.map((r, i) => (
+                <tr key={`${r.click_id}_${i}`} className="at-tr">
+                  <td style={{ ...tdS, whiteSpace: 'nowrap' }}>{fmtDateTime(r.date, r.time)}</td>
+                  <td style={{ ...tdS, color: '#4f46e5', fontWeight: 600 }}>{r.uid || '—'}</td>
+                  <td style={{ ...tdS, fontWeight: 600, color: '#1e293b', whiteSpace: 'nowrap' }}>{r.name || '—'}</td>
+                  <td style={{ ...tdS, color: '#4f46e5', fontSize: 11.5 }}>{r.email || '—'}</td>
+                  <td style={tdS}>{r.iid || '—'}</td>
+                  <td style={tdS}><ResultBadge value={r.result} /></td>
+                  <td style={{ ...tdS, maxWidth: 280 }}>
+                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.note}>{r.note || '—'}</div>
+                    {r.api_msg && String(r.result).toUpperCase() !== 'SUCCESS' && (
+                      <div style={{ fontSize: 10.5, color: '#dc2626' }} title={r.api_msg}>{r.api_msg}</div>
+                    )}
+                  </td>
+                  <td style={tdS}>{r.note_len || '0'}</td>
+                  <td style={{ ...tdS, whiteSpace: 'nowrap', fontSize: 11.5 }}>{r.ip || '—'}</td>
+                  <td style={{ ...tdS, maxWidth: 220 }}>
+                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11 }} title={r.ua}>{r.ua || '—'}</div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* pagination */}
+        {!loading && totalPages > 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, padding: '10px 14px', borderTop: '1px solid #f1f5f9', flexShrink: 0 }}>
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1} style={pgBtn(page <= 1)}>‹ Prev</button>
+            <span style={{ fontSize: 12, color: '#64748b' }}>Page <strong>{page}</strong> of {totalPages}</span>
+            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages} style={pgBtn(page >= totalPages)}>Next ›</button>
+          </div>
+        )}
+      </div>
+
+      {data.source && (
+        <div style={{ fontSize: 10.5, color: '#cbd5e1', flexShrink: 0 }}>log: {data.source}</div>
+      )}
+    </>
+  );
+}
+const lblS = { display: 'block', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.3px', marginBottom: 4 };
+const pgBtn = (disabled) => ({
+  padding: '6px 12px', borderRadius: 7, border: '1.5px solid #e2e8f0', fontSize: 12, fontWeight: 600,
+  background: disabled ? '#f8fafc' : '#fff', color: disabled ? '#cbd5e1' : '#4f46e5', cursor: disabled ? 'not-allowed' : 'pointer',
+});
+
 /* ════════ PAGE ════════ */
 export default function Attendance() {
+  const [tab, setTab] = useState('tracker');   // tracker | clicks
   const [rows,        setRows]        = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [searchInput, setSearchInput] = useState('');
@@ -260,12 +465,29 @@ export default function Attendance() {
         {/* HEADER */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <div style={{ fontSize: 17, fontWeight: 800, color: '#1e293b' }}>📅 Attendance</div>
-          <span style={{ fontSize: 12.5, color: '#64748b', fontWeight: 600 }}>
-            {searched ? 'Search results' : 'Recent 15 records'}: <strong style={{ color: '#4f46e5' }}>{rows.length}</strong>
-          </span>
+          {tab === 'tracker' && (
+            <span style={{ fontSize: 12.5, color: '#64748b', fontWeight: 600 }}>
+              {searched ? 'Search results' : 'Recent 15 records'}: <strong style={{ color: '#4f46e5' }}>{rows.length}</strong>
+            </span>
+          )}
         </div>
 
+        {/* TABS */}
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0, borderBottom: '1.5px solid #ede9fe' }}>
+          {[['tracker', '📊 Attendance Tracker'], ['clicks', '🧾 Click Log']].map(([key, label]) => (
+            <button key={key} onClick={() => setTab(key)} style={{
+              border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              padding: '8px 14px', fontSize: 12.5, fontWeight: 700,
+              color: tab === key ? '#4f46e5' : '#94a3b8',
+              borderBottom: tab === key ? '2.5px solid #4f46e5' : '2.5px solid transparent', marginBottom: -1.5,
+            }}>{label}</button>
+          ))}
+        </div>
+
+        {tab === 'clicks' && <ClickLog />}
+
         {/* SEARCH */}
+        {tab === 'tracker' && (<>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 }}>
           <div style={{ display: 'flex', border: '1.5px solid #e2e8f0', borderRadius: 8,
             overflow: 'hidden', background: '#fff', flex: '0 0 320px' }}>
@@ -344,6 +566,7 @@ export default function Attendance() {
             </table>
           </div>
         </div>
+        </>)}
       </div>
 
       {calData && <CalendarModal data={calData} onClose={() => setCalData(null)} />}
