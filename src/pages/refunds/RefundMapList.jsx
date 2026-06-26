@@ -8,12 +8,24 @@ const ENDPOINT = '/api/refunds/refund_map.php';
 const STAGES = [
   { key: 'registered',             label: 'Registered Students',   short: 'Registered',   icon: '🎫', color: '#4338ca', bg: '#eef2ff' },
   { key: 'attendance_qualified',   label: 'Attendance Qualified',  short: 'Attendance ✓', icon: '📅', color: '#0369a1', bg: '#e0f2fe' },
+  { key: 'assignment_submitted',   label: 'Assignment Submitted',  short: 'Assignments',  icon: '📝', color: '#0d9488', bg: '#ccfbf1' },
   { key: 'project_submitted',      label: 'Project Submitted',     short: 'Submitted',    icon: '📤', color: '#7c3aed', bg: '#f3e8ff' },
   { key: 'project_approved',       label: 'Project Approved',      short: 'Approved',     icon: '✅', color: '#b45309', bg: '#fef3c7' },
   { key: 'refund_claim_requested', label: 'Refund Claim Requested',short: 'Claim Req.',   icon: '🙋', color: '#be185d', bg: '#fce7f3' },
   { key: 'refund_done',            label: 'Refund Done',           short: 'Refunded',     icon: '💸', color: '#15803d', bg: '#dcfce7' },
 ];
 const STAGE_BY_KEY = Object.fromEntries(STAGES.map(s => [s.key, s]));
+
+/* The Assignment Submitted column is only relevant for batches starting on/after
+   this date (must match RM_ASSIGNMENT_GATE_FROM in refund_map.php). It's shown
+   only when the selected batch filter is such a batch; otherwise it's hidden and
+   the funnel goes Attendance Qualified → Project Submitted directly. */
+const ASSIGNMENT_GATE_FROM = new Date('2026-06-23T00:00:00');
+const parseBatchStart = (b) => {
+  if (!b) return null;
+  const d = new Date(String(b).replace(/(\d+)(st|nd|rd|th)/i, '$1'));
+  return isNaN(d.getTime()) ? null : d;
+};
 
 /* ─── helpers ─── */
 const fmtNum = n => (Number(n) || 0).toLocaleString('en-IN');
@@ -549,6 +561,19 @@ export default function RefundMapList() {
   const [sortDir, setSortDir] = useState('asc');
 
   const [modal, setModal] = useState(null); // { batch, stage }
+
+  /* Show the Assignment Submitted column only when a batch starting on/after
+     the gate date is selected; otherwise hide it (Attendance → Project directly). */
+  const showAssignmentCol = useMemo(() => {
+    const d = parseBatchStart(batch);
+    return !!(d && d >= ASSIGNMENT_GATE_FROM);
+  }, [batch]);
+  const visibleStages = useMemo(
+    () => showAssignmentCol ? STAGES : STAGES.filter(s => s.key !== 'assignment_submitted'),
+    [showAssignmentCol]
+  );
+  const colCount = visibleStages.length + 2; // # + Batch + stages
+
   const debounceRef = useRef(null);
   const filterRef = useRef(null);
   const [stickyTop, setStickyTop] = useState(146); // navbar (62) + filter bar height
@@ -627,8 +652,8 @@ export default function RefundMapList() {
       const all = r.data.data?.rows || [];
       if (!all.length) { toast.error('No data to export', { id: t }); return; }
       downloadCSV(
-        ['Batch', 'Batch Start', ...STAGES.map(s => s.label)],
-        all.map(g => [g.batch, g.batch_start, ...STAGES.map(s => g[s.key])]),
+        ['Batch', 'Batch Start', ...visibleStages.map(s => s.label)],
+        all.map(g => [g.batch, g.batch_start, ...visibleStages.map(s => g[s.key])]),
         `refund_funnel_map_${new Date().toISOString().slice(0, 10)}.csv`,
       );
       toast.success(`Exported ${all.length.toLocaleString('en-IN')} batch row${all.length > 1 ? 's' : ''}`, { id: t });
@@ -751,7 +776,7 @@ export default function RefundMapList() {
 
           {/* Row 2 — all funnel stages in one row */}
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 6 }}>
-            {STAGES.map((s, i) => (
+            {visibleStages.map((s, i) => (
               <div key={s.key} style={{
                 flex: '1 1 0', minWidth: 130,
                 display: 'flex', alignItems: 'flex-start', gap: 8, padding: '2px 12px',
@@ -852,7 +877,7 @@ export default function RefundMapList() {
                   <th style={{ ...thS, textAlign: 'left' }}>#</th>
                   <th style={{ ...thS, textAlign: 'left', cursor: 'pointer', userSelect: 'none' }}
                     onClick={() => handleSort('batch')}>Batch{sortArrow('batch')}</th>
-                  {STAGES.map(s => (
+                  {visibleStages.map(s => (
                     <th key={s.key} style={{ ...thS, textAlign: 'center', cursor: 'pointer', userSelect: 'none' }}
                       onClick={() => handleSort(s.key)}>{s.label}{sortArrow(s.key)}</th>
                   ))}
@@ -860,12 +885,12 @@ export default function RefundMapList() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: 48 }}>
+                  <tr><td colSpan={colCount} style={{ textAlign: 'center', padding: 48 }}>
                     <div className="rml-spin" style={{ margin: '0 auto 10px' }} />
                     <div style={{ fontSize: 13, color: '#6b8f8a' }}>Computing funnel…</div>
                   </td></tr>
                 ) : !rows.length ? (
-                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: 60, color: '#6b8f8a' }}>
+                  <tr><td colSpan={colCount} style={{ textAlign: 'center', padding: 60, color: '#6b8f8a' }}>
                     <div style={{ fontSize: 44, opacity: .3 }}>🪙</div>
                     <div style={{ fontWeight: 600, fontSize: 13, marginTop: 8 }}>No refund-eligible batches found</div>
                     <div style={{ fontSize: 12, marginTop: 4 }}>Try adjusting your filters</div>
@@ -879,7 +904,7 @@ export default function RefundMapList() {
                         Starts {fmtDate(row.batch_start)}
                       </div>
                     </td>
-                    {STAGES.map(s => <CountCell key={s.key} row={row} st={s} />)}
+                    {visibleStages.map(s => <CountCell key={s.key} row={row} st={s} />)}
                   </tr>
                 ))}
               </tbody>

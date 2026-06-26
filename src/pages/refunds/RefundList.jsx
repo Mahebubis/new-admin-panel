@@ -1463,8 +1463,10 @@ export default function RefundList() {
   const [batch,        setBatch]        = useState('');
   const [hasVideo,     setHasVideo]     = useState(false);
   const [resubmitted,  setResubmitted]  = useState(false);
+  const [assignment,   setAssignment]   = useState(''); // '' | 'submitted' | 'both'
   const [loading,      setLoading]      = useState(true);
   const [actionLoading,setActionLoading]= useState(false);
+  const [downloading,  setDownloading]  = useState(false);
   const jumpRef = useRef(null);
 
   /* modals */
@@ -1481,7 +1483,8 @@ export default function RefundList() {
       const res = await api.get('/api/refunds/list.php', {
         params: { page, per_page: perPage, search, status, batch,
           has_video: hasVideo ? 1 : 0,
-          resubmitted: resubmitted ? 1 : 0 }
+          resubmitted: resubmitted ? 1 : 0,
+          assignment }
       });
       if (res.data.success) {
         const d = res.data.data;
@@ -1492,7 +1495,7 @@ export default function RefundList() {
         if (d.batches) setBatches(d.batches);
       }
     } catch {} finally { setLoading(false); }
-  }, [page, perPage, search, status, batch, hasVideo, resubmitted]);
+  }, [page, perPage, search, status, batch, hasVideo, resubmitted, assignment]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -1671,7 +1674,35 @@ export default function RefundList() {
   };
 
   const doSearch  = () => { setSearch(searchInput); setPage(1); };
-  const doClear   = () => { setSearchInput(''); setSearch(''); setStatus(''); setBatch(''); setHasVideo(false); setResubmitted(false); setPage(1); };
+  const doClear   = () => { setSearchInput(''); setSearch(''); setStatus(''); setBatch(''); setHasVideo(false); setResubmitted(false); setAssignment(''); setPage(1); };
+
+  /* ── CSV export — downloads ALL rows matching the current filters ── */
+  const downloadCsv = async () => {
+    if (downloading) return;
+    setDownloading(true);
+    const t = toast.loading('Preparing CSV…');
+    try {
+      const res = await api.get('/api/refunds/list.php', {
+        params: { action: 'download_csv', search, status, batch,
+          has_video: hasVideo ? 1 : 0, resubmitted: resubmitted ? 1 : 0, assignment },
+        responseType: 'blob',
+        timeout: 0,
+      });
+      const url  = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement('a');
+      link.href  = url;
+      link.setAttribute('download', `refund_claims_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success('CSV download started', { id: t });
+    } catch {
+      toast.error('Download failed', { id: t });
+    } finally {
+      setDownloading(false);
+    }
+  };
   const jumpToPage = () => {
     const v = parseInt(jumpRef.current?.value);
     if (v >= 1 && v <= totalPages) setPage(v); else toast.error('Invalid page');
@@ -1783,6 +1814,19 @@ export default function RefundList() {
                 {c.label}: {(c.count || 0).toLocaleString()}
               </button>
             ))}
+            {/* ── assignment-submission filters (toggle, independent of status) ── */}
+            <button
+              className={`rl-chip${assignment === 'submitted' ? ' active' : ''}`}
+              style={assignment === 'submitted' ? { background: '#0891b2', color: '#fff' } : { color: '#0891b2' }}
+              onClick={() => { setAssignment(a => a === 'submitted' ? '' : 'submitted'); setPage(1); }}>
+              Assignment Submitted: {(stats.assignment_submitted || 0).toLocaleString()}
+            </button>
+            <button
+              className={`rl-chip${assignment === 'both' ? ' active' : ''}`}
+              style={assignment === 'both' ? { background: '#0d9488', color: '#fff' } : { color: '#0d9488' }}
+              onClick={() => { setAssignment(a => a === 'both' ? '' : 'both'); setPage(1); }}>
+              Both Assignments: {(stats.assignment_both || 0).toLocaleString()}
+            </button>
           </div>
         </div>
 
@@ -1832,6 +1876,11 @@ export default function RefundList() {
           </label>
           <button className="rl-btn-p" onClick={doSearch}><Ico d={P.search} size={12} /> Search</button>
           <button className="rl-btn-o" onClick={doClear}><Ico d={P.x} size={12} /> Clear</button>
+          <button className="rl-btn-p" onClick={downloadCsv} disabled={downloading}
+            style={{ marginLeft: 'auto', background: '#10b981',
+              opacity: downloading ? 0.6 : 1, cursor: downloading ? 'not-allowed' : 'pointer' }}>
+            <Ico d={P.down} size={12} /> {downloading ? 'Preparing…' : 'Download CSV'}
+          </button>
         </div>
 
         {/* ── TABLE ── */}
