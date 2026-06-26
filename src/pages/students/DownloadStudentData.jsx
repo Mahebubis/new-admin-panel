@@ -39,6 +39,7 @@ const dash = v => v ? v : <span style={{ color:'#cbd5e1' }}>—</span>;
 export default function SimplifiedCompleteData() {
   const [data,        setData]        = useState([]);
   const [total,       setTotal]       = useState(0);
+  const [purchaseCount, setPurchaseCount] = useState(0);
   const [page,        setPage]        = useState(1);
   const [search,      setSearch]      = useState('');
   const [searchInput, setSearchInput] = useState('');
@@ -69,6 +70,7 @@ export default function SimplifiedCompleteData() {
       if (res.data.success) {
         setData(res.data.data?.students || []);
         setTotal(res.data.data?.total   || 0);
+        setPurchaseCount(res.data.data?.purchase_count || 0);
       }
     } catch (e) {
       // silently swallow cancellations (StrictMode + filter-change races)
@@ -194,6 +196,7 @@ export default function SimplifiedCompleteData() {
         .sd-header{ flex-shrink:0; background:#fff; border-bottom:1.5px solid #e2e8f0; padding:10px 20px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
         .sd-title { font-size:15px; font-weight:700; color:#1e293b; letter-spacing:-.3px; white-space:nowrap; display:flex; align-items:center; gap:7px; }
         .sd-total { background:#ede9fe; color:#5b21b6; font-size:10.5px; font-weight:700; padding:2px 9px; border-radius:20px; white-space:nowrap; }
+        .sd-purchase { background:#dcfce7; color:#15803d; font-size:10.5px; font-weight:700; padding:2px 9px; border-radius:20px; white-space:nowrap; border:1px solid #bbf7d0; }
         .sd-filters{ display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap; }
         .sd-fg    { display:flex; flex-direction:column; gap:3px; }
         .sd-flabel{ font-size:9.5px; font-weight:600; color:#94a3b8; text-transform:uppercase; letter-spacing:.4px; }
@@ -259,6 +262,7 @@ export default function SimplifiedCompleteData() {
             </svg>
             Simplified Complete Data
             {!loading && <span className="sd-total">{total.toLocaleString()} records</span>}
+            {!loading && <span className="sd-purchase">🛒 {purchaseCount.toLocaleString()} purchases</span>}
           </div>
 
           {/* Date filters */}

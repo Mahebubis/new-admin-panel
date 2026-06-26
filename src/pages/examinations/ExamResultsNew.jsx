@@ -120,6 +120,7 @@ function ConfirmDel({ row, onOk, onCancel }) {
 export default function ExamResultsNew() {
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
+  const [purchaseCount, setPurchaseCount] = useState(0);
   const [allRows, setAllRows] = useState([]);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -147,6 +148,7 @@ export default function ExamResultsNew() {
         if (res.data.status === 'success') {
           setRows(res.data.data || []);
           setTotal(res.data.total || 0);
+          setPurchaseCount(res.data.purchase_total || 0);
         }
       })
       .catch(err => { if (err?.name !== 'CanceledError' && err?.name !== 'AbortError') toast.error('Failed to load'); })
@@ -276,6 +278,13 @@ export default function ExamResultsNew() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ fontSize: 12.5, color: '#64748b', fontWeight: 600 }}>
               Count: <strong style={{ color: '#4f46e5' }}>{total}</strong>
+            </span>
+            <span style={{
+              fontSize: 12, color: '#15803d', fontWeight: 700,
+              background: '#dcfce7', border: '1px solid #bbf7d0',
+              borderRadius: 8, padding: '4px 10px'
+            }}>
+              🛒 Purchase: {purchaseCount}
             </span>
             <button onClick={downloadCSV}
               style={{
