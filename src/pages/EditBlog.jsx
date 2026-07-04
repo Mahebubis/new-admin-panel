@@ -4,7 +4,9 @@ import toast from 'react-hot-toast';
 import { Helmet } from "react-helmet-async";
 
 const BLOG_API = 'https://dashboard.internshipstudio.com/api/post_blogs.php';
-const TINYMCE_KEY = '7hiyhzodceu5a2ryvye4726d6r51qdwkt67osjnafjqs9vrf';
+/* Self-hosted TinyMCE (served from public/tinymce). No cloud API key → no
+   domain-approval lock, so the editor stays editable on production too. */
+const TINYMCE_SRC = '/tinymce/tinymce.min.js';
 
 const CATEGORIES = [
   'Latest Articles', 'Internship Tips', 'Resume Writing Tips',
@@ -79,6 +81,9 @@ export default function EditBlog() {
 
       window.tinymce.init({
         selector: '#tinymce-editor-edit',
+        license_key: 'gpl',        // self-hosted (GPL) build — no cloud key needed
+        base_url: '/tinymce',      // resolve skins/plugins/themes from the vendored copy
+        suffix: '.min',            // load the .min.js / .min.css assets we shipped
         plugins: 'lists advlist link image table code emoticons fullscreen',
         menubar: false,
         height: '100%',
@@ -123,7 +128,7 @@ export default function EditBlog() {
     } else {
       // Load TinyMCE script first
       const script = document.createElement('script');
-      script.src = `https://cdn.tiny.cloud/1/${TINYMCE_KEY}/tinymce/7/tinymce.min.js`;
+      script.src = TINYMCE_SRC;
       script.referrerPolicy = 'origin';
       script.onload = () => setTimeout(doInit, 100);
       document.head.appendChild(script);

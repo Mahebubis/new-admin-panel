@@ -368,9 +368,12 @@ export default function NetcoreBehaviour() {
   }
 
   /* ══════════ FILTER ACTIONS ══════════ */
-  /* auto-select granularity: hour for today/yesterday, day for everything else */
-  const defaultGranularity = (f, fd, td) =>
-    (f === 'today' || f === 'yesterday') && !(fd && td) ? 'hour' : 'day';
+  /* auto-select granularity: hour for a single day (today/yesterday preset, or a
+     custom from==to range), day for everything else. */
+  const defaultGranularity = (f, fd, td) => {
+    if (fd && td) return fd === td ? 'hour' : 'day';
+    return (f === 'today' || f === 'yesterday') ? 'hour' : 'day';
+  };
 
   const applyPreset = (f, label) => {
     setFilter(f); setFilterLabel(label); setFromDate(''); setToDate('');
@@ -834,7 +837,8 @@ export default function NetcoreBehaviour() {
               if (filter === '30days') return 30;
               return 1;
             })();
-            const isSingleDay = (filter === 'today' || filter === 'yesterday') && !(fromDate && toDate);
+            const isSingleDay = ((filter === 'today' || filter === 'yesterday') && !(fromDate && toDate))
+                             || (fromDate && toDate && fromDate === toDate);
             const showHour  = isSingleDay;
             const showDay   = !isSingleDay && rangeDays >= 2;
             const showWeek  = rangeDays >= 7;

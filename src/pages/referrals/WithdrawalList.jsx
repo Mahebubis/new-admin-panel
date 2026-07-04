@@ -217,7 +217,7 @@
 //         .c-upi   { width: 175px; }
 //         .c-amt   { width: 80px; }
 //         .c-stat  { width: 110px; }
-//         .c-proof { width: 80px; }
+//         .c-proof { width: 100px; }
 //         .c-act   { width: 205px; }
 //         .c-email { width: 190px; }
 //         .c-date  { width: 145px; }
@@ -571,6 +571,7 @@ export default function WithdrawalList() {
   const [endDate,     setEndDate]     = useState('');
   const [loading,     setLoading]     = useState(true);
   const [updating,    setUpdating]    = useState({});
+  const [uploadingProof, setUploadingProof] = useState({});
   const [proofModal,  setProofModal]  = useState(null);
   const [upiModal,    setUpiModal]    = useState(null);
   const navigate = useNavigate();
@@ -606,6 +607,35 @@ export default function WithdrawalList() {
       toast.error('Failed to update status');
     } finally {
       setUpdating(prev => { const n = { ...prev }; delete n[id]; return n; });
+    }
+  };
+
+  /* ── upload / replace a withdrawal's payment proof ── */
+  const uploadProof = async (id, file) => {
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { toast.error('File too large (max 5MB)'); return; }
+    setUploadingProof(prev => ({ ...prev, [id]: true }));
+    try {
+      const fd = new FormData();
+      fd.append('id', id);
+      fd.append('proof', file);
+      const res = await api.post('/api/referrals/upload-withdrawal-proof.php', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const url = res.data?.data?.url || res.data?.data?.transaction_screenshot;
+      if (res.data?.success && url) {
+        setData(prev => prev.map(r =>
+          (r.withdrawal_id === id || r.id === id)
+            ? { ...r, transaction_screenshot: url, proof: url } : r
+        ));
+        toast.success('Proof uploaded');
+      } else {
+        toast.error(res.data?.message || 'Upload failed');
+      }
+    } catch (e) {
+      toast.error(e?.response?.data?.message || 'Upload failed');
+    } finally {
+      setUploadingProof(prev => { const n = { ...prev }; delete n[id]; return n; });
     }
   };
 
@@ -676,7 +706,7 @@ export default function WithdrawalList() {
         .c-upi   { width: 175px; }
         .c-amt   { width: 80px; }
         .c-stat  { width: 110px; }
-        .c-proof { width: 80px; }
+        .c-proof { width: 100px; }
         .c-act   { width: 205px; }
         .c-email { width: 190px; }
         .c-date  { width: 145px; }
@@ -853,7 +883,23 @@ export default function WithdrawalList() {
 
                         {/* Proof */}
                         <td onClick={e => e.stopPropagation()}>
-                          <ProofCell url={row.transaction_screenshot || row.proof} onClick={() => setProofModal(row.transaction_screenshot || row.proof)} />
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <ProofCell url={row.transaction_screenshot || row.proof}
+                              onClick={() => (row.transaction_screenshot || row.proof) && setProofModal(row.transaction_screenshot || row.proof)} />
+                            <label
+                              title={(row.transaction_screenshot || row.proof) ? 'Replace proof' : 'Upload proof'}
+                              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                width: 24, height: 24, borderRadius: 6, flexShrink: 0,
+                                cursor: uploadingProof[id] ? 'wait' : 'pointer',
+                                background: '#ede9fe', color: '#6d28d9', border: '1px solid #ddd6fe' }}>
+                              <input type="file" accept="image/*,.pdf" style={{ display: 'none' }}
+                                disabled={!!uploadingProof[id]}
+                                onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) uploadProof(id, f); }} />
+                              {uploadingProof[id]
+                                ? <span className="mini-spin" />
+                                : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" /></svg>}
+                            </label>
+                          </div>
                         </td>
 
                         {/* Actions */}
