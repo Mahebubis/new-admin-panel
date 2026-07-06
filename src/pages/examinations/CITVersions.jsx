@@ -7,7 +7,8 @@ const PV_API = '/api/examinations/result_publish_version.php';   // per-version 
 const FH = { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } };
 const mk = obj => new URLSearchParams(obj);
 
-const PACKET = 500;   // students per network packet
+const PACKET = 2000;   // students per network packet (bulk-inserted server-side)
+const PUBLISH_PASSWORD = 'resultpublish';   // gate for publish / revert actions
 
 /* ─── shared styles ─── */
 const thS = {
@@ -58,6 +59,55 @@ function Confirm({ msg, onOk, onCancel }) {
               background: 'linear-gradient(135deg,#dc2626,#b91c1c)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer'
             }}>
               Yes, Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── password gate for publish / revert ─── */
+function PasswordModal({ title, onOk, onCancel }) {
+  const [pw, setPw]     = useState('');
+  const [err, setErr]   = useState('');
+  const [show, setShow] = useState(false);
+  const submit = () => {
+    if (pw === PUBLISH_PASSWORD) { onOk(); }
+    else { setErr('Incorrect password'); }
+  };
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', zIndex:1200,
+      display:'flex', alignItems:'center', justifyContent:'center', padding:16 }}>
+      <div style={{ background:'#fff', borderRadius:14, maxWidth:400, width:'100%',
+        boxShadow:'0 20px 60px rgba(0,0,0,.25)', overflow:'hidden' }}>
+        <div style={{ padding:'13px 18px', background:'linear-gradient(135deg,#4f46e5,#7c3aed)' }}>
+          <span style={{ fontSize:13.5, fontWeight:700, color:'#fff' }}>🔒 {title}</span>
+        </div>
+        <div style={{ padding:'18px 20px' }}>
+          <p style={{ fontSize:12.5, color:'#334155', marginBottom:12, lineHeight:1.5 }}>
+            Enter the password to continue.
+          </p>
+          <div style={{ position:'relative', marginBottom: err ? 6 : 16 }}>
+            <input type={show ? 'text' : 'password'} autoFocus value={pw}
+              onChange={e => { setPw(e.target.value); setErr(''); }}
+              onKeyDown={e => { if (e.key === 'Enter') submit(); }}
+              placeholder="Password"
+              style={{ ...inp, marginBottom: 0, paddingRight: 40 }} />
+            <button type="button" onClick={() => setShow(s => !s)}
+              title={show ? 'Hide password' : 'Show password'}
+              style={{ position:'absolute', right:6, top:'50%', transform:'translateY(-50%)',
+                background:'none', border:'none', cursor:'pointer', fontSize:15, lineHeight:1, padding:4 }}>
+              {show ? '🙈' : '👁️'}
+            </button>
+          </div>
+          {err && <div style={{ color:'#dc2626', fontSize:11.5, fontWeight:600, marginBottom:14 }}>{err}</div>}
+          <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
+            <button onClick={onCancel} style={{ padding:'8px 16px', border:'1.5px solid #e2e8f0',
+              background:'#f8fafc', color:'#475569', borderRadius:8, fontSize:12, cursor:'pointer' }}>Cancel</button>
+            <button onClick={submit} style={{ padding:'8px 18px', border:'none', borderRadius:8,
+              background:'linear-gradient(135deg,#4f46e5,#7c3aed)', color:'#fff', fontSize:12, fontWeight:700, cursor:'pointer' }}>
+              Continue
             </button>
           </div>
         </div>
@@ -252,16 +302,40 @@ const NEW_FIELDS = [
   { key: 'certificate', label: 'Certificate', type: 'date' },
   { key: 'Initial', label: 'Initial', type: 'text' },
 ];
+/* From/To Date are auto-managed (set to now on add) so they are NOT form inputs */
 const OLD_FIELDS = [
   { key: 'exam_name', label: 'Exam Name', type: 'text' },
-  { key: 'from_date', label: 'From Date', type: 'date' },
-  { key: 'to_date', label: 'To Date', type: 'date' },
   { key: 'result_date', label: 'Result Date', type: 'date' },
   { key: 'certificate_date', label: 'Certificate Date', type: 'date' },
   { key: 'exam_start_date', label: 'Exam Start Date', type: 'date' },
   { key: 'exam_end_date', label: 'Exam End Date', type: 'date' },
   { key: 'wa_community_initials', label: 'WA Community Initials', type: 'text' },
 ];
+
+/* date helpers for the Add popup (all YYYY-MM-DD) */
+const todayStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const addDays = (dateStr, days) => {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  if (isNaN(d.getTime())) return '';
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+/* next 2-letter WA initials: ER -> ES -> ... -> EZ -> FA -> ... -> ZZ -> AA */
+const nextInitials = (code) => {
+  const s = String(code || '').toUpperCase().replace(/[^A-Z]/g, '');
+  if (s.length < 2) return 'AA';
+  let a = s.charCodeAt(0) - 65;   // first letter 0-25
+  let b = s.charCodeAt(1) - 65;   // second letter 0-25
+  b += 1;
+  if (b > 25) { b = 0; a += 1; }
+  if (a > 25) { a = 0; }          // wrap ZZ -> AA
+  return String.fromCharCode(65 + a) + String.fromCharCode(65 + b);
+};
 
 /* ════════ MAIN COMPONENT ════════ */
 export default function CITVersions() {
@@ -273,6 +347,10 @@ export default function CITVersions() {
   const [saving, setSaving] = useState(false);
   const [confirm, setConfirm] = useState(null);  // { id, type:'new'|'old' }
   const [job, setJob] = useState(null);  // publish/revert progress job
+  const [pwGate, setPwGate] = useState(null);  // { title, run } password gate
+
+  /* ── require the password before running a publish/revert action ── */
+  const requirePassword = (title, run) => setPwGate({ title, run });
 
   /* ── fetch versions + per-version publish status ── */
   const loadStatuses = () =>
@@ -282,21 +360,33 @@ export default function CITVersions() {
 
   const fetchAll = () => {
     setLoading(true);
-    Promise.all([
-      api.get(API).then(res => {
-        if (res.data.status === 'success') {
-          setOldRows(res.data.old || []);
-        }
-      }).catch(() => toast.error('Failed to load')),
-      loadStatuses(),
-    ]).finally(() => setLoading(false));
+    // table renders as soon as the versions load — don't block it on the heavier status query
+    api.get(API)
+      .then(res => { if (res.data.status === 'success') setOldRows(res.data.old || []); })
+      .catch(() => toast.error('Failed to load'))
+      .finally(() => setLoading(false));
+    // badges (Published/skipped counts) fill in independently a moment later
+    loadStatuses();
   };
 
   useEffect(() => { fetchAll(); }, []);
 
   /* ── open modals ── */
   const openAdd = (type) => {
-    setForm(type === 'new' ? { ...emptyNew } : { ...emptyOld });
+    if (type === 'old') {
+      // latest old row = highest CIT number -> prefill next version + next WA initials
+      const latest = oldRows.reduce(
+        (best, r) => (citNum(r.exam_name) > citNum(best?.exam_name || '') ? r : best), null);
+      const nextNum = (latest ? citNum(latest.exam_name) : 0) + 1;
+      setForm({
+        ...emptyOld,
+        exam_name: `CIT ${nextNum}`,
+        wa_community_initials: nextInitials(latest?.wa_community_initials),
+        exam_start_date: todayStr(),   // default to today
+      });
+    } else {
+      setForm({ ...emptyNew });
+    }
     setModal({ type, mode: 'add' });
   };
   const openEdit = (type, row) => {
@@ -343,7 +433,15 @@ export default function CITVersions() {
   const downloadOld = (row) =>
     window.open(`/download/download_data.php?type=simplified_complete_data&version=${row.exam_name}`, '_blank');
 
-  const fieldChange = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const fieldChange = (k, v) => setForm(p => {
+    const next = { ...p, [k]: v };
+    // picking Result Date auto-fills Certificate (result+1) and Exam End (result-1)
+    if (k === 'result_date') {
+      next.certificate_date = addDays(v, 1);
+      next.exam_end_date     = addDays(v, -1);
+    }
+    return next;
+  });
 
   /* ══════════ PUBLISH (batched loop, 500/packet) ══════════ */
   const startPublish = async (cit_version) => {
@@ -357,7 +455,7 @@ export default function CITVersions() {
       // (do-while so a version with <500 users still runs one packet)
       while (true) {
         const r = await api.post(PV_API,
-          mk({ action: 'publish_batch', cit_version, offset, limit: PACKET, round: 1, batch_id }),
+          mk({ action: 'publish_batch', cit_version, offset, limit: PACKET, round: 1, batch_id, total }),
           { ...FH, timeout: 120000 });
         if (r.data.status !== 'success') throw new Error(r.data.message || 'Publish failed');
         const d = r.data.data;
@@ -545,7 +643,7 @@ export default function CITVersions() {
           </span>
           {skipped > 0 ? (
             <button title="Publish the skipped students"
-              onClick={() => startSkipped(row.exam_name, st.batch_id)}
+              onClick={() => requirePassword(`Publish skipped — ${row.exam_name}`, () => startSkipped(row.exam_name, st.batch_id))}
               style={{ ...btnBase, marginRight: 0, background: '#eef2ff', color: '#4f46e5', border: '1.5px solid #c7d2fe' }}>
               ⏭ {skipped.toLocaleString()} skipped
             </button>
@@ -559,7 +657,7 @@ export default function CITVersions() {
             </span>
           )}
           {num === revertableNum && (
-            <button onClick={() => startRevert(row.exam_name)}
+            <button onClick={() => requirePassword(`Revert — ${row.exam_name}`, () => startRevert(row.exam_name))}
               style={{ ...btnBase, marginRight: 0, background: '#fee2e2', color: '#dc2626', border: '1.5px solid #fecaca' }}>
               ↩️ Revert
             </button>
@@ -571,7 +669,7 @@ export default function CITVersions() {
     // 3) the single next-to-publish version -> Publish Result
     if (num === nextNum) {
       return (
-        <button onClick={() => startPublish(row.exam_name)}
+        <button onClick={() => requirePassword(`Publish Result — ${row.exam_name}`, () => startPublish(row.exam_name))}
           style={{
             ...btnBase, marginRight: 0, padding: '5px 14px', color: '#fff',
             background: 'linear-gradient(135deg,#4f46e5,#7c3aed)', border: 'none'
@@ -749,6 +847,15 @@ export default function CITVersions() {
           job={job}
           onClose={() => setJob(null)}
           onPublishSkipped={publishSkipped}
+        />
+      )}
+
+      {/* ── PASSWORD GATE (publish / revert) ── */}
+      {pwGate && (
+        <PasswordModal
+          title={pwGate.title}
+          onOk={() => { const fn = pwGate.run; setPwGate(null); fn(); }}
+          onCancel={() => setPwGate(null)}
         />
       )}
     </>
