@@ -349,6 +349,13 @@ export default function CITVersions() {
   const [job, setJob] = useState(null);  // publish/revert progress job
   const [pwGate, setPwGate] = useState(null);  // { title, run } password gate
 
+  /* rollover logs + future result dates */
+  const [futureDates, setFutureDates] = useState([]);
+  const [logs, setLogs] = useState([]);
+  const [dateModal, setDateModal] = useState(null);    // { mode:'add'|'edit', value, original }
+  const [dateSaving, setDateSaving] = useState(false);
+  const [dateConfirm, setDateConfirm] = useState(null); // date string pending delete
+
   /* ── require the password before running a publish/revert action ── */
   const requirePassword = (title, run) => setPwGate({ title, run });
 
@@ -356,6 +363,16 @@ export default function CITVersions() {
   const loadStatuses = () =>
     api.post(PV_API, mk({ action: 'all_status' }), FH)
       .then(r => { if (r.data.status === 'success') setStatuses(r.data.data || {}); })
+      .catch(() => { });
+
+  const loadFutureDates = () =>
+    api.post(API, mk({ action: 'get_future_dates' }), FH)
+      .then(r => { if (r.data.status === 'success') setFutureDates(r.data.dates || []); })
+      .catch(() => { });
+
+  const loadLogs = () =>
+    api.post(API, mk({ action: 'get_rollover_logs' }), FH)
+      .then(r => { if (r.data.status === 'success') setLogs(r.data.logs || []); })
       .catch(() => { });
 
   const fetchAll = () => {
@@ -367,6 +384,8 @@ export default function CITVersions() {
       .finally(() => setLoading(false));
     // badges (Published/skipped counts) fill in independently a moment later
     loadStatuses();
+    loadFutureDates();
+    loadLogs();
   };
 
   useEffect(() => { fetchAll(); }, []);
@@ -424,6 +443,35 @@ export default function CITVersions() {
         // refetch: deleting the latest resets the previous row's to_date + current version
         fetchAll();
       } else { toast.error(res.data.message || 'Failed'); }
+    } catch { toast.error('Error'); }
+  };
+
+  /* ── future result dates: add / edit / delete ── */
+  const saveDate = async () => {
+    const val = (dateModal.value || '').trim();
+    if (!val) { toast.error('Pick a date'); return; }
+    setDateSaving(true);
+    try {
+      const body = dateModal.mode === 'edit'
+        ? { action: 'update_future_date', old_date: dateModal.original, new_date: val }
+        : { action: 'add_future_date', date: val };
+      const r = await api.post(API, mk(body), FH);
+      if (r.data.status === 'success') {
+        toast.success(r.data.message);
+        setFutureDates(r.data.dates || []);
+        setDateModal(null);
+      } else { toast.error(r.data.message || 'Failed'); }
+    } catch { toast.error('Error'); }
+    finally { setDateSaving(false); }
+  };
+
+  const deleteDate = async () => {
+    const d = dateConfirm;
+    setDateConfirm(null);
+    try {
+      const r = await api.post(API, mk({ action: 'delete_future_date', date: d }), FH);
+      if (r.data.status === 'success') { toast.success(r.data.message); setFutureDates(r.data.dates || []); }
+      else { toast.error(r.data.message || 'Failed'); }
     } catch { toast.error('Error'); }
   };
 
@@ -811,6 +859,90 @@ export default function CITVersions() {
 
         {/* ── TWO TABLES ── */}
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {/* ── ROLLOVER LOGS (left) + FUTURE RESULT DATES (right) ── */}
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+
+            {/* LEFT: rollover logs */}
+            <div style={{
+              flex: '1 1 420px', minWidth: 320, background: '#fff', borderRadius: 12,
+              border: '1.5px solid #ede9fe', boxShadow: '0 1px 8px rgba(79,70,229,.05)', overflow: 'hidden'
+            }}>
+              <div style={{ padding: '10px 14px', borderBottom: '1.5px solid #ede9fe', fontSize: 13, fontWeight: 800, color: '#1e293b' }}>
+                🧾 CIT Rollover Logs
+              </div>
+              <div style={{ maxHeight: 260, overflowY: 'auto', overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
+                    <tr style={{ background: 'linear-gradient(135deg,#4f46e5,#7c3aed)' }}>
+                      {['CIT Version', 'Current Version', 'Result Date', 'WA Community', 'Refund Program', 'When'].map(h => <th key={h} style={thS}>{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {logs.length === 0 ? (
+                      <tr><td colSpan={6} style={{ textAlign: 'center', padding: 24, color: '#94a3b8', fontSize: 12 }}>No rollover logs yet</td></tr>
+                    ) : logs.map(l => {
+                      const on = l.refund_program === 'on';
+                      return (
+                        <tr key={l.id}>
+                          <td style={tdS}><b>{l.exam_name}</b></td>
+                          <td style={tdS}>{l.current_cit_version || '—'}</td>
+                          <td style={tdS}>{l.result_date}</td>
+                          <td style={tdS}>{l.wa_community_name || '—'}</td>
+                          <td style={tdS}>
+                            <span style={{
+                              padding: '2px 8px', borderRadius: 99, fontSize: 10, fontWeight: 800,
+                              background: on ? '#dcfce7' : '#f1f5f9', color: on ? '#15803d' : '#64748b'
+                            }}>
+                              {(l.refund_program || 'off')} · {on ? 'Refund' : 'Regular'}
+                            </span>
+                          </td>
+                          <td style={{ ...tdS, whiteSpace: 'nowrap' }}>{l.created_at}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* RIGHT: future result dates manager */}
+            <div style={{
+              flex: '1 1 320px', minWidth: 280, background: '#fff', borderRadius: 12,
+              border: '1.5px solid #ede9fe', boxShadow: '0 1px 8px rgba(79,70,229,.05)', overflow: 'hidden'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '1.5px solid #ede9fe' }}>
+                <span style={{ fontSize: 13, fontWeight: 800, color: '#1e293b' }}>📅 Future Result Dates</span>
+                <button onClick={() => setDateModal({ mode: 'add', value: '', original: '' })}
+                  style={{ padding: '6px 12px', border: 'none', borderRadius: 8, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', color: '#fff', background: 'linear-gradient(135deg,#4f46e5,#7c3aed)' }}>
+                  + Add Date
+                </button>
+              </div>
+              <div style={{ maxHeight: 260, overflowY: 'auto', padding: '8px 10px' }}>
+                {futureDates.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: 20, color: '#94a3b8', fontSize: 12 }}>No future result dates</div>
+                ) : futureDates.map((d, i) => (
+                  <div key={d} style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '7px 10px', borderRadius: 8, marginBottom: 6,
+                    background: i === 0 ? '#eef2ff' : '#f8fafc', border: '1px solid #eef2ff'
+                  }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'inline-flex', alignItems: 'center' }}>
+                      {i === 0 && <span style={{ fontSize: 9, fontWeight: 800, color: '#4f46e5', marginRight: 6, padding: '1px 6px', background: '#e0e7ff', borderRadius: 99 }}>NEXT</span>}
+                      {d}
+                    </span>
+                    <span style={{ whiteSpace: 'nowrap' }}>
+                      <button title="Edit" onClick={() => setDateModal({ mode: 'edit', value: d, original: d })}
+                        style={{ ...btnBase, background: '#fef9c3', color: '#b45309', border: '1.5px solid #fde68a' }}>✏️</button>
+                      <button title="Delete" onClick={() => setDateConfirm(d)}
+                        style={{ ...btnBase, marginRight: 0, background: '#fee2e2', color: '#dc2626', border: '1.5px solid #fecaca' }}>🗑</button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
           {renderTable(oldRows,
             ['Exam Name', 'From Date', 'To Date', 'Result Date', 'Certificate Date', 'Exam Start', 'Exam End', 'WA Initials'],
             'old', 'Add CIT Version (Old)',
@@ -856,6 +988,46 @@ export default function CITVersions() {
           title={pwGate.title}
           onOk={() => { const fn = pwGate.run; setPwGate(null); fn(); }}
           onCancel={() => setPwGate(null)}
+        />
+      )}
+
+      {/* ── ADD / EDIT FUTURE RESULT DATE ── */}
+      {dateModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 1000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+        }}>
+          <div style={{ background: '#fff', borderRadius: 14, width: '100%', maxWidth: 380, boxShadow: '0 20px 60px rgba(0,0,0,.25)', overflow: 'hidden' }}>
+            <div style={{ padding: '13px 18px', background: 'linear-gradient(135deg,#4f46e5,#7c3aed)' }}>
+              <span style={{ fontSize: 13.5, fontWeight: 700, color: '#fff' }}>
+                {dateModal.mode === 'edit' ? '✏️ Edit Result Date' : '➕ Add Result Date'}
+              </span>
+            </div>
+            <div style={{ padding: '18px 20px' }}>
+              <label style={{ display: 'block', fontSize: 10.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 4 }}>
+                Result Date
+              </label>
+              <input type="date" autoFocus value={dateModal.value}
+                onChange={e => setDateModal(m => ({ ...m, value: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter') saveDate(); }}
+                style={inp} />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
+                <button onClick={() => setDateModal(null)} style={{ padding: '8px 16px', border: '1.5px solid #e2e8f0', background: '#f8fafc', color: '#475569', borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>Cancel</button>
+                <button onClick={saveDate} disabled={dateSaving} style={{ padding: '8px 18px', border: 'none', borderRadius: 8, background: 'linear-gradient(135deg,#4f46e5,#7c3aed)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: dateSaving ? 'not-allowed' : 'pointer', opacity: dateSaving ? .7 : 1 }}>
+                  {dateSaving ? 'Saving...' : '💾 Save'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── CONFIRM DELETE FUTURE DATE ── */}
+      {dateConfirm && (
+        <Confirm
+          msg={`Delete result date ${dateConfirm}? This cannot be undone.`}
+          onOk={deleteDate}
+          onCancel={() => setDateConfirm(null)}
         />
       )}
     </>
