@@ -69,26 +69,30 @@ function Confirm({ msg, onOk, onCancel }) {
 
 /* ─── password gate for publish / revert ─── */
 function PasswordModal({ title, onOk, onCancel }) {
-  const [pw, setPw]     = useState('');
-  const [err, setErr]   = useState('');
+  const [pw, setPw] = useState('');
+  const [err, setErr] = useState('');
   const [show, setShow] = useState(false);
   const submit = () => {
     if (pw === PUBLISH_PASSWORD) { onOk(); }
     else { setErr('Incorrect password'); }
   };
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', zIndex:1200,
-      display:'flex', alignItems:'center', justifyContent:'center', padding:16 }}>
-      <div style={{ background:'#fff', borderRadius:14, maxWidth:400, width:'100%',
-        boxShadow:'0 20px 60px rgba(0,0,0,.25)', overflow:'hidden' }}>
-        <div style={{ padding:'13px 18px', background:'linear-gradient(135deg,#4f46e5,#7c3aed)' }}>
-          <span style={{ fontSize:13.5, fontWeight:700, color:'#fff' }}>🔒 {title}</span>
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 1200,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+    }}>
+      <div style={{
+        background: '#fff', borderRadius: 14, maxWidth: 400, width: '100%',
+        boxShadow: '0 20px 60px rgba(0,0,0,.25)', overflow: 'hidden'
+      }}>
+        <div style={{ padding: '13px 18px', background: 'linear-gradient(135deg,#4f46e5,#7c3aed)' }}>
+          <span style={{ fontSize: 13.5, fontWeight: 700, color: '#fff' }}>🔒 {title}</span>
         </div>
-        <div style={{ padding:'18px 20px' }}>
-          <p style={{ fontSize:12.5, color:'#334155', marginBottom:12, lineHeight:1.5 }}>
+        <div style={{ padding: '18px 20px' }}>
+          <p style={{ fontSize: 12.5, color: '#334155', marginBottom: 12, lineHeight: 1.5 }}>
             Enter the password to continue.
           </p>
-          <div style={{ position:'relative', marginBottom: err ? 6 : 16 }}>
+          <div style={{ position: 'relative', marginBottom: err ? 6 : 16 }}>
             <input type={show ? 'text' : 'password'} autoFocus value={pw}
               onChange={e => { setPw(e.target.value); setErr(''); }}
               onKeyDown={e => { if (e.key === 'Enter') submit(); }}
@@ -96,17 +100,23 @@ function PasswordModal({ title, onOk, onCancel }) {
               style={{ ...inp, marginBottom: 0, paddingRight: 40 }} />
             <button type="button" onClick={() => setShow(s => !s)}
               title={show ? 'Hide password' : 'Show password'}
-              style={{ position:'absolute', right:6, top:'50%', transform:'translateY(-50%)',
-                background:'none', border:'none', cursor:'pointer', fontSize:15, lineHeight:1, padding:4 }}>
+              style={{
+                position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
+                background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: 4
+              }}>
               {show ? '🙈' : '👁️'}
             </button>
           </div>
-          {err && <div style={{ color:'#dc2626', fontSize:11.5, fontWeight:600, marginBottom:14 }}>{err}</div>}
-          <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
-            <button onClick={onCancel} style={{ padding:'8px 16px', border:'1.5px solid #e2e8f0',
-              background:'#f8fafc', color:'#475569', borderRadius:8, fontSize:12, cursor:'pointer' }}>Cancel</button>
-            <button onClick={submit} style={{ padding:'8px 18px', border:'none', borderRadius:8,
-              background:'linear-gradient(135deg,#4f46e5,#7c3aed)', color:'#fff', fontSize:12, fontWeight:700, cursor:'pointer' }}>
+          {err && <div style={{ color: '#dc2626', fontSize: 11.5, fontWeight: 600, marginBottom: 14 }}>{err}</div>}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+            <button onClick={onCancel} style={{
+              padding: '8px 16px', border: '1.5px solid #e2e8f0',
+              background: '#f8fafc', color: '#475569', borderRadius: 8, fontSize: 12, cursor: 'pointer'
+            }}>Cancel</button>
+            <button onClick={submit} style={{
+              padding: '8px 18px', border: 'none', borderRadius: 8,
+              background: 'linear-gradient(135deg,#4f46e5,#7c3aed)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer'
+            }}>
               Continue
             </button>
           </div>
@@ -352,6 +362,7 @@ export default function CITVersions() {
   /* rollover logs + future result dates */
   const [futureDates, setFutureDates] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [curSettings, setCurSettings] = useState({});   // live settings.* shown in the dashboard strip
   const [dateModal, setDateModal] = useState(null);    // { mode:'add'|'edit', value, original }
   const [dateSaving, setDateSaving] = useState(false);
   const [dateConfirm, setDateConfirm] = useState(null); // date string pending delete
@@ -372,7 +383,12 @@ export default function CITVersions() {
 
   const loadLogs = () =>
     api.post(API, mk({ action: 'get_rollover_logs' }), FH)
-      .then(r => { if (r.data.status === 'success') setLogs(r.data.logs || []); })
+      .then(r => {
+        if (r.data.status === 'success') {
+          setLogs(r.data.logs || []);
+          setCurSettings(r.data.settings || {});
+        }
+      })
       .catch(() => { });
 
   const fetchAll = () => {
@@ -486,10 +502,20 @@ export default function CITVersions() {
     // picking Result Date auto-fills Certificate (result+1) and Exam End (result-1)
     if (k === 'result_date') {
       next.certificate_date = addDays(v, 1);
-      next.exam_end_date     = addDays(v, -1);
+      next.exam_end_date = addDays(v, -1);
     }
     return next;
   });
+
+  const formatDate = (date) => {
+  if (!date) return '—';
+
+  return new Date(date).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+};
 
   /* ══════════ PUBLISH (batched loop, 500/packet) ══════════ */
   const startPublish = async (cit_version) => {
@@ -860,12 +886,40 @@ export default function CITVersions() {
         {/* ── TWO TABLES ── */}
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
+          {/* ── LIVE SETTINGS DASHBOARD ── */}
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            {[
+              { label: 'Current CIT Version', value: curSettings.current_cit_version, icon: '🎓' },
+              { label: 'Result Date', value: curSettings.result_date, icon: '📅' },
+              { label: 'Refund Program', value: curSettings.refund_program, icon: '💸' },
+              { label: 'Next Result Date', value: futureDates[0], icon: '⏭' },
+            ].map(c => (
+              <div key={c.label} style={{
+                flex: '1 1 180px', minWidth: 160, background: '#fff', borderRadius: 12,
+                border: '1.5px solid #ede9fe', boxShadow: '0 1px 8px rgba(79,70,229,.05)', padding: '12px 14px'
+              }}>
+                <div style={{
+                  fontSize: 10, fontWeight: 800, color: '#94a3b8',
+                  textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 5
+                }}>
+                  {c.icon} {c.label}
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: c.value ? '#4f46e5' : '#cbd5e1' }}>
+                  {c.value || '—'}
+                </div>
+              </div>
+            ))}
+          </div>
+
           {/* ── ROLLOVER LOGS (left) + FUTURE RESULT DATES (right) ── */}
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
 
             {/* LEFT: rollover logs */}
+            {/* LEFT: rollover logs */}
             <div style={{
-              flex: '1 1 420px', minWidth: 320, background: '#fff', borderRadius: 12,
+              flex: 1,
+              minWidth: 0,
+              background: '#fff', borderRadius: 12,
               border: '1.5px solid #ede9fe', boxShadow: '0 1px 8px rgba(79,70,229,.05)', overflow: 'hidden'
             }}>
               <div style={{ padding: '10px 14px', borderBottom: '1.5px solid #ede9fe', fontSize: 13, fontWeight: 800, color: '#1e293b' }}>
@@ -875,12 +929,12 @@ export default function CITVersions() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                     <tr style={{ background: 'linear-gradient(135deg,#4f46e5,#7c3aed)' }}>
-                      {['CIT Version', 'Current Version', 'Result Date', 'WA Community', 'Refund Program', 'When'].map(h => <th key={h} style={thS}>{h}</th>)}
+                      {['CIT Version', 'Current Version', 'Result Date', 'Result Date (settings)', 'WA Community', 'Refund Program', 'When'].map(h => <th key={h} style={thS}>{h}</th>)}
                     </tr>
                   </thead>
                   <tbody>
                     {logs.length === 0 ? (
-                      <tr><td colSpan={6} style={{ textAlign: 'center', padding: 24, color: '#94a3b8', fontSize: 12 }}>No rollover logs yet</td></tr>
+                      <tr><td colSpan={7} style={{ textAlign: 'center', padding: 24, color: '#94a3b8', fontSize: 12 }}>No rollover logs yet</td></tr>
                     ) : logs.map(l => {
                       const on = l.refund_program === 'on';
                       return (
@@ -888,6 +942,7 @@ export default function CITVersions() {
                           <td style={tdS}><b>{l.exam_name}</b></td>
                           <td style={tdS}>{l.current_cit_version || '—'}</td>
                           <td style={tdS}>{l.result_date}</td>
+                          <td style={tdS}>{l.settings_result_date || '—'}</td>
                           <td style={tdS}>{l.wa_community_name || '—'}</td>
                           <td style={tdS}>
                             <span style={{
@@ -908,7 +963,9 @@ export default function CITVersions() {
 
             {/* RIGHT: future result dates manager */}
             <div style={{
-              flex: '1 1 320px', minWidth: 280, background: '#fff', borderRadius: 12,
+              width: 280,
+              flexShrink: 0,
+              background: '#fff', borderRadius: 12,
               border: '1.5px solid #ede9fe', boxShadow: '0 1px 8px rgba(79,70,229,.05)', overflow: 'hidden'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '1.5px solid #ede9fe' }}>
@@ -929,7 +986,8 @@ export default function CITVersions() {
                   }}>
                     <span style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'inline-flex', alignItems: 'center' }}>
                       {i === 0 && <span style={{ fontSize: 9, fontWeight: 800, color: '#4f46e5', marginRight: 6, padding: '1px 6px', background: '#e0e7ff', borderRadius: 99 }}>NEXT</span>}
-                      {d}
+                      {/* {d} */}
+                      {formatDate(d)}
                     </span>
                     <span style={{ whiteSpace: 'nowrap' }}>
                       <button title="Edit" onClick={() => setDateModal({ mode: 'edit', value: d, original: d })}

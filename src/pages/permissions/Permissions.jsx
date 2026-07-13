@@ -40,6 +40,7 @@ const EXTRA_SECTION_PERMISSIONS = {
     internship_simulation: 'Internship Simulation 2.2',
     problem_statement: 'Problem Statement',
     assignment_panel: 'Assignment Panel',
+    purchased_starter_kit: 'Purchased Starter Kit',
   },
 };
 

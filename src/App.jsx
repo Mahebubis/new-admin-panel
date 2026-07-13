@@ -208,6 +208,7 @@ import NetcoreSegmentCreate from './pages/netcore/NetcoreSegmentCreate';
 import NetcoreSegmentUsers from './pages/netcore/NetcoreSegmentUsers';
 import InternshipList from './pages/internships/InternshipList';
 import PurchasedInternships from './pages/internships/PurchasedInternships';
+import PurchasedStarterKit from './pages/internships/PurchasedStarterKit';
 import AllocateInternships from './pages/internships/AllocateInternships';
 import ProjectSubmission from './pages/internships/ProjectSubmission';
 import CheckPayments from './pages/internships/CheckPayments';
@@ -336,6 +337,7 @@ export default function App() {
         {/* Internships */}
         <Route path="internships" element={G('internship_list', <InternshipList />)} />
         <Route path="internships/purchased" element={G('purchased_internships', <PurchasedInternships />)} />
+        <Route path="internships/starter-kit" element={G('purchased_starter_kit', <PurchasedStarterKit />)} />
         <Route path="internships/allocate" element={G('allocate_internships', <AllocateInternships />)} />
         <Route path="internships/projects" element={G('project_submission', <ProjectSubmission />)} />
         <Route path="internships/payments" element={G('check_payments', <CheckPayments />)} />

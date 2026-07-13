@@ -1088,6 +1088,7 @@ const sidebarMenu = [
     key: 'internships', group: 'Internships', icon: 'fas fa-briefcase', items: [
       { text: 'Internship List', link: '/internships', icon: 'fas fa-list-check', perm: 'internship_list', exact: true },
       { text: 'Purchased Internships', link: '/internships/purchased', icon: 'fas fa-credit-card', perm: 'purchased_internships' },
+      { text: 'Purchased Starter Kit', link: '/internships/starter-kit', icon: 'fas fa-box-open', perm: 'purchased_starter_kit' },
       { text: 'Allocate Internships', link: '/internships/allocate', icon: 'fas fa-layer-group', perm: 'allocate_internships' },
       { text: 'Project Submission', link: '/internships/projects', icon: 'fas fa-file-circle-check', perm: 'project_submission' },
       { text: 'Check Payments', link: '/internships/payments', icon: 'fas fa-money-check-dollar', perm: 'check_payments' },
