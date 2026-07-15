@@ -35,6 +35,7 @@ const EXTRA_SECTION_PERMISSIONS = {
   'Examinations': {
     publish_result: 'Publish Result',
     publish_result_test: 'Publish Result (Test)',
+    'not-attempted-exam': 'Not Attempted Exam',
   },
   'Internships': {
     internship_simulation: 'Internship Simulation 2.2',

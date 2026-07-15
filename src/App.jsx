@@ -229,6 +229,7 @@ import BulkEmail from './pages/communication/BulkEmail';
 import ExamResults from './pages/examinations/ExamResults';
 import ExamNotGiven from './pages/examinations/ExamNotGiven';
 import CITVersions from './pages/examinations/CITVersions';
+import NotAttemptedExam from './pages/examinations/NotAttemptedExam';
 import FreeApplicants from './pages/examinations/FreeApplicants';
 import ExamResultsNew from './pages/examinations/ExamResultsNew';
 import ResultPublish from './pages/examinations/ResultPublish';
@@ -377,6 +378,7 @@ export default function App() {
         <Route path="exams/auto-submitted" element={G('auto_submitted_exams', <AutoSubmittedExams />)} />
         <Route path="exams/publish-result" element={G('publish_result', <ResultPublish />)} />
         <Route path="exams/publish-result-test" element={G('publish_result_test', <ResultPublishTest />)} />
+        <Route path="exams/not-attempted-exam" element={G('not-attempted-exam', <NotAttemptedExam/>)} />
 
         {/* Reporting & Analysis */}
         <Route path="reports/batch-dates" element={G('batch_dates', <BatchDates />)} />

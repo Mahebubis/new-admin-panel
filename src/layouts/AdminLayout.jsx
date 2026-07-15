@@ -1135,6 +1135,7 @@ const sidebarMenu = [
       { text: 'Auto Submitted Exams', link: '/exams/auto-submitted', icon: 'fas fa-warning', perm: 'auto_submitted_exams' },
       { text: 'Publish Result', link: '/exams/publish-result', icon: 'fas fa-bullhorn', perm: 'publish_result' },
       { text: 'Publish Result (Test)', link: '/exams/publish-result-test', icon: 'fas fa-flask', perm: 'publish_result_test' },
+      { text: 'Not Attempted Exam', link: '/exams/not-attempted-exam', icon: 'fas fa-user-clock', perm: 'not-attempted-exam' },
     ]
   },
   {
