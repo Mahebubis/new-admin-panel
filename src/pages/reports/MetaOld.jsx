@@ -6949,6 +6949,8 @@ export default function MetaAdsDashboard({
 
     const [confirmedFrom,        setConfirmedFrom]        = useState('');
     const [confirmedTo,          setConfirmedTo]          = useState('');
+    const [confirmedFromTime,    setConfirmedFromTime]    = useState('');
+    const [confirmedToTime,      setConfirmedToTime]      = useState('');
     const [confirmedCompareFrom, setConfirmedCompareFrom] = useState('');
     const [confirmedCompareTo,   setConfirmedCompareTo]   = useState('');
     const [isComparison,         setIsComparison]         = useState(false);
@@ -7206,6 +7208,8 @@ export default function MetaAdsDashboard({
                 setDpToDate(parseYMD(data.to_date));
                 setConfirmedFrom(data.from_date);
                 setConfirmedTo(data.to_date);
+                setConfirmedFromTime(data.from_time || '');
+                setConfirmedToTime(data.to_time || '');
                 if (autoFetch) {
                     setTimeout(() => {
                         fetchAnalyticsRef.current(citVersion, data.from_date, data.to_date);
@@ -8408,6 +8412,8 @@ export default function MetaAdsDashboard({
         const f = toYMD(dpTempFrom), t = toYMD(dpTempTo);
         setConfirmedFrom(f);
         setConfirmedTo(t);
+        setConfirmedFromTime('');
+        setConfirmedToTime('');
 
         let cf = '', ct = '';
         if (dpTempIsComparison) {
@@ -8688,7 +8694,14 @@ export default function MetaAdsDashboard({
                         <div className="filter-group">
                             <label className="filter-label">Date Range</label>
                             <button className="date-range-btn" onClick={openDatePicker}>
-                                <span><div className="dr-dates">{dateLabel}</div></span>
+                                <span>
+                                    <div className="dr-dates">{dateLabel}</div>
+                                    {confirmedFromTime && confirmedToTime && !isComparison && (
+                                        <div style={{ fontSize: 9, opacity: 0.6, marginTop: 2 }}>
+                                            {confirmedFromTime} - {confirmedToTime}
+                                        </div>
+                                    )}
+                                </span>
                                 <i className="fas fa-calendar dr-icon"></i>
                             </button>
                         </div>

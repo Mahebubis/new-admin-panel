@@ -6,7 +6,17 @@ const post = d => fetch(API, { method: 'POST', body: new URLSearchParams(d) }).t
 const USD_INR = 84.07;
 
 /* ─── static instance type definitions ─── */
+// const INSTANCE_TYPES = [
+//     { type: 't3.2xlarge', cpu: 8, mem: 32, price: 0.3328, tier: 'Starter', icon: '🌱', color: '#E53E3E', bg: '#FFF5F5', shadow: 'rgba(229,62,62,.35)' },
+//     { type: 'm5.4xlarge', cpu: 16, mem: 64, price: 0.768, tier: 'Growth', icon: '🚀', color: '#0891B2', bg: '#ECFEFF', shadow: 'rgba(8,145,178,.3)' },
+//     { type: 'm5.8xlarge', cpu: 32, mem: 128, price: 1.536, tier: 'Scale', icon: '⚡', color: '#7C3AED', bg: '#F5F3FF', shadow: 'rgba(124,58,237,.3)' },
+//     { type: 'm5.16xlarge', cpu: 64, mem: 256, price: 3.072, tier: 'Enterprise', icon: '👑', color: '#D97706', bg: '#FFFBEB', shadow: 'rgba(217,119,6,.3)' },
+// ];
+
+
+
 const INSTANCE_TYPES = [
+    { type: 't3.xlarge', cpu: 4, mem: 16, price: 0.1664, tier: 'Lite', icon: '🌿', color: '#059669', bg: '#ECFDF5', shadow: 'rgba(5,150,105,.3)' },
     { type: 't3.2xlarge', cpu: 8, mem: 32, price: 0.3328, tier: 'Starter', icon: '🌱', color: '#E53E3E', bg: '#FFF5F5', shadow: 'rgba(229,62,62,.35)' },
     { type: 'm5.4xlarge', cpu: 16, mem: 64, price: 0.768, tier: 'Growth', icon: '🚀', color: '#0891B2', bg: '#ECFEFF', shadow: 'rgba(8,145,178,.3)' },
     { type: 'm5.8xlarge', cpu: 32, mem: 128, price: 1.536, tier: 'Scale', icon: '⚡', color: '#7C3AED', bg: '#F5F3FF', shadow: 'rgba(124,58,237,.3)' },
@@ -52,14 +62,14 @@ function InstanceCard({ inst, isCurrent, isPending, isChanging, onSelect }) {
     return (
         <div
             style={{
-                borderRadius: 16, padding: 16, cursor: isCurrent || isPending ? 'default' : 'pointer',
+                borderRadius: 16, padding: 16, cursor: isCurrent ? 'default' : 'pointer',
                 background: getBg(), border: getBorder(),
                 transform: getTransform(), opacity: getOpacity(),
                 filter: getBlur(), zIndex: getZIndex(),
                 boxShadow: getShadow(), position: 'relative', overflow: 'hidden',
                 transition: 'all .35s cubic-bezier(.4,0,.2,1)',
             }}
-            onMouseEnter={() => !isCurrent && !isPending && setHovered(true)}
+            onMouseEnter={() => !isCurrent && setHovered(true)}
             onMouseLeave={() => setHovered(false)}>
 
             {/* top colour bar */}
@@ -141,12 +151,14 @@ function InstanceCard({ inst, isCurrent, isPending, isChanging, onSelect }) {
                         ✅ Active
                     </button>
                 ) : isPending ? (
-                    <button style={{
-                        padding: '7px 13px', borderRadius: 8, border: '1.5px solid #FCD34D',
-                        background: '#FEF3C7', color: '#D97706', fontSize: 11, fontWeight: 700,
-                        cursor: 'default', fontFamily: 'Sora,sans-serif', display: 'flex', alignItems: 'center', gap: 5
-                    }}>
-                        ⏳ Pending
+                    <button onClick={() => onSelect(inst)}
+                        title="Change is stuck or still applying — click to retry"
+                        style={{
+                            padding: '7px 13px', borderRadius: 8, border: '1.5px solid #FCD34D',
+                            background: '#FEF3C7', color: '#D97706', fontSize: 11, fontWeight: 700,
+                            cursor: 'pointer', fontFamily: 'Sora,sans-serif', display: 'flex', alignItems: 'center', gap: 5
+                        }}>
+                        ⏳ Pending · ↻ Retry
                     </button>
                 ) : (
                     <button onClick={() => onSelect(inst)}
@@ -326,6 +338,11 @@ export default function AWSInstanceManager() {
     }, [data]);
 
     /* ── do upgrade ── */
+    const showSuccessToast = () => {
+        setToast(true);
+        setTimeout(() => { setToast(false); loadData(); }, 6000);
+    };
+
     const doUpgrade = async () => {
         if (!confirm) return;
         const targetType = confirm.type;
@@ -337,22 +354,37 @@ export default function AWSInstanceManager() {
         setTimeout(() => setStep(2), 7000);
         setTimeout(() => setStep(3), 14000);
 
+        let res = null;
+        let requestFailed = false;
         try {
-            const res = await post({ action: 'upgrade_instance', instanceType: targetType });
-            setTimeout(() => {
-                setUpgrading(false);
-                setStep(0);
-                if (res.success) {
-                    setToast(true);
-                    setTimeout(() => { setToast(false); loadData(); }, 6000);
-                } else {
-                    alert('Error: ' + (res.error || 'Unknown error'));
-                }
-            }, 21000); // show all 3 steps
+            res = await post({ action: 'upgrade_instance', instanceType: targetType });
         } catch (e) {
-            setUpgrading(false); setStep(0);
-            alert('Network error: ' + e.message);
+            // fetch/JSON parsing failed (eg. proxy timeout returning an HTML page) —
+            // the request may still have been recorded server-side, so don't assume failure.
+            requestFailed = true;
         }
+
+        setTimeout(async () => {
+            setUpgrading(false);
+            setStep(0);
+
+            if (res && res.success) {
+                showSuccessToast();
+                return;
+            }
+
+            if (requestFailed) {
+                try {
+                    const check = await post({ action: 'get_data' });
+                    if (check.success && check.latest_type === targetType) {
+                        showSuccessToast();
+                        return;
+                    }
+                } catch (_) { /* fall through to error alert below */ }
+            }
+
+            alert('Error: ' + (res?.error || 'Instance change may not have been applied. Please check the current status and retry if needed.'));
+        }, 21000); // show all 3 steps
     };
 
     /* ── cost with live hours ── */
@@ -373,9 +405,9 @@ export default function AWSInstanceManager() {
 
     return (
         <>
-        <Helmet>
-        <title>Change AWS Instance | Admin Panel</title>
-      </Helmet>
+            <Helmet>
+                <title>Change AWS Instance | Admin Panel</title>
+            </Helmet>
             <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
         .aim-root * { box-sizing:border-box; }
@@ -476,8 +508,12 @@ export default function AWSInstanceManager() {
                 </div>
 
                 {/* ══ INSTANCE CARDS ══ */}
-                <div style={{
+                {/* <div style={{
                     display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12,
+                    alignItems: 'center', padding: '14px 8px'
+                }}> */}
+                <div style={{
+                    display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12,
                     alignItems: 'center', padding: '14px 8px'
                 }}>
                     {INSTANCE_TYPES.map(inst => {

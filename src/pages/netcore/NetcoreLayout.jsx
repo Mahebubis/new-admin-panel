@@ -6,12 +6,22 @@ const SECTIONS = {
   dashboard: { title: 'Dashboards', items: [{ to: '/netcore/behaviour', label: 'Home' }] },
   users:     { title: 'Audience',   items: [
     { to: '/netcore/contacts', label: 'All contacts' },
-    { to: '/netcore/segments', label: 'Segments' },
+    { to: '/netcore/segments',  label: 'Segments' },
+    { to: '/netcore/lists',     label: 'Lists' },
+    { to: '/netcore/blocklist', label: 'Blocklist' },
+  ] },
+  engage:    { title: 'Engage',     items: [
+    { to: '/netcore/campaigns', label: 'Campaigns' },
+  ] },
+  content:   { title: 'Content',    items: [
+    { to: '/netcore/templates', label: 'Template' },
   ] },
 };
 
 function activeSection(p) {
-  if (p.startsWith('/netcore/contacts') || p.startsWith('/netcore/segments')) return 'users';
+  if (p.startsWith('/netcore/contacts') || p.startsWith('/netcore/segments') || p.startsWith('/netcore/lists') || p.startsWith('/netcore/blocklist')) return 'users';
+  if (p.startsWith('/netcore/campaigns')) return 'engage';
+  if (p.startsWith('/netcore/templates')) return 'content';
   return 'dashboard';
 }
 
@@ -21,9 +31,15 @@ export default function NetcoreLayout() {
   const current = activeSection(loc.pathname);
   const section = SECTIONS[current];
 
-  const Icon = ({ name }) => name === 'dashboard'
-    ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg>
-    : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>;
+  const Icon = ({ name }) => {
+    if (name === 'dashboard')
+      return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg>;
+    if (name === 'engage')
+      return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 11l18-8-8 18-2-8-8-2z" /></svg>;
+    if (name === 'content')
+      return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M8 4v5" /></svg>;
+    return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>;
+  };
 
   return (
     <>
@@ -67,13 +83,19 @@ export default function NetcoreLayout() {
           <NavLink to="/netcore/contacts" className={current === 'users' ? 'active' : ''}>
             <Icon name="users" /><span>Audience</span>
           </NavLink>
+          <NavLink to="/netcore/campaigns" className={current === 'engage' ? 'active' : ''}>
+            <Icon name="engage" /><span>Engage</span>
+          </NavLink>
+          <NavLink to="/netcore/templates" className={current === 'content' ? 'active' : ''}>
+            <Icon name="content" /><span>Content</span>
+          </NavLink>
         </nav>
 
         <nav className="nc-nav-sub">
           <span className="nc-nav-sub-title">{section.title}</span>
           {section.items.map(it => (
             <NavLink key={it.to} to={it.to}
-              end={it.to === '/netcore/contacts' || it.to === '/netcore/segments'}>
+              end={it.to === '/netcore/contacts' || it.to === '/netcore/segments' || it.to === '/netcore/lists' || it.to === '/netcore/blocklist' || it.to === '/netcore/campaigns' || it.to === '/netcore/templates'}>
               {it.label}
             </NavLink>
           ))}

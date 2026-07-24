@@ -206,6 +206,17 @@ import NetcoreUserTimeline from './pages/netcore/NetcoreUserTimeline';
 import NetcoreSegments from './pages/netcore/NetcoreSegments';
 import NetcoreSegmentCreate from './pages/netcore/NetcoreSegmentCreate';
 import NetcoreSegmentUsers from './pages/netcore/NetcoreSegmentUsers';
+import NetcoreLists from './pages/netcore/NetcoreLists';
+import NetcoreListContacts from './pages/netcore/NetcoreListContacts';
+import ImportContactsWizard from './pages/netcore/ImportContactsWizard';
+import ContactLogs from './pages/netcore/ContactLogs';
+import { NetcoreBlocklist, BlocklistLogs, BlocklistImport } from './pages/netcore/NetcoreBlocklist';
+import CampaignsList from './pages/netcore/CampaignsList';
+import CampaignWizard from './pages/netcore/CampaignWizard';
+import CampaignReport from './pages/netcore/CampaignReport';
+import TemplatesList from './pages/netcore/TemplatesList';
+import TemplateEditor from './pages/netcore/TemplateEditor';
+import EspSettings from './pages/netcore/EspSettings';
 import InternshipList from './pages/internships/InternshipList';
 import PurchasedInternships from './pages/internships/PurchasedInternships';
 import PurchasedStarterKit from './pages/internships/PurchasedStarterKit';
@@ -289,6 +300,14 @@ export default function App() {
       {/* Full-screen authenticated pages — no AdminLayout chrome (no sidebar / topbar / netcore navs) */}
       <Route path="/netcore/segments/new"      element={<ProtectedRoute>{G('netcore_behaviour', <NetcoreSegmentCreate />)}</ProtectedRoute>} />
       <Route path="/netcore/segments/edit/:id" element={<ProtectedRoute>{G('netcore_behaviour', <NetcoreSegmentCreate />)}</ProtectedRoute>} />
+      <Route path="/netcore/lists/:listId/import" element={<ProtectedRoute>{G('netcore_behaviour', <ImportContactsWizard />)}</ProtectedRoute>} />
+      <Route path="/netcore/blocklist/import"      element={<ProtectedRoute>{G('netcore_behaviour', <BlocklistImport />)}</ProtectedRoute>} />
+      <Route path="/netcore/campaigns/new"        element={<ProtectedRoute>{G('netcore_behaviour', <CampaignWizard />)}</ProtectedRoute>} />
+      <Route path="/netcore/campaigns/:id"        element={<ProtectedRoute>{G('netcore_behaviour', <CampaignWizard />)}</ProtectedRoute>} />
+      <Route path="/netcore/campaigns/:id/report" element={<ProtectedRoute>{G('netcore_behaviour', <CampaignReport />)}</ProtectedRoute>} />
+      <Route path="/netcore/templates/new"        element={<ProtectedRoute>{G('netcore_behaviour', <TemplateEditor />)}</ProtectedRoute>} />
+      <Route path="/netcore/templates/:id"        element={<ProtectedRoute>{G('netcore_behaviour', <TemplateEditor />)}</ProtectedRoute>} />
+      <Route path="/netcore/settings"             element={<ProtectedRoute>{G('netcore_behaviour', <EspSettings />)}</ProtectedRoute>} />
 
       <Route element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>
         {/* Dashboard is open to every authenticated user */}
@@ -321,7 +340,7 @@ export default function App() {
         {/* Domain Management */}
         <Route path="domains" element={G('manage_domains', <DomainList />)} />
 
-        {/* Netcore — sub-layout with sidebar + sub-sidebar (Dashboard + Audience) */}
+        {/* Netcore — sub-layout with sidebar + sub-sidebar (Dashboard + Audience + Engage + Content) */}
         <Route path="netcore" element={G('netcore_behaviour', <NetcoreLayout />)}>
           <Route index element={<NetcoreBehaviour />} />
           <Route path="behaviour" element={<NetcoreBehaviour />} />
@@ -329,6 +348,13 @@ export default function App() {
           <Route path="contacts/:email" element={<NetcoreUserTimeline />} />
           <Route path="segments" element={<NetcoreSegments />} />
           <Route path="segments/:id/users" element={<NetcoreSegmentUsers />} />
+          <Route path="lists" element={<NetcoreLists />} />
+          <Route path="lists/logs" element={<ContactLogs />} />
+          <Route path="lists/:id/contacts" element={<NetcoreListContacts />} />
+          <Route path="blocklist" element={<NetcoreBlocklist />} />
+          <Route path="blocklist/logs" element={<BlocklistLogs />} />
+          <Route path="campaigns" element={<CampaignsList />} />
+          <Route path="templates" element={<TemplatesList />} />
         </Route>
         <Route path="netcore/filter" element={G('netcore_filter', <NetcoreFilter />)} />
 

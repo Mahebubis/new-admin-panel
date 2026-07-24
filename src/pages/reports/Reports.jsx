@@ -697,7 +697,7 @@ export default function AllReports() {
             </Section>
 
             {/* Misc Data */}
-            {/* <Section
+            <Section
               icon="🗂️"
               title="Misc Data"
               description="IP logs, GST sheet and dropped-off lead exports"
@@ -707,7 +707,7 @@ export default function AllReports() {
               <DLBtn accent="slate" href={dlUrl({ type: 'user_ip_data' })}>User IP</DLBtn>
               <DLBtn accent="slate" href={dlUrl({ type: 'gst_data' })}>GST Data Sheet</DLBtn>
               <DLBtn accent="slate" href={dlUrl({ type: 'autofill_reg_data' })}>Autofill Registration Data</DLBtn>
-            </Section> */}
+            </Section>
 
             {/* Company Report */}
             {/* <Section
