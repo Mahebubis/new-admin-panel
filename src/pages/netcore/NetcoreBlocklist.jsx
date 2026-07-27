@@ -46,6 +46,7 @@ export function NetcoreBlocklist() {
       basePath="/netcore/blocklist"
       importPath="/netcore/blocklist/import"
       titleOverride="Blocklist"
+      isBlocklist
     />
   );
 }

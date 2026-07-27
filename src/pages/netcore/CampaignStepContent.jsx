@@ -2,10 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import AttributeField from './AttributePicker';
+import { buildCustomAttributeTags } from './campaignMergeTags';
+import TemplateEditDrawer from './TemplateEditDrawer';
 
 const TPL_API = '/api/campaigns/templates.php';
 const CAMP_API = '/api/campaigns/campaigns.php';
 const SETTINGS_API = '/api/campaigns/settings.php';
+const ATTR_API = '/api/attributes/attributes.php';
 const FORM = { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } };
 
 const inp = { width: '100%', padding: '10px 12px', border: '1.5px solid #e2e8f0', borderRadius: 8, fontSize: 12.5, fontFamily: 'inherit', color: '#1e293b', outline: 'none', boxSizing: 'border-box' };
@@ -13,14 +16,14 @@ const label = { display: 'block', fontSize: 12, fontWeight: 700, color: '#0f172a
 const card = { background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 20, marginBottom: 18 };
 
 /* Real scaled-down render of the template's actual HTML — see TemplatesList.jsx for the same pattern. */
-function TemplateThumbnail({ html, height = 100 }) {
+function TemplateThumbnail({ html, height = 220 }) {
   if (!html) {
     return <div style={{ height, background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#cbd5e1', fontSize: 10 }}>No preview</div>;
   }
   return (
     <div style={{ height, background: '#fff', overflow: 'hidden', position: 'relative', borderRadius: 6, border: '1px solid #f1f5f9' }}>
-      <iframe title="template preview" srcDoc={html} sandbox=""
-        style={{ width: '400%', height: '400%', border: 'none', transform: 'scale(0.25)', transformOrigin: 'top left', pointerEvents: 'none' }} />
+      <iframe title="template preview" srcDoc={html} sandbox="" scrolling="no"
+        style={{ width: '200%', height: '200%', border: 'none', overflow: 'hidden', transform: 'scale(0.5)', transformOrigin: 'top left', pointerEvents: 'none' }} />
     </div>
   );
 }
@@ -87,7 +90,6 @@ export default function CampaignStepContent({ draft, setField, onValidChange, sa
   const [templates, setTemplates] = useState([]);
   const [loadingTpl, setLoadingTpl] = useState(true);
   const [domains, setDomains] = useState([]);
-  const [examVersions, setExamVersions] = useState([]);
   const [showReplyTo, setShowReplyTo] = useState(!!draft.reply_to);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const fileInputRef = useRef(null);
@@ -95,6 +97,19 @@ export default function CampaignStepContent({ draft, setField, onValidChange, sa
   const [testEmails, setTestEmails] = useState('');
   const [testSending, setTestSending] = useState(false);
   const [testResults, setTestResults] = useState(null);
+  const [customAttrTags, setCustomAttrTags] = useState([]);
+  const [editingTemplateId, setEditingTemplateId] = useState(null);
+
+  // Fetched once — Customer Attributes (public/react-api/api/attributes/) show up in the
+  // same XX_..._XX picker as the fixed identity/exam tags, just from a dynamic source.
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.post(ATTR_API, new URLSearchParams({ action: 'list', per_page: 200 }), FORM);
+        if (res.data.success) setCustomAttrTags(buildCustomAttributeTags(res.data.data.attributes));
+      } catch { /* non-critical — picker just falls back to the fixed tags */ }
+    })();
+  }, []);
 
   const totalAttachedBytes = (draft.attachments || []).reduce((sum, a) => sum + (a.size || 0), 0);
 
@@ -149,15 +164,6 @@ export default function CampaignStepContent({ draft, setField, onValidChange, sa
   useEffect(() => {
     (async () => {
       try {
-        const res = await api.post(CAMP_API, new URLSearchParams({ action: 'exam_versions' }), FORM);
-        if (res.data.success) setExamVersions(res.data.data.versions || []);
-      } catch { /* non-critical — exam merge tags just won't have an exam to pick */ }
-    })();
-  }, []); // eslint-disable-line
-
-  useEffect(() => {
-    (async () => {
-      try {
         const res = await api.post(SETTINGS_API, new URLSearchParams({ action: 'get' }), FORM);
         if (res.data.success) {
           const rows = res.data.data.settings || [];
@@ -201,6 +207,18 @@ export default function CampaignStepContent({ draft, setField, onValidChange, sa
     } catch { toast.error('Could not load template'); }
   };
 
+  const onTemplateSaved = (updated) => {
+    setEditingTemplateId(null);
+    loadTemplates();
+    // Keep the live preview in sync if the template being edited is the one currently
+    // selected for this campaign — otherwise the preview would keep showing the stale
+    // content until the admin re-picks the same template.
+    if (draft.template_id === updated.id) {
+      setField('template_name', updated.name);
+      setField('content_html', updated.body_html);
+    }
+  };
+
   const sendTest = async () => {
     const emails = testEmails.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
     if (!emails.length) return toast.error('Enter at least one email address');
@@ -227,7 +245,7 @@ export default function CampaignStepContent({ draft, setField, onValidChange, sa
           <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 18 }}>Define sender details to be used for sending the email</div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-            <AttributeField label="Sender name" value={draft.sender_name} onChange={v => setField('sender_name', v)} placeholder="Internship Studio" />
+            <AttributeField label="Sender name" value={draft.sender_name} onChange={v => setField('sender_name', v)} placeholder="Internship Studio" extraTags={customAttrTags} />
             <div>
               <label style={label}>Sender email <span style={{ color: '#dc2626' }}>*</span></label>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -239,10 +257,10 @@ export default function CampaignStepContent({ draft, setField, onValidChange, sa
           </div>
 
           <div style={{ marginBottom: 16 }}>
-            <AttributeField label="Subject" required value={draft.subject} onChange={v => setField('subject', v)} placeholder="Your subject line" />
+            <AttributeField label="Subject" required value={draft.subject} onChange={v => setField('subject', v)} placeholder="Your subject line" extraTags={customAttrTags} />
           </div>
           <div style={{ marginBottom: 16 }}>
-            <AttributeField label="Pre-header" value={draft.preheader} onChange={v => setField('preheader', v)} placeholder="Shown next to the subject in most inboxes" />
+            <AttributeField label="Pre-header" value={draft.preheader} onChange={v => setField('preheader', v)} placeholder="Shown next to the subject in most inboxes" extraTags={customAttrTags} />
           </div>
 
           {!showReplyTo ? (
@@ -294,18 +312,6 @@ export default function CampaignStepContent({ draft, setField, onValidChange, sa
         </div>
 
         <div style={card}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>Exam <span style={{ fontWeight: 500, color: '#94a3b8' }}>(optional)</span></div>
-          <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 14 }}>
-            Only needed if your template uses exam merge tags (like XX_EXAM_SCORE_XX). Ties this campaign to one specific exam,
-            so each recipient's own score/rank/status for THAT exam gets filled in at send time.
-          </div>
-          <select style={inp} value={draft.exam_cit_version || ''} onChange={e => setField('exam_cit_version', e.target.value)}>
-            <option value="">— None (no exam merge tags) —</option>
-            {examVersions.map(v => <option key={v.id} value={v.cit_name}>{v.cit_name}</option>)}
-          </select>
-        </div>
-
-        <div style={card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>Email body</div>
@@ -328,16 +334,22 @@ export default function CampaignStepContent({ draft, setField, onValidChange, sa
           ) : templates.length === 0 ? (
             <div style={{ padding: 30, textAlign: 'center', color: '#94a3b8', fontSize: 12.5 }}>No templates yet — create one to get started.</div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginTop: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16, marginTop: 16 }}>
               {templates.map(t => {
                 const active = draft.template_id === t.id;
                 return (
-                  <button key={t.id} type="button" onClick={() => pickTemplate(t)}
-                    style={{ textAlign: 'left', border: `2px solid ${active ? '#1e3a8a' : '#e2e8f0'}`, borderRadius: 10, padding: 10, background: active ? '#eef2ff' : '#fff', cursor: 'pointer', fontFamily: 'inherit' }}>
-                    <TemplateThumbnail html={t.body_html} />
-                    <div style={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a', marginTop: 8, marginBottom: 2 }}>{t.name}</div>
-                    <div style={{ fontSize: 10, color: active ? '#1e3a8a' : '#cbd5e1', fontWeight: 700 }}>{active ? '✓ SELECTED' : `ID: ${t.id}`}</div>
-                  </button>
+                  <div key={t.id} style={{ position: 'relative' }}>
+                    <button type="button" onClick={() => pickTemplate(t)}
+                      style={{ width: '100%', textAlign: 'left', border: `2px solid ${active ? '#1e3a8a' : '#e2e8f0'}`, borderRadius: 10, padding: 10, background: active ? '#eef2ff' : '#fff', cursor: 'pointer', fontFamily: 'inherit' }}>
+                      <TemplateThumbnail html={t.body_html} />
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a', marginTop: 8, marginBottom: 2, paddingRight: 24 }}>{t.name}</div>
+                      <div style={{ fontSize: 10, color: active ? '#1e3a8a' : '#cbd5e1', fontWeight: 700 }}>{active ? '✓ SELECTED' : `ID: ${t.id}`}</div>
+                    </button>
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setEditingTemplateId(t.id); }} title="Edit this template"
+                      style={{ position: 'absolute', top: 8, right: 8, width: 24, height: 24, border: 'none', borderRadius: 6, background: 'rgba(255,255,255,.92)', boxShadow: '0 1px 4px rgba(0,0,0,.15)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#334155' }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
+                    </button>
+                  </div>
                 );
               })}
             </div>
@@ -392,6 +404,14 @@ export default function CampaignStepContent({ draft, setField, onValidChange, sa
             </div>
           </div>
         </div>
+      )}
+
+      {editingTemplateId && (
+        <TemplateEditDrawer
+          templateId={editingTemplateId}
+          onClose={() => setEditingTemplateId(null)}
+          onSaved={onTemplateSaved}
+        />
       )}
     </div>
   );

@@ -6,9 +6,10 @@ const SECTIONS = {
   dashboard: { title: 'Dashboards', items: [{ to: '/netcore/behaviour', label: 'Home' }] },
   users:     { title: 'Audience',   items: [
     { to: '/netcore/contacts', label: 'All contacts' },
-    { to: '/netcore/segments',  label: 'Segments' },
-    { to: '/netcore/lists',     label: 'Lists' },
-    { to: '/netcore/blocklist', label: 'Blocklist' },
+    { to: '/netcore/segments',   label: 'Segments' },
+    { to: '/netcore/lists',      label: 'Lists' },
+    { to: '/netcore/blocklist',  label: 'Blocklist' },
+    { to: '/netcore/attributes', label: 'Attributes' },
   ] },
   engage:    { title: 'Engage',     items: [
     { to: '/netcore/campaigns', label: 'Campaigns' },
@@ -19,7 +20,7 @@ const SECTIONS = {
 };
 
 function activeSection(p) {
-  if (p.startsWith('/netcore/contacts') || p.startsWith('/netcore/segments') || p.startsWith('/netcore/lists') || p.startsWith('/netcore/blocklist')) return 'users';
+  if (p.startsWith('/netcore/contacts') || p.startsWith('/netcore/segments') || p.startsWith('/netcore/lists') || p.startsWith('/netcore/blocklist') || p.startsWith('/netcore/attributes')) return 'users';
   if (p.startsWith('/netcore/campaigns')) return 'engage';
   if (p.startsWith('/netcore/templates')) return 'content';
   return 'dashboard';
@@ -95,7 +96,7 @@ export default function NetcoreLayout() {
           <span className="nc-nav-sub-title">{section.title}</span>
           {section.items.map(it => (
             <NavLink key={it.to} to={it.to}
-              end={it.to === '/netcore/contacts' || it.to === '/netcore/segments' || it.to === '/netcore/lists' || it.to === '/netcore/blocklist' || it.to === '/netcore/campaigns' || it.to === '/netcore/templates'}>
+              end={it.to === '/netcore/contacts' || it.to === '/netcore/segments' || it.to === '/netcore/lists' || it.to === '/netcore/blocklist' || it.to === '/netcore/attributes' || it.to === '/netcore/campaigns' || it.to === '/netcore/templates'}>
               {it.label}
             </NavLink>
           ))}

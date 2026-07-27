@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
+import AddEditContactModal from './AddEditContactModal';
+import ConfirmDialog from './ConfirmDialog';
 
 const API = '/api/lists/lists.php';
 const FORM = { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } };
@@ -11,7 +13,7 @@ function Spinner() {
   return <span style={{ display: 'inline-block', width: 32, height: 32, borderRadius: '50%', border: '3px solid #c4b5fd', borderTopColor: '#4f46e5', animation: 'nc_spin 0.85s linear infinite' }} />;
 }
 
-export default function NetcoreListContacts({ basePath = '/netcore/lists', idOverride, importPath, titleOverride } = {}) {
+export default function NetcoreListContacts({ basePath = '/netcore/lists', idOverride, importPath, titleOverride, isBlocklist = false } = {}) {
   const { id: idParam } = useParams();
   const id = idOverride || idParam;
   const nav = useNavigate();
@@ -25,6 +27,9 @@ export default function NetcoreListContacts({ basePath = '/netcore/lists', idOve
   const [search, setSearch]   = useState('');
   const [applied, setApplied] = useState('');
   const searchInputRef = useRef(null);
+  const [modalMode, setModalMode] = useState(null); // null | 'add' | { editRow }
+  const [confirmRow, setConfirmRow] = useState(null); // contact row pending removal
+  const [removing, setRemoving] = useState(false);
   // Guards against React StrictMode's dev-only double-invoke of effects (mounts twice on
   // purpose in development to catch non-idempotent effects) — without this, every page load
   // would fire each of these requests twice in dev. Keyed by id (not just a plain boolean) so
@@ -64,17 +69,21 @@ export default function NetcoreListContacts({ basePath = '/netcore/lists', idOve
     if (e.key === 'Enter') { setApplied(search); fetchPage(1, perPage, search); }
   };
 
-  const removeContact = async (contactId) => {
-    if (!window.confirm('Remove this contact from the list?')) return;
+  const confirmRemove = async () => {
+    if (!confirmRow) return;
+    setRemoving(true);
     const t = toast.loading('Removing…');
     try {
-      const res = await api.post(API, new URLSearchParams({ action: 'remove_member', list_id: id, contact_id: contactId }), FORM);
-      if (res.data.success) { toast.success('Removed', { id: t }); fetchPage(); }
+      const res = await api.post(API, new URLSearchParams({ action: 'remove_member', list_id: id, contact_id: confirmRow.id }), FORM);
+      if (res.data.success) { toast.success('Removed', { id: t }); setConfirmRow(null); fetchPage(); }
       else toast.error(res.data.message || 'Failed', { id: t });
     } catch { toast.error('Network error', { id: t }); }
+    finally { setRemoving(false); }
   };
 
-  const COLS = ['Email', 'First name', 'Last name', 'Phone', 'State', 'Country', 'City', 'Added on', ''];
+  const COLS = isBlocklist
+    ? ['Email', 'First name', 'Last name', 'Phone', 'State', 'Country', 'City', 'Reason', 'Added on', '']
+    : ['Email', 'First name', 'Last name', 'Phone', 'State', 'Country', 'City', 'Added on', ''];
 
   return (
     <div style={{ padding: 24, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
@@ -92,6 +101,9 @@ export default function NetcoreListContacts({ basePath = '/netcore/lists', idOve
           <input ref={searchInputRef} value={search} onChange={e => setSearch(e.target.value)} onKeyDown={onSearchKey}
             placeholder="Search email / name and press Enter…"
             style={{ padding: '9px 12px', border: '1.5px solid #e2e8f0', borderRadius: 8, fontSize: 12.5, fontFamily: 'inherit', outline: 'none', width: 260 }} />
+          <button onClick={() => setModalMode('add')} style={{ padding: '9px 16px', border: '1.5px solid #1e3a8a', background: '#fff', color: '#1e3a8a', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            + Add contact
+          </button>
           {importPath && (
             <button onClick={() => nav(importPath)} style={{ padding: '9px 16px', border: 'none', background: '#1e3a8a', color: '#fff', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
               Import contacts
@@ -125,9 +137,12 @@ export default function NetcoreListContacts({ basePath = '/netcore/lists', idOve
                       <td style={{ padding: '11px 16px', borderBottom: '1px solid #f1f5f9', color: '#334155' }}>{r.state || '—'}</td>
                       <td style={{ padding: '11px 16px', borderBottom: '1px solid #f1f5f9', color: '#334155' }}>{r.country || '—'}</td>
                       <td style={{ padding: '11px 16px', borderBottom: '1px solid #f1f5f9', color: '#334155' }}>{r.city || '—'}</td>
+                      {isBlocklist && <td style={{ padding: '11px 16px', borderBottom: '1px solid #f1f5f9', color: '#334155' }}>{r.reason || '—'}</td>}
                       <td style={{ padding: '11px 16px', borderBottom: '1px solid #f1f5f9', color: '#94a3b8' }}>{r.added_at}</td>
-                      <td style={{ padding: '11px 16px', borderBottom: '1px solid #f1f5f9' }}>
-                        <button onClick={() => removeContact(r.id)} title="Remove from list"
+                      <td style={{ padding: '11px 16px', borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap' }}>
+                        <button onClick={() => setModalMode({ editRow: r })} title="Edit contact"
+                          style={{ border: 'none', background: 'none', color: '#1e3a8a', cursor: 'pointer', fontSize: 12, fontWeight: 700, marginRight: 12 }}>Edit</button>
+                        <button onClick={() => setConfirmRow(r)} title="Remove from list"
                           style={{ border: 'none', background: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>Remove</button>
                       </td>
                     </tr>
@@ -154,6 +169,27 @@ export default function NetcoreListContacts({ basePath = '/netcore/lists', idOve
             style={{ padding: '6px 14px', border: '1.5px solid #c4b5fd', borderRadius: 6, background: '#fff', cursor: page >= pages ? 'not-allowed' : 'pointer', opacity: page >= pages ? .4 : 1, fontSize: 12, fontFamily: 'inherit' }}>Next</button>
         </div>
       </div>
+
+      {modalMode && (
+        <AddEditContactModal
+          listId={id}
+          editRow={modalMode === 'add' ? null : modalMode.editRow}
+          isBlocklist={isBlocklist}
+          onClose={() => setModalMode(null)}
+          onSaved={() => { setModalMode(null); fetchPage(); }}
+        />
+      )}
+
+      <ConfirmDialog
+        open={!!confirmRow}
+        tone="danger"
+        title="Remove this contact?"
+        message={confirmRow && <><strong style={{ color: '#334155' }}>{confirmRow.email}</strong> will be removed from this list. This won't delete their account or any other data.</>}
+        confirmLabel="Remove"
+        busy={removing}
+        onConfirm={confirmRemove}
+        onCancel={() => setConfirmRow(null)}
+      />
     </div>
   );
 }

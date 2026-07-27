@@ -211,6 +211,8 @@ import NetcoreListContacts from './pages/netcore/NetcoreListContacts';
 import ImportContactsWizard from './pages/netcore/ImportContactsWizard';
 import ContactLogs from './pages/netcore/ContactLogs';
 import { NetcoreBlocklist, BlocklistLogs, BlocklistImport } from './pages/netcore/NetcoreBlocklist';
+import NetcoreAttributes from './pages/netcore/NetcoreAttributes';
+import AttributeLogs from './pages/netcore/AttributeLogs';
 import CampaignsList from './pages/netcore/CampaignsList';
 import CampaignWizard from './pages/netcore/CampaignWizard';
 import CampaignReport from './pages/netcore/CampaignReport';
@@ -353,6 +355,8 @@ export default function App() {
           <Route path="lists/:id/contacts" element={<NetcoreListContacts />} />
           <Route path="blocklist" element={<NetcoreBlocklist />} />
           <Route path="blocklist/logs" element={<BlocklistLogs />} />
+          <Route path="attributes" element={<NetcoreAttributes />} />
+          <Route path="attributes/logs" element={<AttributeLogs />} />
           <Route path="campaigns" element={<CampaignsList />} />
           <Route path="templates" element={<TemplatesList />} />
         </Route>

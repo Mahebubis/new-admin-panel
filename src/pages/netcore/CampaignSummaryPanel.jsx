@@ -23,7 +23,7 @@ const Row = ({ label, value }) => (
 /* Right-side collapsible recap panel, shown alongside every wizard step. */
 export default function CampaignSummaryPanel({ draft, segmentNames, listNames }) {
   return (
-    <div style={{ width: 300, flexShrink: 0, padding: '4px 16px 16px', overflowY: 'auto' }}>
+    <div style={{ width: 300, flexShrink: 0, padding: '4px 16px 140px', overflowY: 'auto' }}>
       <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', margin: '10px 0 4px' }}>Summary</div>
 
       <Section title="Setup">

@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { IDENTITY_MERGE_TAGS, EXAM_MERGE_TAGS, insertTokenAtCursor } from './campaignMergeTags';
-
-const ALL_MERGE_TAGS = [...IDENTITY_MERGE_TAGS, ...EXAM_MERGE_TAGS];
+import { insertTokenAtCursor } from './campaignMergeTags';
 
 const inputStyle = {
   width: '100%', padding: '9px 12px', border: '1.5px solid #e2e8f0', borderRadius: 8,
@@ -17,7 +15,7 @@ const labelStyle = { display: 'block', fontSize: 12, fontWeight: 700, color: '#0
  * position — the popover stays open so multiple attributes can be inserted
  * into the same field one after another.
  */
-export default function AttributeField({ label, value, onChange, placeholder, required, hint }) {
+export default function AttributeField({ label, value, onChange, placeholder, required, hint, extraTags = [] }) {
   const inputRef = useRef(null);
   const wrapRef = useRef(null);
   const [focused, setFocused] = useState(false);
@@ -32,7 +30,11 @@ export default function AttributeField({ label, value, onChange, placeholder, re
   }, [open]);
 
   const insert = token => insertTokenAtCursor(inputRef.current, token, value || '', onChange);
-  const filtered = ALL_MERGE_TAGS.filter(t => t.title.toLowerCase().includes(search.toLowerCase()));
+  // Only the attributes the admin actually created in the Attributes tab — no fixed
+  // identity/exam tags mixed in here (per explicit request: this list should show exactly
+  // what's in the Attributes tab, nothing more).
+  const q = search.toLowerCase();
+  const filteredCustom = extraTags.filter(t => t.title.toLowerCase().includes(q));
 
   return (
     <div ref={wrapRef}>
@@ -68,12 +70,16 @@ export default function AttributeField({ label, value, onChange, placeholder, re
               position: 'absolute', top: 'calc(100% + 4px)', left: 0, width: 230, background: '#fff', border: '1px solid #e2e8f0',
               borderRadius: 10, boxShadow: '0 10px 28px rgba(0,0,0,.14)', zIndex: 60, padding: 8,
             }}>
-              <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Search attributes…"
+              <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…"
                 style={{ width: '100%', padding: '7px 9px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 12, marginBottom: 6, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }} />
-              <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.4px', padding: '2px 4px 6px' }}>USE ATTRIBUTE — click to insert, pick as many as you like</div>
-              <div style={{ maxHeight: 180, overflowY: 'auto' }}>
-                {filtered.length === 0 && <div style={{ padding: '8px 4px', fontSize: 12, color: '#94a3b8', textAlign: 'center' }}>No matches</div>}
-                {filtered.map(t => (
+              <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: '#1e3a8a', letterSpacing: '.4px', padding: '2px 4px 6px' }}>YOUR ATTRIBUTES ({extraTags.length}) — click to insert</div>
+                {filteredCustom.length === 0 && (
+                  <div style={{ padding: '6px 4px 10px', fontSize: 11.5, color: '#94a3b8' }}>
+                    {extraTags.length === 0 ? 'None created yet — add one in Audience → Attributes.' : 'No matches'}
+                  </div>
+                )}
+                {filteredCustom.map(t => (
                   <button key={t.value} type="button" onMouseDown={e => e.preventDefault()} onClick={() => insert(t.value)}
                     style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 12.5, color: '#334155', borderRadius: 6, fontFamily: 'inherit' }}
                     onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}

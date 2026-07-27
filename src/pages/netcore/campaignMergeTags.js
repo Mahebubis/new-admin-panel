@@ -23,6 +23,16 @@ export const EXAM_MERGE_TAGS = [
   { value: 'XX_EXAM_DATE_XX',       title: 'Exam Date' },
 ];
 
+/** Maps campaign_attributes rows (from /api/attributes/attributes.php?action=list) into
+ *  the same {value, title} shape as IDENTITY_MERGE_TAGS/EXAM_MERGE_TAGS, so Customer
+ *  Attributes show up in the same picker as every other merge tag — deliberately
+ *  [NAME] bracket syntax rather than XX_..._XX, per explicit request, to visually set
+ *  attributes apart from the fixed identity/exam tags. Server-side substitution (same
+ *  bracket format) lives in campaigns/lib/AttributeResolver.php. */
+export function buildCustomAttributeTags(attributes) {
+  return (attributes || []).map(a => ({ value: `[${a.name}]`, title: a.name.replace(/_/g, ' ') }));
+}
+
 /** Splices `token` into `value` at the input's current cursor position, then
  *  restores focus/cursor just after the inserted token. Popover stays open so
  *  multiple attributes can be chained in one field. */

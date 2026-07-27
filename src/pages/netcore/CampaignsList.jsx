@@ -92,6 +92,7 @@ const COLS = [
   { key: 'revenue', label: 'Revenue' },
   { key: 'unsubscribe_count', label: 'Unsubscribed' },
   { key: 'bounce_count', label: 'Bounce' },
+  { key: 'spam_count', label: 'Spam' },
 ];
 
 function menuFor(status) {
@@ -279,6 +280,7 @@ export default function CampaignsList() {
                       <td style={{ padding: '14px 14px', borderBottom: '1px solid #f1f5f9', color: '#94a3b8' }} title="Revenue tracking isn't wired yet">NA</td>
                       <td style={{ padding: '14px 14px', borderBottom: '1px solid #f1f5f9', color: '#475569' }}>{n0(r.unsubscribe_count)}</td>
                       <td style={{ padding: '14px 14px', borderBottom: '1px solid #f1f5f9', color: '#475569' }}>{n0(r.bounce_count)}</td>
+                      <td style={{ padding: '14px 14px', borderBottom: '1px solid #f1f5f9', color: '#475569' }}>{n0(r.spam_count)}</td>
                     </tr>
                   ))}
               </tbody>

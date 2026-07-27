@@ -20,7 +20,7 @@ function fmtDt(s) {
 /* Real scaled-down render of the template's actual HTML — the "400% then scale(0.25)"
    trick makes the iframe visually fill the container at any width without JS measuring it.
    sandbox="" disables scripts/forms in case a template's HTML has any — it's a pure preview. */
-function TemplateThumbnail({ html, height = 130 }) {
+function TemplateThumbnail({ html, height = 260 }) {
   if (!html) {
     return (
       <div style={{ height, background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 11, borderBottom: '1px solid #f1f5f9' }}>
@@ -30,8 +30,8 @@ function TemplateThumbnail({ html, height = 130 }) {
   }
   return (
     <div style={{ height, background: '#fff', overflow: 'hidden', position: 'relative', borderBottom: '1px solid #f1f5f9' }}>
-      <iframe title="template preview" srcDoc={html} sandbox=""
-        style={{ width: '400%', height: '400%', border: 'none', transform: 'scale(0.25)', transformOrigin: 'top left', pointerEvents: 'none' }} />
+      <iframe title="template preview" srcDoc={html} sandbox="" scrolling="no"
+        style={{ width: '200%', height: '200%', border: 'none', overflow: 'hidden', transform: 'scale(0.5)', transformOrigin: 'top left', pointerEvents: 'none' }} />
     </div>
   );
 }
@@ -97,7 +97,7 @@ export default function TemplatesList() {
           ) : rows.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 60, color: '#94a3b8', fontSize: 13 }}>No templates yet. Click "Create New Template" to start.</div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 20 }}>
               {rows.map(t => (
                 <div key={t.id} className="nc-tpl-card" style={{ border: '1.5px solid #e2e8f0', borderRadius: 12, background: '#fff', overflow: 'hidden' }}>
                   <TemplateThumbnail html={t.body_html} />
