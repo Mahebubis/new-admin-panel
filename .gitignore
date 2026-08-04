@@ -1,6 +1,15 @@
 # Backend (PHP) — not tracked on GitHub
 react-api/
 
+# Separate applications that live here only as working copies. Neither belongs
+# in this repo's history: user_dashboard is the dashboard.internshipstudio.com
+# app (deployed over SFTP) and payment_api has its own repo entirely
+# (github.com/gamentionkray/istudio-payment-go, pulled directly on the server).
+# Committing them also pushed ~71 MiB and tripped GitHub push protection, since
+# user_dashboard's PHP carries live SendGrid and AWS keys in plaintext.
+user_dashboard/
+payment_api/
+
 # Secrets — must NEVER be committed
 react-api/config/aws.php
 

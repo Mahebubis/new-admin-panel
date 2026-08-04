@@ -52,6 +52,9 @@ const Api = {
   itemAddFile: (form)    => call('action=item_add', form, true),   // multipart
   itemAddLink: (d)       => call('action=item_add', d),            // json
   itemRemove: (id)       => call('action=item_delete', { id }),
+  /* re-upload — swap the S3 file behind an existing row, keeping its id */
+  reuploadFile: (form)   => call('action=reupload', form, true),        // parent statement file
+  itemReupload: (form)   => call('action=item_reupload', form, true),   // resource / dataset item
 };
 
 /* ── lightweight client cache (stale-while-revalidate) so revisits are instant ── */
@@ -436,13 +439,44 @@ function DraftRow({ item, isDataset, onChange, onRemove }) {
   );
 }
 
-/* a persisted (already-saved) item shown in edit mode with a remove button */
-function SavedItemRow({ item, onRemove }) {
+/* a persisted (already-saved) item shown in edit mode, with re-upload + remove */
+function SavedItemRow({ item, onRemove, onReplaced }) {
   const isLink = item.kind === 'link';
   const meta = typeMeta(item.file_type);
   const Ic = isLink ? LinkIcon : meta.icon;
   const name = item.label || item.file_name || item.url || 'Item';
   const href = isLink ? item.url : item.file_url;
+
+  /* replace the S3 file on this same item id — nothing else about the row moves */
+  const reRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const replace = async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    if (f.size > 50 * 1024 * 1024) return toast.error('File must be under 50MB');
+    const ok = window.confirm(
+      `Replace the file behind "${name}"?\n\n` +
+      `• "${f.name}" is uploaded to S3 and gets a fresh URL\n` +
+      `• item id #${item.id} stays exactly the same\n` +
+      `• the previous URL is saved so this can be reverted`
+    );
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append('id', item.id);
+      fd.append('file', f);
+      const d = await Api.itemReupload(fd);
+      toast.success('File replaced — new S3 URL saved on the same record');
+      onReplaced?.({
+        ...item, file_url: d.file_url, file_key: d.file_key, file_name: d.file_name,
+        file_type: d.file_type, file_size: d.file_size, mime_type: d.mime_type,
+      });
+    } catch (err) { toast.error(err.message || 'Re-upload failed'); }
+    finally { setBusy(false); }
+  };
+
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px',
       border: `1px solid ${C.line}`, borderRadius: 10, background: '#fff' }}>
@@ -455,6 +489,17 @@ function SavedItemRow({ item, onRemove }) {
           overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</div>
         <div style={{ fontSize: 11, color: C.faint }}>{isLink ? 'Link' : (meta.label + (item.file_size ? ` · ${fmtSize(item.file_size)}` : ''))}</div>
       </div>
+      {!isLink && (
+        <>
+          <input ref={reRef} type="file" style={{ display: 'none' }} onChange={replace} />
+          <button type="button" disabled={busy} onClick={() => reRef.current?.click()}
+            title="Re-upload — replace this file with a new S3 upload (item id stays the same)"
+            style={{ ...reupBtn, opacity: busy ? 0.6 : 1, cursor: busy ? 'not-allowed' : 'pointer' }}>
+            {busy ? <Spin size={13} /> : <RefreshCw size={13} />}
+            <span>{busy ? 'Uploading…' : 'Re-upload'}</span>
+          </button>
+        </>
+      )}
       <a href={href} target="_blank" rel="noopener noreferrer" title="Open"
         style={{ ...iconBtn, textDecoration: 'none' }}><ExternalLink size={15} /></a>
       <button type="button" onClick={onRemove} style={iconBtnDanger} title="Remove"><Trash2 size={15} /></button>
@@ -545,7 +590,8 @@ function StatementModal({ domain, editing, onClose, onSaved }) {
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
         {list.map(it => it.persisted
-          ? <SavedItemRow key={it.id} item={it} onRemove={() => removeItem(setList)(it)} />
+          ? <SavedItemRow key={it.id} item={it} onRemove={() => removeItem(setList)(it)}
+              onReplaced={(next) => setList(l => l.map(x => x.id === it.id ? { ...next, persisted: true } : x))} />
           : <DraftRow key={it.tempId} item={it} isDataset={isDataset}
               onChange={(next) => upd(setList)(it.tempId, next)} onRemove={() => removeItem(setList)(it)} />)}
         <button type="button" onClick={addDraft(setList)}
@@ -689,7 +735,8 @@ function DomainDetail({ domain, onBack, onCountChange }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {rows.map(r => <StatementRow key={r.id} row={r}
             onEdit={() => setModal({ editing: r })}
-            onDelete={() => setConfirmDel(r)} />)}
+            onDelete={() => setConfirmDel(r)}
+            onChanged={() => load(true)} />)}
         </div>
       )}
 
@@ -708,7 +755,7 @@ function DomainDetail({ domain, onBack, onCountChange }) {
 }
 
 /* one resource/dataset line within a statement */
-function ItemLine({ item, onView }) {
+function ItemLine({ item, onView, onReupload, busy }) {
   const isLink = item.kind === 'link';
   const meta = typeMeta(item.file_type);
   const Ic = isLink ? LinkIcon : meta.icon;
@@ -726,6 +773,16 @@ function ItemLine({ item, onView }) {
           overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</div>
         <div style={{ fontSize: 11, color: C.faint }}>{sub}</div>
       </div>
+      {/* re-upload: replaces the S3 file on this exact record id */}
+      {!isLink && onReupload && (
+        <button type="button" disabled={busy}
+          title="Re-upload — replace this file with a new S3 upload (record id stays the same)"
+          onClick={(e) => { e.stopPropagation(); onReupload(item); }}
+          style={{ ...reupBtn, opacity: busy ? 0.6 : 1, cursor: busy ? 'not-allowed' : 'pointer' }}>
+          {busy ? <Spin size={13} /> : <RefreshCw size={13} />}
+          <span>{busy ? 'Uploading…' : 'Re-upload'}</span>
+        </button>
+      )}
       {isLink ? <ExternalLink size={15} color={C.faint} /> : <Eye size={15} color={C.accent} />}
     </>
   );
@@ -736,22 +793,74 @@ function ItemLine({ item, onView }) {
     : <div style={baseStyle} onClick={() => onView(item)}>{inner}</div>;
 }
 
+/* small "Re-upload" pill shown on every uploaded (non-link) item line */
+const reupBtn = {
+  display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0,
+  height: 28, padding: '0 10px', borderRadius: 8, border: `1px solid ${C.line}`,
+  background: '#fff', color: C.body, fontSize: 11.5, fontWeight: 600,
+};
+
 /* single statement row — header + grouped resources & datasets + description */
-function StatementRow({ row, onEdit, onDelete }) {
+function StatementRow({ row, onEdit, onDelete, onChanged }) {
   const [open, setOpen] = useState(false);
   const [viewItem, setViewItem] = useState(null);
   const hasDesc = row.description && row.description.replace(/<[^>]+>/g, '').trim().length > 0;
 
   const items = row.items || [];
-  /* legacy single file stored on the parent → show as a resource */
+  /* legacy single file stored on the parent → show as a resource.
+     Re-uploading it targets the parent statement row, not an item. */
   const legacy = row.file_url
     ? [{ id: `legacy-${row.id}`, kind: 'file', category: 'resource', label: row.file_name,
          file_url: row.file_url, file_name: row.file_name, file_type: row.file_type,
-         file_size: row.file_size, mime_type: row.mime_type }]
+         file_size: row.file_size, mime_type: row.mime_type,
+         _scope: 'statement', _targetId: row.id }]
     : [];
   const resources = [...legacy, ...items.filter(i => (i.category || 'resource') === 'resource')];
   const datasets  = items.filter(i => i.category === 'dataset');
   const total = resources.length + datasets.length;
+
+  /* ---- re-upload: new S3 upload written back onto the SAME record id, so
+     nothing that references this problem statement / dataset breaks. The old
+     URL is stored server-side (internship_attachment_reupload_log) for revert. */
+  const reFileRef = useRef(null);
+  const reTarget = useRef(null);
+  const [replacingId, setReplacingId] = useState(null);
+
+  const pickReplacement = (item) => {
+    reTarget.current = item;
+    if (reFileRef.current) { reFileRef.current.value = ''; reFileRef.current.click(); }
+  };
+  const onReplacementChosen = async (e) => {
+    const f = e.target.files?.[0];
+    const item = reTarget.current;
+    e.target.value = '';
+    reTarget.current = null;
+    if (!f || !item) return;
+    if (f.size > 50 * 1024 * 1024) return toast.error('File must be under 50MB');
+
+    const scope = item._scope === 'statement' ? 'statement' : 'item';
+    const targetId = item._targetId ?? item.id;
+    const label = item.label || item.file_name || 'this file';
+    const ok = window.confirm(
+      `Replace the file behind "${label}"?\n\n` +
+      `• "${f.name}" is uploaded to S3 and gets a fresh URL\n` +
+      `• record id #${targetId} stays exactly the same\n` +
+      `• the previous URL is saved so this can be reverted`
+    );
+    if (!ok) return;
+
+    setReplacingId(item.id);
+    try {
+      const fd = new FormData();
+      fd.append('id', targetId);
+      fd.append('file', f);
+      if (scope === 'statement') await Api.reuploadFile(fd);
+      else await Api.itemReupload(fd);
+      toast.success('File replaced — new S3 URL saved on the same record');
+      onChanged?.();
+    } catch (err) { toast.error(err.message || 'Re-upload failed'); }
+    finally { setReplacingId(null); }
+  };
 
   return (
     <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, background: '#fff', overflow: 'hidden' }}>
@@ -793,7 +902,8 @@ function StatementRow({ row, onEdit, onDelete }) {
             <div>
               <div style={subHead}><Paperclip size={13} /> Files & links</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {resources.map(it => <ItemLine key={it.id} item={it} onView={setViewItem} />)}
+                {resources.map(it => <ItemLine key={it.id} item={it} onView={setViewItem}
+                  onReupload={pickReplacement} busy={replacingId === it.id} />)}
               </div>
             </div>
           )}
@@ -801,7 +911,8 @@ function StatementRow({ row, onEdit, onDelete }) {
             <div>
               <div style={subHead}><Database size={13} /> Datasets</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {datasets.map(it => <ItemLine key={it.id} item={it} onView={setViewItem} />)}
+                {datasets.map(it => <ItemLine key={it.id} item={it} onView={setViewItem}
+                  onReupload={pickReplacement} busy={replacingId === it.id} />)}
               </div>
             </div>
           )}
@@ -810,6 +921,9 @@ function StatementRow({ row, onEdit, onDelete }) {
           )}
         </div>
       )}
+
+      {/* hidden picker shared by every "Re-upload" button in this statement */}
+      <input ref={reFileRef} type="file" style={{ display: 'none' }} onChange={onReplacementChosen} />
 
       {viewItem && <FileViewer row={viewItem} onClose={() => setViewItem(null)} />}
     </div>

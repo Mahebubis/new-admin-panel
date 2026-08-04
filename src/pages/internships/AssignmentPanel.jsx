@@ -22,7 +22,7 @@ import {
   FileText, FileSpreadsheet, Presentation, ListFilter, CircleDot,
   CheckSquare, Upload, Bold, Italic, Underline, Strikethrough, List,
   ListOrdered, Eraser, Table, Highlighter, Baseline, ImagePlus, Download,
-  FileArchive, Star, UploadCloud, ClipboardList,
+  FileArchive, Star, UploadCloud, ClipboardList, RefreshCw,
 } from "lucide-react";
 
 /* ===========================================================================
@@ -72,6 +72,8 @@ const A = {
 
   listAttachments: (aid) => api(`resource=attachments&action=list&assignment_id=${aid}`),
   createAttachment: (fd) => apiForm("resource=attachments&action=create", fd),
+  /* swap the S3 file behind an existing attachment — same row id, new URL */
+  reuploadAttachment: (fd) => apiForm("resource=attachments&action=reupload", fd),
   updateAttachment: (d) => api("resource=attachments&action=update", d),
   deleteAttachment: (id) => api("resource=attachments&action=delete", { id }),
   reorderAttachments: (order) => api("resource=attachments&action=reorder", { order }),
@@ -792,6 +794,10 @@ function AttachmentManager({ assignment }) {
   const fileRef = useRef(null);
   const drag = useRef(null);
   const [overIdx, setOverIdx] = useState(null);
+  /* re-upload (replace the file behind an existing row, keeping its id) */
+  const reFileRef = useRef(null);
+  const reTarget = useRef(null);
+  const [replacingId, setReplacingId] = useState(null);
 
   const load = useCallback(async () => {
     try { setItems((await A.listAttachments(assignment.id)).attachments || []); }
@@ -838,6 +844,42 @@ function AttachmentManager({ assignment }) {
       await load();
     } catch (e) { toast.error(e.message); }
   };
+  /* ---- re-upload -------------------------------------------------------
+     Picks a replacement file for an EXISTING attachment. The row id, label,
+     description, required flag and order all stay as they are — only the S3
+     URL is refreshed — so every student submission linked to this id keeps
+     working. The old URL is stored server-side and can be restored. */
+  const pickReplacement = (it) => {
+    reTarget.current = it;
+    if (reFileRef.current) { reFileRef.current.value = ""; reFileRef.current.click(); }
+  };
+  const onReplacementChosen = async (e) => {
+    const f = e.target.files?.[0];
+    const it = reTarget.current;
+    e.target.value = "";
+    reTarget.current = null;
+    if (!f || !it) return;
+    const ok = window.confirm(
+      `Replace the file behind "${it.title || it.file_name}"?\n\n` +
+      `• "${f.name}" is uploaded to S3 and gets a fresh URL\n` +
+      `• attachment id #${it.id} stays exactly the same\n` +
+      `• the previous URL is saved so this can be reverted`
+    );
+    if (!ok) return;
+    setReplacingId(it.id);
+    try {
+      const fd = new FormData();
+      fd.append("id", it.id);
+      fd.append("file", f);
+      await A.reuploadAttachment(fd);
+      toast.success("File replaced — new S3 URL saved on the same record");
+      /* drawer copy would show the stale file name — close it */
+      setEditing((p) => (p && p.id === it.id ? null : p));
+      await load();
+    } catch (err) { toast.error(err.message); }
+    finally { setReplacingId(null); }
+  };
+
   const remove = async (it) => {
     if (!window.confirm(`Remove "${it.title || it.file_name}"?`)) return;
     try { await A.deleteAttachment(it.id); toast.success("Attachment removed"); await load(); }
@@ -961,6 +1003,15 @@ function AttachmentManager({ assignment }) {
                     <a className="asg-btn asg-btn-ghost asg-btn-sm" href={it.file_url} target="_blank" rel="noreferrer" title="Open / download">
                       <Download size={13} />
                     </a>
+                    {it.kind !== "link" && (
+                      <button className="asg-btn asg-btn-ghost asg-btn-sm asg-att-reup"
+                        disabled={replacingId === it.id}
+                        title="Re-upload — replace this file with a new S3 upload (record id stays the same)"
+                        onClick={() => pickReplacement(it)}>
+                        <RefreshCw size={13} className={replacingId === it.id ? "asg-rot" : ""} />
+                        <span>{replacingId === it.id ? "Uploading…" : "Re-upload"}</span>
+                      </button>
+                    )}
                     <button className="asg-btn asg-btn-ghost asg-btn-sm" onClick={() => setEditing({ ...it })}>
                       <Pencil size={13} />
                     </button>
@@ -974,6 +1025,9 @@ function AttachmentManager({ assignment }) {
           })}
         </div>
       )}
+
+      {/* hidden picker used by every row's "Re-upload" button */}
+      <input ref={reFileRef} type="file" style={{ display: "none" }} onChange={onReplacementChosen} />
 
       {/* edit attachment meta drawer */}
       {editing && (
@@ -1008,9 +1062,25 @@ function AttachmentManager({ assignment }) {
                   onClick={() => setEditing((p) => ({ ...p, is_required: !p.is_required }))} />
                 Mark as required
               </label>
-              <p className="asg-field-help" style={{ marginTop: 14 }}>
-                The uploaded file can't be swapped here — delete and re-upload to replace it.
-              </p>
+              {editing.kind !== "link" && (
+                <div className="asg-reup-box">
+                  <div className="asg-reup-head"><RefreshCw size={14} /> Replace the uploaded file</div>
+                  <p className="asg-field-help" style={{ margin: "6px 0 10px" }}>
+                    Upload the file again to get a fresh S3 URL. Attachment id
+                    <b> #{editing.id}</b> is not changed, so student submissions
+                    attached to it are unaffected — and the old URL is kept for revert.
+                  </p>
+                  <div className="asg-att-meta" style={{ marginBottom: 10 }}>
+                    <span className="asg-chip">current</span>
+                    <span style={{ wordBreak: "break-all" }}>{editing.file_name}</span>
+                  </div>
+                  <button className="asg-btn asg-btn-ghost" disabled={replacingId === editing.id}
+                    onClick={() => pickReplacement(editing)}>
+                    <RefreshCw size={14} className={replacingId === editing.id ? "asg-rot" : ""} />
+                    {replacingId === editing.id ? "Uploading…" : "Choose replacement file"}
+                  </button>
+                </div>
+              )}
             </div>
             <div className="asg-drawer-foot">
               <button className="asg-btn asg-btn-ghost" onClick={() => setEditing(null)}>Cancel</button>
@@ -1486,7 +1556,15 @@ const ASG_CSS = `
 .asg-att-title{font-size:13.5px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 .asg-att-desc{font-size:12px;color:var(--asg-text-2);margin-top:3px;line-height:1.45;}
 .asg-att-meta{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--asg-text-3);margin-top:6px;align-items:center;}
-.asg-att-acts{display:flex;gap:5px;flex-shrink:0;}
+.asg-att-acts{display:flex;gap:5px;flex-shrink:0;align-items:center;}
+/* re-upload (replace the S3 file, keep the record id) */
+.asg-att-reup{gap:6px;}
+.asg-att-reup span{font-size:11.5px;font-weight:600;}
+.asg-att-reup:hover:not(:disabled){border-color:var(--asg-accent);color:var(--asg-accent-text);}
+.asg-att-reup:disabled{opacity:.6;cursor:not-allowed;}
+.asg-reup-box{margin-top:16px;padding:14px;border:1px dashed var(--asg-border-2);border-radius:var(--asg-r);background:var(--asg-bg-soft);}
+.asg-reup-head{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;color:var(--asg-text);}
+.asg-rot{animation:asg-spin .8s linear infinite;}
 .asg-chip{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--asg-bg-soft);color:var(--asg-text-2);text-transform:uppercase;letter-spacing:.03em;}
 .asg-chip.req{background:var(--asg-danger-soft);color:var(--asg-danger-text);}
 /* form builder */
