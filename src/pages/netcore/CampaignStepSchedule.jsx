@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
 
+// Display names for email_campaigns.esp_transport. 'mailwizz' is retired but still a legal
+// stored value on campaigns created before it was removed, so it keeps a label here.
+const ESP_LABELS = { sendgrid: 'SendGrid', elasticemail: 'Elastic Email', mailwizz: 'MailWizz (retired)' };
+
 const inp = { width: '100%', padding: '10px 12px', border: '1.5px solid #e2e8f0', borderRadius: 8, fontSize: 12.5, fontFamily: 'inherit', color: '#1e293b', outline: 'none', boxSizing: 'border-box' };
 const card = { background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 20, marginBottom: 18 };
 const Toggle = ({ on, onClick }) => (
@@ -95,7 +99,7 @@ export default function CampaignStepSchedule({ draft, setField, onValidChange, s
               <Fact label="Google Analytics" value={draft.ga_enabled ? [draft.ga_source, draft.ga_medium, draft.ga_campaign].filter(Boolean).join(' / ') || 'On' : 'Off'} />
               <Fact label="Conversion goal" value={draft.goal_enabled ? `${draft.goal_event_name || 'Event not set'} (within ${draft.goal_window_days || 2}d)` : 'Off'} />
               <Fact label="Exam tie-in" value={draft.exam_cit_version || 'None'} />
-              <Fact label="Sending via" value={draft.esp_transport === 'mailwizz' ? 'MailWizz' : 'SendGrid'} />
+              <Fact label="Sending via" value={ESP_LABELS[draft.esp_transport] || 'SendGrid'} />
             </Group>
 
             <Group title="Attachments">

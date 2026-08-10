@@ -113,7 +113,7 @@ export default function CampaignCreateFlow({ flow, setFlow }) {
               <SmallTile icon={I.sms} label="SMS" disabled />
               <SmallTile icon={I.bell} label="App push" disabled />
               <SmallTile icon={I.bell} label="Web push" disabled />
-              <SmallTile icon={I.whatsapp} label="WhatsApp" disabled />
+              <SmallTile icon={I.whatsapp} label="WhatsApp" onClick={() => { close(); nav('/netcore/whatsapp/new'); }} />
               <SmallTile icon={I.sms} label="RCS" disabled />
             </div>
 

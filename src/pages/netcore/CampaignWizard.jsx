@@ -150,7 +150,11 @@ export default function CampaignWizard() {
       const res = await api.post(CAMP_API, body, FORM);
       if (res.data.success) {
         const newId = res.data.data.id;
-        const updated = { ...draft, id: newId, reachable_count: res.data.data.reachable_count ?? draft.reachable_count, status: res.data.data.status ?? draft.status };
+        // esp_transport comes back from the server rather than staying at the local default:
+        // on the first save of a NEW campaign the backend stamps it with whichever provider is
+        // the Active sender in ESP Settings (there's no per-campaign picker), so echoing it
+        // back is what keeps the Schedule step's "Sending via" line honest.
+        const updated = { ...draft, id: newId, reachable_count: res.data.data.reachable_count ?? draft.reachable_count, status: res.data.data.status ?? draft.status, esp_transport: res.data.data.esp_transport ?? draft.esp_transport };
         setDraft(updated);
         lastSavedRef.current = JSON.stringify(updated);
         return newId;

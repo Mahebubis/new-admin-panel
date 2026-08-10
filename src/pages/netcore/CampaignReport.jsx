@@ -166,8 +166,14 @@ export default function CampaignReport() {
         <StatTile label="Total recipients" value={n0(c.total_recipients)} />
         <StatTile label="Sent" value={n0(c.sent_count)} sub={pct(c.sent_count, c.total_recipients)} />
         <StatTile label="Delivered" value={n0(c.delivered_count)} sub={pct(c.delivered_count, c.total_recipients)} color="#15803d" />
-        <StatTile label="Opened" value={n0(c.unique_open_count)} sub={`${pct(c.unique_open_count, c.delivered_count)} · ${n0(c.open_count)} total opens`} color="#1d4ed8" />
-        <StatTile label="Clicked" value={n0(c.unique_click_count)} sub={`${pct(c.unique_click_count, c.delivered_count)} · ${n0(c.click_count)} total clicks`} color="#15803d" />
+        {/* The "N filtered" suffixes are machine fetches excluded from these numbers —
+            Apple Mail prefetching images on delivery, security scanners, duplicate
+            re-renders. Shown rather than hidden so a suspiciously low open rate can be
+            explained, and so a mis-tuned filter is visible instead of silent. */}
+        <StatTile label="Opened" value={n0(c.unique_open_count)} color="#1d4ed8"
+          sub={`${pct(c.unique_open_count, c.delivered_count)} · ${n0(c.open_count)} total opens${c.bot_open_count > 0 ? ` · ${n0(c.bot_open_count)} filtered` : ''}`} />
+        <StatTile label="Clicked" value={n0(c.unique_click_count)} color="#15803d"
+          sub={`${pct(c.unique_click_count, c.delivered_count)} · ${n0(c.click_count)} total clicks${c.bot_click_count > 0 ? ` · ${n0(c.bot_click_count)} filtered` : ''}`} />
         <StatTile label="Bounced" value={n0(c.bounce_count)} sub={`Hard: ${n0(c.hard_bounce_count)} · Soft: ${n0(c.soft_bounce_count)}`} color="#dc2626" />
         <StatTile label="Unsubscribed" value={n0(c.unsubscribe_count)} color="#c2410c" />
         {c.goal_event_name && <StatTile label="Conversions" value={n0(c.conversion_count)} sub={`${pct(c.conversion_count, c.total_recipients)} · click-attributed`} color="#7c3aed" />}

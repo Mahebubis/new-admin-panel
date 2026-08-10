@@ -8,10 +8,11 @@ const mk  = obj => new URLSearchParams(obj);
 
 const tdS = { padding:'9px 12px', borderBottom:'1px solid #f5f3ff', color:'#334155', fontSize:12, verticalAlign:'middle' };
 
-/* status → api value */
+/* status → api value (ninety_nine_store_orders.status enum) */
 const STATUS_TABS = [
   { key:'success',   label:'Payment Success', hint:'status = success' },
   { key:'initiated', label:'Add to Cart',     hint:'status = initiated' },
+  { key:'failed',    label:'Failed',          hint:'status = failed' },
 ];
 
 const RANGES = [
@@ -30,7 +31,28 @@ const PROVIDERS = [
 
 const PER_PAGE_OPTIONS = [20, 50, 100, 200];
 
+const COLUMNS = ['#','Name','Email','Mobile','State','Courses','Batch','Payment ID','Order ID','Provider','Amount','Status','Date'];
+
 const inr = n => '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+
+const STATUS_PILL = {
+  success:   { label:'Success',   bg:'#dcfce7', color:'#15803d' },
+  initiated: { label:'Initiated', bg:'#fef3c7', color:'#b45309' },
+  failed:    { label:'Failed',    bg:'#fee2e2', color:'#b91c1c' },
+};
+
+/* the API always returns `courses` as an array of {name, slug, price};
+   this stays defensive in case an older payload comes back as a raw string */
+const courseList = (r) => {
+  if (Array.isArray(r.courses) && r.courses.length) return r.courses;
+  if (typeof r.courses === 'string' && r.courses.trim()) {
+    try {
+      const d = JSON.parse(r.courses);
+      if (Array.isArray(d)) return d.map(c => (typeof c === 'string' ? { name:c } : c));
+    } catch { /* fall through to the single-course shape */ }
+  }
+  return r.course_name || r.course_slug ? [{ name: r.course_name, slug: r.course_slug }] : [];
+};
 
 export default function PurchasedStarterKit() {
   const [status,   setStatus]   = useState('success');
@@ -46,7 +68,11 @@ export default function PurchasedStarterKit() {
   const [perPage,  setPerPage]  = useState(20);
   const [loading,  setLoading]  = useState(true);
 
-  const [stats,    setStats]    = useState({ success_count:0, initiated_count:0, success_amount:0, initiated_amount:0 });
+  const [stats,    setStats]    = useState({
+    success_count:0, initiated_count:0, failed_count:0,
+    success_amount:0, initiated_amount:0, failed_amount:0,
+    success_courses:0, initiated_courses:0, failed_courses:0,
+  });
   const [statsLoading, setStatsLoading] = useState(true);
 
   /* custom range needs both dates before it fires */
@@ -96,7 +122,8 @@ export default function PurchasedStarterKit() {
 
   const copy = (text) => { if (!text) return; navigator.clipboard.writeText(text); toast.success('Copied!'); };
 
-  /* ── download Excel for the selected date range (+ provider, current status tab) ── */
+  /* ── download Excel for the selected date range (+ provider, current status tab).
+        Sheet 1 = one row per order, Sheet 2 = one row per course in that order. ── */
   const downloadExcel = async () => {
     if (!rangeReady) { toast.error('Pick both custom dates first'); return; }
     setDownloading(true);
@@ -118,32 +145,61 @@ export default function PurchasedStarterKit() {
         });
       }
 
-      const sheet = data.map((r, i) => ({
-        '#':          i + 1,
-        'Name':       r.name    || '',
-        'Email':      r.email   || '',
-        'Mobile':     r.phone   || '',
-        'Payment ID': r.payment_id || '',
-        'Order ID':   r.order_id   || '',
-        'Provider':   r.provider   || '',
-        'Amount':     Number(r.amount || 0),
-        'Status':     r.status  || '',
-        'Paid Date':  r.paid_at || '',
-      }));
-      const ws = window.XLSX.utils.json_to_sheet(sheet);
+      const orders = data.map((r, i) => {
+        const cs = courseList(r);
+        return {
+          '#':            i + 1,
+          'Name':         r.name    || '',
+          'Email':        r.email   || '',
+          'Mobile':       r.phone   || r.phone_number || '',
+          'State':        r.state   || '',
+          'Courses':      cs.map(c => c.name || c.slug).join(', '),
+          'Course Count': Number(r.course_count || cs.length || 0),
+          'Batch':        r.batch      || '',
+          'Payment ID':   r.payment_id || '',
+          'Order ID':     r.order_id   || '',
+          'Provider':     r.provider   || '',
+          'Amount':       Number(r.amount || 0),
+          'Status':       r.status  || '',
+          'Date':         r.paid_at || '',
+        };
+      });
+
+      /* course-wise sheet — a buyer with 3 courses becomes 3 rows */
+      const courses = [];
+      data.forEach((r, i) => {
+        courseList(r).forEach(c => {
+          courses.push({
+            'Order #':     i + 1,
+            'Name':        r.name  || '',
+            'Email':       r.email || '',
+            'Mobile':      r.phone || r.phone_number || '',
+            'State':       r.state || '',
+            'Course Name': c.name  || '',
+            'Course Slug': c.slug  || '',
+            'Price':       c.price == null ? '' : Number(c.price),
+            'Batch':       r.batch      || '',
+            'Order ID':    r.order_id   || '',
+            'Payment ID':  r.payment_id || '',
+            'Provider':    r.provider   || '',
+            'Status':      r.status     || '',
+            'Date':        r.paid_at    || '',
+          });
+        });
+      });
+
       const wb = window.XLSX.utils.book_new();
-      window.XLSX.utils.book_append_sheet(wb, ws, 'Starter Kit');
+      window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(orders),  'Orders');
+      window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(courses), 'Course-wise');
 
       const rangeTag = range === 'custom' ? `${start}_to_${end}` : range;
       window.XLSX.writeFile(wb, `starter_kit_${status}_${provider}_${rangeTag}.xlsx`);
-      toast.success(`Exported ${data.length} record(s)`);
+      toast.success(`Exported ${orders.length} order(s) / ${courses.length} course(s)`);
     } catch { toast.error('Excel export failed'); }
     finally { setDownloading(false); }
   };
 
   const totalPages = Math.max(1, Math.ceil(total / perPage));
-
-  const activeCount = status === 'success' ? stats.success_count : stats.initiated_count;
 
   return (
     <>
@@ -217,16 +273,23 @@ export default function PurchasedStarterKit() {
           </div>
         </div>
 
-        {/* ── stat cards ── */}
+        {/* ── stat cards — count = orders, sub-line also carries courses sold ── */}
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))', gap:14, marginBottom:16 }}>
           <StatCard label="Payment Success" value={statsLoading ? '…' : stats.success_count}
-            sub={statsLoading ? '' : inr(stats.success_amount) + ' collected'}
+            sub={statsLoading ? '' : `${inr(stats.success_amount)} collected`}
+            sub2={statsLoading ? '' : `${stats.success_courses || 0} course(s) sold`}
             active={status==='success'} color="#16a34a" bg="#f0fdf4"
             onClick={() => changeStatus('success')}/>
           <StatCard label="Add to Cart (Initiated)" value={statsLoading ? '…' : stats.initiated_count}
-            sub={statsLoading ? '' : inr(stats.initiated_amount) + ' pending'}
+            sub={statsLoading ? '' : `${inr(stats.initiated_amount)} pending`}
+            sub2={statsLoading ? '' : `${stats.initiated_courses || 0} course(s) in cart`}
             active={status==='initiated'} color="#d97706" bg="#fffbeb"
             onClick={() => changeStatus('initiated')}/>
+          <StatCard label="Failed" value={statsLoading ? '…' : stats.failed_count}
+            sub={statsLoading ? '' : `${inr(stats.failed_amount)} lost`}
+            sub2={statsLoading ? '' : `${stats.failed_courses || 0} course(s)`}
+            active={status==='failed'} color="#dc2626" bg="#fef2f2"
+            onClick={() => changeStatus('failed')}/>
         </div>
 
         {/* ── status tabs (redundant with cards, but explicit) ── */}
@@ -275,7 +338,7 @@ export default function PurchasedStarterKit() {
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
               <thead>
                 <tr style={{ background:'linear-gradient(135deg,#4f46e5,#7c3aed)' }}>
-                  {['#','Name','Email','Mobile','Payment ID','Order ID','Provider','Amount','Status','Paid Date'].map(h => (
+                  {COLUMNS.map(h => (
                     <th key={h} style={{ color:'#fff', fontSize:11, fontWeight:600, padding:'11px 12px',
                       textAlign:'left', textTransform:'uppercase', letterSpacing:'.3px',
                       borderRight:'1px solid rgba(255,255,255,.15)', whiteSpace:'nowrap' }}>{h}</th>
@@ -284,12 +347,12 @@ export default function PurchasedStarterKit() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={10} style={{ textAlign:'center', padding:40 }}>
+                  <tr><td colSpan={COLUMNS.length} style={{ textAlign:'center', padding:40 }}>
                     <div style={{ display:'inline-block', width:28, height:28, border:'3px solid #ede9fe',
                       borderTop:'3px solid #4f46e5', borderRadius:'50%', animation:'sk_spin .7s linear infinite' }}/>
                   </td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan={10} style={{ textAlign:'center', color:'#94a3b8', padding:36, fontSize:13 }}>
+                  <tr><td colSpan={COLUMNS.length} style={{ textAlign:'center', color:'#94a3b8', padding:36, fontSize:13 }}>
                     No records found for this filter
                   </td></tr>
                 ) : rows.map((r, i) => (
@@ -303,7 +366,10 @@ export default function PurchasedStarterKit() {
                           style={{ background:'none', border:'none', cursor:'pointer', color:'#94a3b8', fontSize:11, padding:2 }}>⧉</button>}
                       </div>
                     </td>
-                    <td style={{ ...tdS, minWidth:110, fontSize:11.5 }}>{r.phone || '—'}</td>
+                    <td style={{ ...tdS, minWidth:110, fontSize:11.5 }}>{r.phone || r.phone_number || '—'}</td>
+                    <td style={{ ...tdS, fontSize:11.5, minWidth:100 }}>{r.state || '—'}</td>
+                    <td style={{ ...tdS, minWidth:230 }}><CoursesCell row={r}/></td>
+                    <td style={{ ...tdS, fontSize:11.5, whiteSpace:'nowrap' }}>{r.batch || '—'}</td>
                     <td style={{ ...tdS, fontSize:11, minWidth:120 }}>
                       <div style={{ display:'flex', alignItems:'center', gap:4 }}>
                         <span>{r.payment_id || '—'}</span>
@@ -321,11 +387,13 @@ export default function PurchasedStarterKit() {
                     <td style={{ ...tdS, fontSize:11, textTransform:'capitalize' }}>{r.provider || '—'}</td>
                     <td style={{ ...tdS, fontWeight:700, color:'#1e293b' }}>{inr(r.amount)}</td>
                     <td style={tdS}>
-                      <span style={{ padding:'2px 9px', borderRadius:99, fontSize:10.5, fontWeight:700,
-                        background: r.status==='success' ? '#dcfce7' : '#fef3c7',
-                        color: r.status==='success' ? '#15803d' : '#b45309' }}>
-                        {r.status==='success' ? 'Success' : 'Initiated'}
-                      </span>
+                      {(() => {
+                        const p = STATUS_PILL[r.status] || { label: r.status || '—', bg:'#f1f5f9', color:'#475569' };
+                        return (
+                          <span style={{ padding:'2px 9px', borderRadius:99, fontSize:10.5, fontWeight:700,
+                            background:p.bg, color:p.color }}>{p.label}</span>
+                        );
+                      })()}
                     </td>
                     <td style={{ ...tdS, fontSize:11, whiteSpace:'nowrap' }}>{r.paid_at || '—'}</td>
                   </tr>
@@ -366,7 +434,47 @@ export default function PurchasedStarterKit() {
   );
 }
 
-function StatCard({ label, value, sub, active, color, bg, onClick }) {
+/* One order can hold several courses — show the first one and fold the rest
+   behind "+N More..", which expands the full list in place. */
+function CoursesCell({ row }) {
+  const [open, setOpen] = useState(false);
+  const list = courseList(row);
+
+  if (!list.length) return <span style={{ color:'#94a3b8' }}>—</span>;
+
+  const shown  = open ? list : list.slice(0, 1);
+  const hidden = list.length - shown.length;
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+      {shown.map((c, i) => (
+        <div key={(c.slug || c.name || '') + i} style={{ fontSize:11.5, color:'#334155', lineHeight:1.35 }}>
+          {open && <span style={{ color:'#c4b5fd', marginRight:4 }}>•</span>}
+          {c.name || c.slug || '—'}
+          {c.price != null && c.price !== '' && (
+            <span style={{ color:'#94a3b8', marginLeft:5 }}>{inr(c.price)}</span>
+          )}
+        </div>
+      ))}
+      {hidden > 0 && (
+        <button onClick={() => setOpen(true)}
+          style={{ alignSelf:'flex-start', background:'none', border:'none', padding:0, cursor:'pointer',
+            fontSize:11, fontWeight:700, color:'#4f46e5', fontFamily:'inherit' }}>
+          +{hidden} More..
+        </button>
+      )}
+      {open && list.length > 1 && (
+        <button onClick={() => setOpen(false)}
+          style={{ alignSelf:'flex-start', background:'none', border:'none', padding:0, cursor:'pointer',
+            fontSize:11, fontWeight:700, color:'#94a3b8', fontFamily:'inherit' }}>
+          show less
+        </button>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ label, value, sub, sub2, active, color, bg, onClick }) {
   return (
     <div onClick={onClick}
       style={{ background: active ? bg : '#fff', borderRadius:12, padding:'16px 18px', cursor:'pointer',
@@ -376,7 +484,8 @@ function StatCard({ label, value, sub, active, color, bg, onClick }) {
         {label}
       </div>
       <div style={{ fontSize:28, fontWeight:800, color, marginTop:6, lineHeight:1 }}>{value}</div>
-      {sub && <div style={{ fontSize:12, color:'#94a3b8', marginTop:6, fontWeight:600 }}>{sub}</div>}
+      {sub  && <div style={{ fontSize:12, color:'#94a3b8', marginTop:6, fontWeight:600 }}>{sub}</div>}
+      {sub2 && <div style={{ fontSize:11, color:'#cbd5e1', marginTop:2, fontWeight:600 }}>{sub2}</div>}
     </div>
   );
 }

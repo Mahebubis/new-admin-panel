@@ -12,16 +12,22 @@ const SECTIONS = {
     { to: '/netcore/attributes', label: 'Attributes' },
   ] },
   engage:    { title: 'Engage',     items: [
-    { to: '/netcore/campaigns', label: 'Campaigns' },
+    { to: '/netcore/campaigns', label: 'Email campaigns' },
+    { to: '/netcore/whatsapp',  label: 'WhatsApp campaigns' },
+    { to: '/netcore/whatsapp/inbox', label: 'WhatsApp live chat' },
   ] },
   content:   { title: 'Content',    items: [
-    { to: '/netcore/templates', label: 'Template' },
+    { to: '/netcore/templates',          label: 'Email templates' },
+    { to: '/netcore/whatsapp/templates', label: 'WhatsApp templates' },
   ] },
 };
 
 function activeSection(p) {
   if (p.startsWith('/netcore/contacts') || p.startsWith('/netcore/segments') || p.startsWith('/netcore/lists') || p.startsWith('/netcore/blocklist') || p.startsWith('/netcore/attributes')) return 'users';
-  if (p.startsWith('/netcore/campaigns')) return 'engage';
+  // Checked before the plain /netcore/whatsapp prefix below, so the templates gallery lands in
+  // Content alongside its email counterpart rather than under Engage.
+  if (p.startsWith('/netcore/whatsapp/templates')) return 'content';
+  if (p.startsWith('/netcore/campaigns') || p.startsWith('/netcore/whatsapp')) return 'engage';
   if (p.startsWith('/netcore/templates')) return 'content';
   return 'dashboard';
 }
@@ -94,9 +100,10 @@ export default function NetcoreLayout() {
 
         <nav className="nc-nav-sub">
           <span className="nc-nav-sub-title">{section.title}</span>
+          {/* `end` on every item: without it "/netcore/whatsapp" would also light up while
+              you're on "/netcore/whatsapp/templates". */}
           {section.items.map(it => (
-            <NavLink key={it.to} to={it.to}
-              end={it.to === '/netcore/contacts' || it.to === '/netcore/segments' || it.to === '/netcore/lists' || it.to === '/netcore/blocklist' || it.to === '/netcore/attributes' || it.to === '/netcore/campaigns' || it.to === '/netcore/templates'}>
+            <NavLink key={it.to} to={it.to} end>
               {it.label}
             </NavLink>
           ))}

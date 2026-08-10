@@ -219,6 +219,13 @@ import CampaignReport from './pages/netcore/CampaignReport';
 import TemplatesList from './pages/netcore/TemplatesList';
 import TemplateEditor from './pages/netcore/TemplateEditor';
 import EspSettings from './pages/netcore/EspSettings';
+import WaCampaignsList from './pages/netcore/whatsapp/WaCampaignsList';
+import WaCampaignWizard from './pages/netcore/whatsapp/WaCampaignWizard';
+import WaCampaignReport from './pages/netcore/whatsapp/WaCampaignReport';
+import WaTemplatesList from './pages/netcore/whatsapp/WaTemplatesList';
+import WaTemplateEditor from './pages/netcore/whatsapp/WaTemplateEditor';
+import WaSettings from './pages/netcore/whatsapp/WaSettings';
+import WaInbox from './pages/netcore/whatsapp/WaInbox';
 import InternshipList from './pages/internships/InternshipList';
 import PurchasedInternships from './pages/internships/PurchasedInternships';
 import PurchasedStarterKit from './pages/internships/PurchasedStarterKit';
@@ -310,6 +317,14 @@ export default function App() {
       <Route path="/netcore/templates/new"        element={<ProtectedRoute>{G('netcore_behaviour', <TemplateEditor />)}</ProtectedRoute>} />
       <Route path="/netcore/templates/:id"        element={<ProtectedRoute>{G('netcore_behaviour', <TemplateEditor />)}</ProtectedRoute>} />
       <Route path="/netcore/settings"             element={<ProtectedRoute>{G('netcore_behaviour', <EspSettings />)}</ProtectedRoute>} />
+      {/* WhatsApp campaigns — same full-screen (no AdminLayout chrome) treatment as the email
+          wizard/editor, since each of these owns the whole viewport. */}
+      <Route path="/netcore/whatsapp/new"           element={<ProtectedRoute>{G('netcore_behaviour', <WaCampaignWizard />)}</ProtectedRoute>} />
+      <Route path="/netcore/whatsapp/settings"      element={<ProtectedRoute>{G('netcore_behaviour', <WaSettings />)}</ProtectedRoute>} />
+      <Route path="/netcore/whatsapp/templates/new" element={<ProtectedRoute>{G('netcore_behaviour', <WaTemplateEditor />)}</ProtectedRoute>} />
+      <Route path="/netcore/whatsapp/templates/:id" element={<ProtectedRoute>{G('netcore_behaviour', <WaTemplateEditor />)}</ProtectedRoute>} />
+      <Route path="/netcore/whatsapp/:id/report"    element={<ProtectedRoute>{G('netcore_behaviour', <WaCampaignReport />)}</ProtectedRoute>} />
+      <Route path="/netcore/whatsapp/:id"           element={<ProtectedRoute>{G('netcore_behaviour', <WaCampaignWizard />)}</ProtectedRoute>} />
 
       <Route element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>
         {/* Dashboard is open to every authenticated user */}
@@ -359,6 +374,11 @@ export default function App() {
           <Route path="attributes/logs" element={<AttributeLogs />} />
           <Route path="campaigns" element={<CampaignsList />} />
           <Route path="templates" element={<TemplatesList />} />
+          {/* Static paths, so they outrank the full-screen /netcore/whatsapp/:id route above
+              (React Router v6 ranks by specificity, not declaration order). */}
+          <Route path="whatsapp" element={<WaCampaignsList />} />
+          <Route path="whatsapp/templates" element={<WaTemplatesList />} />
+          <Route path="whatsapp/inbox" element={<WaInbox />} />
         </Route>
         <Route path="netcore/filter" element={G('netcore_filter', <NetcoreFilter />)} />
 
