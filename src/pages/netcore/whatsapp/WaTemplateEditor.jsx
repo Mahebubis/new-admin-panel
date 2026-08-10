@@ -8,6 +8,10 @@ import WaPhonePreview from './WaPhonePreview';
 import { WA_TPL_API, FORM, WA, WA_CSS, inp, label, card } from './waShared';
 import { Spinner, WhatsAppIcon, Notice, ApprovalBadge } from './WaUi';
 
+// Same base + fallback as src/api/axios.js — the tracked link shown here is the real public URL
+// WhatsApp will open, which is never localhost even in dev.
+const API_BASE = import.meta.env.VITE_API_URL || 'https://cit3.internshipstudio.com/admin/react-api';
+
 
 const LANGUAGES = [
   { value: 'en', label: 'English', sublabel: 'en' },
@@ -45,6 +49,26 @@ const APPROVALS = [
   { value: 'unknown', label: 'Unknown', sublabel: 'status not tracked' },
 ];
 
+/*
+ * Hosts this business controls — and therefore the only ones a click can be tracked on.
+ *
+ * Tracking works by handing the landing page a campaign id it can store, so it only means
+ * anything where we own the page reading it. A link to someone else's site can be tapped all day
+ * and nobody will ever tell us, so ticking the box there would promise a number that stays zero.
+ *
+ * Add a domain here if the platform grows one; subdomains are matched automatically.
+ */
+const TRACKABLE_HOSTS = ['internshipstudio.com'];
+
+function isTrackableUrl(url) {
+  try {
+    const host = new URL(String(url || '').trim()).hostname.toLowerCase();
+    return TRACKABLE_HOSTS.some(d => host === d || host.endsWith('.' + d));
+  } catch {
+    return false;   // still being typed, or not a URL at all
+  }
+}
+
 const BUTTON_TYPES = [
   { value: 'url', label: 'Visit website', sublabel: 'opens a link' },
   { value: 'phone', label: 'Call phone number', sublabel: 'dials a number' },
@@ -54,7 +78,7 @@ const BUTTON_TYPES = [
 const EMPTY = {
   id: null, meta_template_id: '', name: '', display_name: '', category: 'utility', language: 'en',
   header_type: 'none', header_text: '', header_media_url: '',
-  body_text: '', footer_text: '', buttons: [], click_target_url: '',
+  body_text: '', footer_text: '', buttons: [], click_target_url: '', link_id: null,
   sample_values: { header: [], body: [] },
   approval_status: 'pending',
 };
@@ -62,6 +86,41 @@ const EMPTY = {
 function countVars(text) {
   const m = String(text || '').match(/\{\{\s*(\d+)\s*\}\}/g) || [];
   return m.reduce((max, tok) => Math.max(max, parseInt(tok.replace(/\D/g, ''), 10) || 0), 0);
+}
+
+/*
+ * The two faces of a tracked link. Mirrors lib/WaLinks.php — the server is what actually rewrites
+ * the stored URL; these only keep the editor honest about which form it is showing.
+ *
+ *   what you type      https://dashboard.internshipstudio.com/login
+ *   what Meta approves https://dashboard.internshipstudio.com/login/23
+ *
+ * 23 is this template's permanent link id (wa_links). The path form is what Meta actually approved
+ * (exam_live_link_v3), after refusing every version whose link carried a variable — so it is the
+ * shape generated here. The dashboard also reads a "?id=23" query form, which needs no route, but
+ * nothing is generated in that shape while the approved templates are in this one.
+ *
+ * plainUrl() strips both forms and the "{{1}}" ending from the abandoned variable-based scheme, so
+ * any older template opens showing a clean, retypeable address.
+ */
+function plainUrl(url, linkId) {
+  let s = String(url || '').replace(/[?&/]?\{\{\s*\d+\s*\}\}\s*$/, '');
+  if (linkId) {
+    s = s.replace(new RegExp('[?&]id=' + linkId + '(?=$|[&#])'), '');
+    s = s.replace(new RegExp('/' + linkId + '(?=$|[?#])'), '');
+  }
+  return s;
+}
+
+function trackedUrl(url, linkId) {
+  const s = plainUrl(url, linkId);
+  if (!s || !linkId) return s;
+  // The id goes in before any query string — appending it to "…/login?next=x" would change that
+  // query value rather than the path.
+  const cut = s.search(/[?#]/);
+  const path = (cut === -1 ? s : s.slice(0, cut)).replace(/\/+$/, '');
+  const tail = cut === -1 ? '' : s.slice(cut);
+  return path + '/' + linkId + tail;
 }
 
 export default function WaTemplateEditor() {
@@ -89,6 +148,7 @@ export default function WaTemplateEditor() {
             id: Number(t.id),
             buttons: t.buttons || [],
             click_target_url: t.click_target_url || '',
+            link_id: t.link_id ? Number(t.link_id) : null,
             sample_values: {
               header: t.sample_values?.header || [],
               body: t.sample_values?.body || [],
@@ -136,7 +196,17 @@ export default function WaTemplateEditor() {
 
   const addButton = () => {
     if ((tpl.buttons || []).length >= 3) return toast.error('WhatsApp allows at most 3 buttons');
-    set('buttons', [...(tpl.buttons || []), { type: 'url', text: '', url: '', phone: '', dynamic: false }]);
+    /*
+     * A new URL button starts at the tracked destination, because that is what it is for in almost
+     * every template here: a plain message and one button that sends people to your platform.
+     * Typing the same URL a second time on the same screen only creates a chance to mistype it —
+     * and a button whose URL differs from the tracked destination by one character is the exact
+     * failure that reports zero conversions while looking perfectly configured.
+     */
+    const dest = String(tpl.click_target_url || '').trim();
+    set('buttons', [...(tpl.buttons || []), {
+      type: 'url', text: '', url: dest, phone: '', dynamic: !!dest && isTrackableUrl(dest),
+    }]);
   };
   const setButton = (i, patch) => set('buttons', tpl.buttons.map((b, j) => (j === i ? { ...b, ...patch } : b)));
   const removeButton = i => set('buttons', tpl.buttons.filter((_, j) => j !== i));
@@ -149,6 +219,21 @@ export default function WaTemplateEditor() {
     const used = [...new Set((tpl.body_text.match(/\{\{\s*\d+\s*\}\}/g) || []).map(t => parseInt(t.replace(/\D/g, ''), 10)))].sort((a, b) => a - b);
     if (used.length && used.join(',') !== used.map((_, i) => i + 1).join(',')) {
       return `Body placeholders must run consecutively from {{1}} — found {{${used.join('}}, {{')}}}`;
+    }
+    /*
+     * Meta refuses a body that BEGINS or ENDS with a variable — "Variables can't be at the start
+     * or end of the template" (code 100). Caught here because the alternative is a round trip to
+     * Meta, a rejection, and an edit allowance spent on a one-word fix.
+     *
+     * Trailing punctuation is stripped before the check: a body ending "…here: {{1}}." satisfies
+     * Meta, and refusing it would be stricter than the rule it is enforcing.
+     */
+    const trimmedBody = tpl.body_text.trim();
+    if (/^\{\{\s*\d+\s*\}\}/.test(trimmedBody)) {
+      return 'Meta does not allow the body to START with a variable — put some words before {{1}}';
+    }
+    if (/\{\{\s*\d+\s*\}\}[\s.,!?;:)"']*$/.test(trimmedBody)) {
+      return 'Meta does not allow the body to END with a variable — add a line after it, e.g. "Thank you."';
     }
     for (const b of tpl.buttons || []) {
       if (!b.text.trim()) return 'Every button needs a label';
@@ -173,7 +258,13 @@ export default function WaTemplateEditor() {
         category: tpl.category, language: tpl.language,
         header_type: tpl.header_type, header_text: tpl.header_text || '', header_media_url: tpl.header_media_url || '',
         body_text: tpl.body_text, footer_text: tpl.footer_text || '',
-        buttons: JSON.stringify(tpl.buttons || []),
+        // dynamicTouched is UI bookkeeping — it records that the admin overrode the auto-tick in
+        // this editing session, and has no meaning once saved. Stripped so it never lands in the
+        // stored button JSON or gets sent to Meta.
+        buttons: JSON.stringify((tpl.buttons || []).map(b => {
+          const { dynamicTouched: _ignored, ...rest } = b;
+          return rest;
+        })),
         click_target_url: tpl.click_target_url || '',
         sample_values: JSON.stringify(tpl.sample_values || {}),
         approval_status: tpl.approval_status,
@@ -181,7 +272,12 @@ export default function WaTemplateEditor() {
       const res = await api.post(WA_TPL_API, body, FORM);
       if (res.data.success) {
         const savedId = res.data.data.id;
-        lastSavedRef.current = JSON.stringify({ ...tpl, id: savedId });
+        // The link id is minted server-side on the first save of a template that has a tracked
+        // destination. Taking it back into state here is what lets a brand-new template show its
+        // real approved URL immediately, instead of only after being reopened.
+        const linkId = res.data.data.link_id ? Number(res.data.data.link_id) : null;
+        setTpl(t => ({ ...t, id: savedId, link_id: linkId || t.link_id }));
+        lastSavedRef.current = JSON.stringify({ ...tpl, id: savedId, link_id: linkId || tpl.link_id });
         return savedId;
       }
       toast.error(res.data.message || 'Could not save');
@@ -429,27 +525,60 @@ export default function WaTemplateEditor() {
               rather than described: the URL Meta approves, and the variable the campaign fills.
               Getting either wrong produces a link that works perfectly and reports nothing.
             */}
-            <Notice tone="info" title="To track clicks and conversions on a link button" style={{ marginTop: 16 }}>
-              <div style={{ marginBottom: 6 }}>
-                <b>1.</b> Make the button a <b>URL</b> button, tick <b>Dynamic</b>, and set its link to your
-                real destination with <code style={{ background: '#fff', padding: '1px 5px', borderRadius: 4, fontSize: 10 }}>?&#123;&#123;1&#125;&#125;</code> on the end:
+            {/* Deliberately short. The whole setup is now one checkbox on the button below —
+                everything else is derived, so instructions that list steps would be describing
+                work the panel already does. */}
+            {/*
+              The tracked-link destination.
+
+              Kept as a field on the TEMPLATE rather than the campaign because the link's target is
+              a property of the message, and asking per campaign would invite a different answer
+              each time. It applies to both routes into the tracker — a URL button, or a short link
+              written into the body — so it is no longer hidden inside the button section.
+            */}
+            <div style={{ marginTop: 16 }}>
+              <label style={label}>
+                Tracked link destination <span style={{ fontWeight: 500, color: '#94a3b8' }}>(optional)</span>
+              </label>
+              <input style={inp} value={tpl.click_target_url || ''}
+                onChange={e => set('click_target_url', e.target.value)}
+                placeholder="https://dashboard.internshipstudio.com/login" />
+              <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 5, lineHeight: 1.6 }}>
+                Where people end up after tapping a link in this template. Write this same plain link
+                into your body text (or a button) — a short number is added to the end when the template
+                is saved, and that number is what carries the campaign.
               </div>
-              <div style={{ background: '#fff', border: '1px solid #bfdbfe', borderRadius: 6, padding: '7px 9px', margin: '0 0 8px', fontFamily: 'monospace', fontSize: 10.5, wordBreak: 'break-all', color: '#0f172a' }}>
-                https://dashboard.internshipstudio.com/login?&#123;&#123;1&#125;&#125;
-              </div>
-              <div style={{ marginBottom: 6 }}>
-                <b>2.</b> On the campaign's Content step, set the button variable to:
-              </div>
-              <div style={{ background: '#fff', border: '1px solid #bfdbfe', borderRadius: 6, padding: '7px 9px', fontFamily: 'monospace', fontSize: 10.5, color: '#0f172a' }}>
-                XX_WA_ATTR_XX
-              </div>
-              <div style={{ marginTop: 8, lineHeight: 1.6 }}>
-                Each recipient then gets their own link carrying <b>campaign_id</b>, <b>medium</b>,
-                <b> phone</b>, <b>goal</b>, <b>attr_window</b> and <b>wa_rid</b> — so your platform can log
-                the click and set the attribution cookie exactly as it does for a tracked email link.
-                A <b>fixed</b> button URL cannot carry any of this and will always report zero.
-              </div>
-            </Notice>
+
+              {/*
+                The tracked link, once it exists.
+
+                It cannot be shown before the first save because the id is a wa_links primary key —
+                the row has to exist for the number to be real, and inventing one here would print a
+                link that resolves to nothing.
+              */}
+              {tpl.link_id ? (
+                <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '9px 11px', marginTop: 8 }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: '#0369a1', letterSpacing: '.3px', marginBottom: 4 }}>
+                    SENT TO META AS
+                  </div>
+                  <div style={{ fontFamily: 'monospace', fontSize: 10.5, color: '#0f172a', wordBreak: 'break-all' }}>
+                    {trackedUrl(tpl.click_target_url, tpl.link_id)}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: '#0c4a6e', marginTop: 6, lineHeight: 1.6 }}>
+                    Link <b>#{tpl.link_id}</b> belongs to this template permanently. It points at whichever
+                    campaign sent the template last, so the tap is recorded and the goal is credited exactly
+                    as it is for a tracked email link. No variables and no parameters — which is what Meta
+                    approves.
+                  </div>
+                </div>
+              ) : !!String(tpl.click_target_url || '').trim() && (
+                <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '9px 11px', marginTop: 8, fontSize: 10.5, color: '#92400e', lineHeight: 1.6 }}>
+                  Save the template once and the tracked link appears here — the number is issued at save
+                  time. Submit to Meta after that, never before, or the version Meta reviews will be the
+                  untracked one.
+                </div>
+              )}
+            </div>
           </div>
 
           {(headerVars > 0 || bodyVars > 0) && (
@@ -508,15 +637,85 @@ export default function WaTemplateEditor() {
                       </div>
                       {b.type === 'url' && (
                         <div style={{ gridColumn: '1 / -1' }}>
-                          <label style={label}>Button URL</label>
-                          <input style={inp} value={b.url} onChange={e => setButton(i, { url: e.target.value })}
-                            placeholder="https://dashboard.internshipstudio.com/login" />
+                          <label style={label}>Where this button goes</label>
+                          {/*
+                            A PLAIN url, always. The tracked-link id is machinery, not a decision:
+                            it is appended on save (wa_templates.php) and stripped for display here,
+                            so the two can never drift apart and nobody has to retype a number.
+                          */}
+                          <input style={inp}
+                            value={plainUrl(b.url, tpl.link_id)}
+                            onChange={e => {
+                              const url = plainUrl(e.target.value, tpl.link_id);
+                              /*
+                               * A link to our own platform is trackable and almost always should
+                               * be, so it ticks itself — forgetting the box is the single mistake
+                               * that makes a campaign report zero conversions while looking
+                               * perfectly configured.
+                               *
+                               * Stops the moment the admin touches the checkbox: after that it is
+                               * their decision, and a form that keeps overriding you is worse than
+                               * one that never helped.
+                               */
+                              const patch = { url };
+                              if (!b.dynamicTouched) patch.dynamic = isTrackableUrl(url);
+                              setButton(i, patch);
+                            }}
+                            placeholder={String(tpl.click_target_url || '').trim() || 'https://dashboard.internshipstudio.com/login'} />
+                          {!String(b.url || '').trim() && !!String(tpl.click_target_url || '').trim() && (
+                            <div style={{ fontSize: 10.5, color: '#0369a1', marginTop: 5, lineHeight: 1.5 }}>
+                              Leave this blank and the button uses your <b>Tracked link destination</b> above —
+                              one place to change it, so the two can't drift apart.
+                            </div>
+                          )}
                           <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, cursor: 'pointer' }}>
-                            <input type="checkbox" checked={!!b.dynamic} onChange={e => setButton(i, { dynamic: e.target.checked })} />
+                            <input type="checkbox" checked={!!b.dynamic}
+                              onChange={e => setButton(i, { dynamic: e.target.checked, dynamicTouched: true })} />
                             <span style={{ fontSize: 11.5, color: '#334155' }}>
-                              Dynamic URL — append a per-contact suffix (chosen in the campaign's Content step)
+                              <b>Track clicks and conversions</b> — record who tapped, and credit the campaign
+                              when they complete the goal
                             </span>
                           </label>
+
+                          {/* Says why the box moved on its own, so it doesn't read as a glitch. */}
+                          {!!b.dynamic && !b.dynamicTouched && isTrackableUrl(b.url) && (
+                            <div style={{ fontSize: 10.5, color: '#15803d', marginTop: 5, paddingLeft: 22 }}>
+                              Turned on automatically — this link points at your own platform, so clicks can be
+                              tracked. Untick it if you don't want them counted.
+                            </div>
+                          )}
+                          {!b.dynamic && !!String(b.url || '').trim() && !isTrackableUrl(b.url) && (
+                            <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 5, paddingLeft: 22, lineHeight: 1.5 }}>
+                              This link goes to a site you don't control, so a tap can't be reported back —
+                              tracking would always show zero.
+                            </div>
+                          )}
+
+                          {/* The derived URL, shown read-only. One field to edit, one thing to
+                              check — change the link above and this follows immediately. */}
+                          {/* The blank button falls back to the tracked destination, exactly as the
+                              server does on save — so this preview shows the URL Meta will really
+                              receive rather than going blank and looking unconfigured. */}
+                          {!!b.dynamic && !!(String(b.url || '').trim() || String(tpl.click_target_url || '').trim()) && (
+                            <div style={{ marginTop: 8, background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '9px 11px' }}>
+                              <div style={{ fontSize: 10, fontWeight: 800, color: '#0369a1', letterSpacing: '.3px', marginBottom: 4 }}>
+                                SENT TO META AS
+                              </div>
+                              <div style={{ fontFamily: 'monospace', fontSize: 10.5, color: '#0f172a', wordBreak: 'break-all' }}>
+                                {(() => {
+                                  const eff = String(b.url || '').trim() || String(tpl.click_target_url || '').trim();
+                                  return tpl.link_id ? trackedUrl(eff, tpl.link_id) : plainUrl(eff, tpl.link_id);
+                                })()}
+                              </div>
+                              <div style={{ fontSize: 10.5, color: '#0c4a6e', marginTop: 5, lineHeight: 1.5 }}>
+                                {tpl.link_id
+                                  ? <>The number on the end is this template's tracked link. It records the tap and
+                                      credits the campaign when the goal is completed — nothing else to configure.</>
+                                  : <>Set the <b>Tracked link destination</b> above to this same address and save once;
+                                      the tracking number is added here automatically.</>}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                       {b.type === 'phone' && (

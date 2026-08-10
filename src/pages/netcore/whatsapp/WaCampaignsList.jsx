@@ -19,7 +19,9 @@ const COLS = [
   { key: 'sent_count', label: 'Sent' },
   { key: 'delivered_count', label: 'Delivered' },
   { key: 'read_count', label: 'Read' },
-  { key: 'click_count', label: 'Clicked' },
+  // People, not taps — see clicked_users in wa_campaigns.php. Every other column on this row
+  // counts people, and a Clicked that counted taps could exceed Sent, which it did.
+  { key: 'clicked_users', label: 'Clicked' },
   { key: 'conversion_count', label: 'Converted' },
   { key: 'failed_count', label: 'Failed' },
   { key: 'skipped_dedup_count', label: 'Deduped' },
@@ -286,7 +288,10 @@ export default function WaCampaignsList() {
                     <td style={{ padding: 14, borderBottom: '1px solid #f1f5f9', color: '#475569' }}
                       title="Only moves when the delivery webhook is registered in the Netcore panel">{n0(r.delivered_count)}</td>
                     <td style={{ padding: 14, borderBottom: '1px solid #f1f5f9', color: '#475569' }}>{n0(r.read_count)}</td>
-                    <td style={{ padding: 14, borderBottom: '1px solid #f1f5f9', color: '#475569' }}>{n0(r.click_count)}</td>
+                    <td style={{ padding: 14, borderBottom: '1px solid #f1f5f9', color: '#475569' }}
+                        title={`${n0(r.click_count)} tap${Number(r.click_count) === 1 ? '' : 's'} in total`}>
+                      {n0(r.clicked_users)}
+                    </td>
                     {/* An em dash, not 0, when no goal was set. "0 conversions" and "we weren't
                         counting" are different statements and a report must not conflate them. */}
                     <td style={{ padding: 14, borderBottom: '1px solid #f1f5f9', color: r.goal_event_name ? '#7c3aed' : '#cbd5e1', fontWeight: r.goal_event_name ? 700 : 400 }}

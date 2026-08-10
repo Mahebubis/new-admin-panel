@@ -83,8 +83,14 @@ export default function WaTemplatesList() {
       const res = await api.post(WA_TPL_API, new URLSearchParams({ action: 'refresh_status', id }), FORM);
       if (res.data.success) {
         const next = res.data.data.approval_status;
-        toast.success(`Status: ${next}`);
-        setRows(rs => rs.map(r => (r.id === id ? { ...r, approval_status: next } : r)));
+        const why  = res.data.data.rejected_message || '';
+        /* A rejection with no reason is the one status an admin can do nothing with, so Meta's
+           own explanation is shown as a persistent error rather than a passing success toast. */
+        if (next === 'rejected' && why) toast.error(`Rejected — ${why}`, { duration: 20000 });
+        else toast.success(`Status: ${next}`);
+        setRows(rs => rs.map(r => (r.id === id
+          ? { ...r, approval_status: next, rejected_message: why }
+          : r)));
       } else toast.error(res.data.message || 'Could not check', { duration: 10000 });
     } catch (e) { toast.error(e?.response?.data?.message || 'Could not check', { duration: 10000 }); }
     finally { setCheckingId(null); }
@@ -238,9 +244,12 @@ export default function WaTemplatesList() {
                           rather than just showing a badge. */}
                       {t.approval_status !== 'approved' && (
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginTop: 10, fontSize: 11, color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '7px 10px', lineHeight: 1.5 }}>
+                          {/* Meta's own reason once we have it — "rejected" alone gives an admin
+                              nothing to change, and the reason is the entire point of pressing
+                              Check on a rejected template. */}
                           <span>
                             {t.approval_status === 'rejected'
-                              ? 'Meta rejected this — fix and re-submit.'
+                              ? (t.rejected_message || 'Meta rejected this — press Check to see why.')
                               : 'Waiting on Meta.'}
                           </span>
                           {t.meta_template_id && (
@@ -317,10 +326,30 @@ export default function WaTemplatesList() {
             <div style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
               {confirm.action === 'delete' ? 'Delete this template?' : 'Archive this template?'}
             </div>
-            <div style={{ fontSize: 12.5, color: '#64748b', marginBottom: 22, lineHeight: 1.6 }}>
+            <div style={{ fontSize: 12.5, color: '#64748b', marginBottom: 16, lineHeight: 1.6 }}>
               You're about to {confirm.label}. Campaigns already built with it keep their own snapshot, so
               nothing scheduled or sent is affected.
             </div>
+
+            {/* Delete now reaches Meta as well, and that is not reversible from here — a template
+                removed from the WABA has to be re-created and re-approved. Said before the click,
+                not discovered after it. */}
+            {confirm.action === 'delete' && (
+              <Notice tone="danger" style={{ marginBottom: 20 }}>
+                This also <b>deletes it from Meta</b>, freeing the name so you can create it again.
+                Meta removes every language version, and it cannot be undone — the template would
+                have to be re-submitted for approval.
+              </Notice>
+            )}
+
+            {/* Delete lives on the Archived tab, which is not obvious from here. Saying so turns a
+                dead end into a two-step path. */}
+            {confirm.action === 'archive' && (
+              <Notice tone="info" style={{ marginBottom: 20 }}>
+                To remove it permanently — including from Meta — open the <b>Archived</b> tab afterwards
+                and press <b>Delete</b> there.
+              </Notice>
+            )}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button className="wa-btn wa-btn-text" onClick={() => setConfirm(null)}>Cancel</button>
               <button className={`wa-btn ${confirm.action === 'delete' ? 'wa-btn-contained' : 'wa-btn-primary'}`}

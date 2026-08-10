@@ -298,24 +298,51 @@ export default function WaStepContent({ draft, setField, onValidChange, applyTem
                         {draft.buttons[dynamicButtonIdx].url}
                       </span>
                     </div>
-                    <WaAttributeField
-                      label="Dynamic URL suffix"
-                      value={vars.button_url_suffix || ''}
-                      onChange={setSuffix}
-                      placeholder="e.g. XX_USER_EMAIL_XX"
-                      hint="Appended to the button's approved base URL for each contact."
-                      customTags={customAttrTags}
-                    />
-                    {/* A URL button whose approved link contains {{1}} expects a value at send
-                        time. Left empty, WhatsApp can drop the whole message — and it does so
-                        silently, after the API has already answered "accepted". */}
-                    {!String(vars.button_url_suffix || '').trim() && (
-                      <Notice tone="warn" style={{ marginTop: 10 }}>
-                        This button's approved URL contains <b>{'{{1}}'}</b>, so WhatsApp expects a value for
-                        it. Leaving this blank is a common reason a message is accepted by the API and then
-                        never arrives — unless your provider fills the placeholder itself for link tracking
-                        (a <code>nctrckg.com</code> URL usually means it does).
-                      </Notice>
+                    {/*
+                      With a conversion goal set, this value is not a choice — it is the
+                      attribution string, and any other value silently breaks tracking. So it is
+                      shown as settled rather than offered as a field: nothing to type, nothing to
+                      get wrong, and no campaign can be sent with tracking half-configured.
+                    */}
+                    {String(draft.goal_event_name || '').trim() !== '' ? (
+                      <div>
+                        <label style={label}>Link tracking</label>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '10px 12px', background: '#f0fdf4', border: '1.5px solid #bbf7d0', borderRadius: 8 }}>
+                          <span style={{ color: '#15803d', display: 'flex', flexShrink: 0 }}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M20 6L9 17l-5-5" />
+                            </svg>
+                          </span>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>Set automatically</div>
+                            <div style={{ fontSize: 10.5, color: '#15803d', marginTop: 2, lineHeight: 1.5 }}>
+                              Each recipient's button carries this campaign, their phone number and the goal
+                              <b> {draft.goal_event_name}</b> — so a click can be recorded and credited.
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <WaAttributeField
+                          label="Dynamic URL suffix"
+                          value={vars.button_url_suffix || ''}
+                          onChange={setSuffix}
+                          placeholder="e.g. XX_USER_EMAIL_XX"
+                          hint="Appended to the button's approved base URL for each contact."
+                          customTags={customAttrTags}
+                        />
+                        {/* A URL button whose approved link contains {{1}} expects a value at send
+                            time. Left empty, WhatsApp can drop the whole message — and it does so
+                            silently, after the API has already answered "accepted". */}
+                        {!String(vars.button_url_suffix || '').trim() && (
+                          <Notice tone="warn" style={{ marginTop: 10 }}>
+                            This button's approved URL contains <b>{'{{1}}'}</b>, so WhatsApp expects a value for
+                            it. Set a conversion goal on the Setup step and this fills itself in — otherwise give
+                            it a value here, or the message can be accepted and then silently dropped.
+                          </Notice>
+                        )}
+                      </>
                     )}
                   </div>
                 )}
