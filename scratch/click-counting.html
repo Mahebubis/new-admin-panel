@@ -1,0 +1,476 @@
+<title>Counting WhatsApp Clicks</title>
+<style>
+  :root {
+    --paper:      #eff2f1;
+    --surface:    #ffffff;
+    --surface-2:  #e6ebe9;
+    --ink:        #131a18;
+    --ink-soft:   #4a5854;
+    --ink-faint:  #7b8783;
+    --rule:       #d3dbd8;
+    --accent:     #0b6b57;
+    --named:      #0b6b57;
+    --named-bg:   #dcece7;
+    --unnamed:    #6b7280;
+    --unnamed-bg: #e4e6ea;
+    --warn:       #9a5410;
+    --warn-bg:    #f7ead9;
+    --shadow:     0 1px 2px rgba(19,26,24,.06), 0 8px 24px rgba(19,26,24,.05);
+
+    --display: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0e1413;
+      --surface:    #161e1c;
+      --surface-2:  #1e2725;
+      --ink:        #e4ebe8;
+      --ink-soft:   #a8b5b1;
+      --ink-faint:  #79867f;
+      --rule:       #2b3a36;
+      --accent:     #4cc6a3;
+      --named:      #4cc6a3;
+      --named-bg:   #123329;
+      --unnamed:    #9aa3ad;
+      --unnamed-bg: #232a30;
+      --warn:       #e0a05a;
+      --warn-bg:    #33270f;
+      --shadow:     0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #0e1413;
+    --surface:    #161e1c;
+    --surface-2:  #1e2725;
+    --ink:        #e4ebe8;
+    --ink-soft:   #a8b5b1;
+    --ink-faint:  #79867f;
+    --rule:       #2b3a36;
+    --accent:     #4cc6a3;
+    --named:      #4cc6a3;
+    --named-bg:   #123329;
+    --unnamed:    #9aa3ad;
+    --unnamed-bg: #232a30;
+    --warn:       #e0a05a;
+    --warn-bg:    #33270f;
+    --shadow:     0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 56px 22px 96px; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: clamp(34px, 6vw, 48px);
+    line-height: 1.1;
+    letter-spacing: -.015em;
+    margin: 0 0 16px;
+    text-wrap: balance;
+  }
+  .standfirst {
+    font-size: 19px;
+    color: var(--ink-soft);
+    margin: 0;
+    max-width: 62ch;
+  }
+  h2 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: clamp(24px, 3.4vw, 31px);
+    line-height: 1.2;
+    letter-spacing: -.01em;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+  h3 {
+    font-size: 16px;
+    font-weight: 650;
+    margin: 0 0 6px;
+    letter-spacing: -.005em;
+  }
+  p { margin: 0 0 16px; max-width: 66ch; }
+  section { margin-top: 56px; }
+  .lede { color: var(--ink-soft); margin-bottom: 26px; max-width: 66ch; }
+
+  code {
+    font-family: var(--mono);
+    font-size: .88em;
+    background: var(--surface-2);
+    padding: .12em .4em;
+    border-radius: 4px;
+  }
+  .card code, .note code { background: var(--paper); }
+
+  .duo { display: grid; grid-template-columns: 1fr; gap: 18px; }
+  @media (min-width: 720px) { .duo { grid-template-columns: 1fr 1fr; } }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    padding: 22px;
+    box-shadow: var(--shadow);
+  }
+  .tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 999px;
+    margin-bottom: 12px;
+  }
+  .tag.named   { background: var(--named-bg);   color: var(--named); }
+  .tag.unnamed { background: var(--unnamed-bg); color: var(--unnamed); }
+  .question {
+    font-family: var(--display);
+    font-size: 21px;
+    line-height: 1.3;
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  .card ul { margin: 0; padding-left: 1.1em; color: var(--ink-soft); font-size: 15.5px; }
+  .card li { margin-bottom: 7px; }
+  .card li:last-child { margin-bottom: 0; }
+  .verdict {
+    margin: 16px 0 0;
+    padding-top: 14px;
+    border-top: 1px dashed var(--rule);
+    font-size: 15px;
+    color: var(--ink);
+  }
+
+  .steps { margin-top: 8px; }
+  .step {
+    display: grid;
+    grid-template-columns: 44px 1fr;
+    gap: 18px;
+    padding: 20px 0;
+    border-top: 1px solid var(--rule);
+  }
+  .step:last-child { border-bottom: 1px solid var(--rule); }
+  .num {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    padding-top: 4px;
+    letter-spacing: .06em;
+  }
+  .when { font-size: 13px; color: var(--ink-faint); margin: 0 0 4px; font-family: var(--mono); }
+  .step p { margin: 0 0 10px; font-size: 15.5px; color: var(--ink-soft); }
+  .writes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .chip {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+  .chip.hit  { background: var(--named-bg);   color: var(--named); }
+  .chip.miss { background: var(--unnamed-bg); color: var(--unnamed); }
+
+  .keys { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 18px; }
+  .key {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 3px 7px;
+    border-radius: 5px;
+    background: var(--unnamed-bg);
+    color: var(--unnamed);
+  }
+  .note {
+    background: var(--warn-bg);
+    color: var(--warn);
+    border-radius: 10px;
+    padding: 16px 18px;
+    font-size: 15.5px;
+    line-height: 1.55;
+  }
+  .note p { margin: 0; max-width: none; }
+
+  .tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 12px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; min-width: 580px; }
+  th, td { text-align: left; padding: 13px 16px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 500;
+    background: var(--surface-2);
+  }
+  tr:last-child td { border-bottom: 0; }
+  .yes { color: var(--named); font-weight: 650; }
+  .no  { color: var(--ink-faint); }
+
+  .kicker {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 10px 10px 0;
+    padding: 18px 20px;
+    margin-top: 26px;
+  }
+  .kicker p { margin: 0; font-size: 15.5px; }
+
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    padding: 16px 18px;
+    max-width: 260px;
+    margin-top: 18px;
+    box-shadow: var(--shadow);
+  }
+  .tile .label {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--ink-faint);
+  }
+  .tile .big { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.25; }
+  .tile .sub { font-size: 13px; color: var(--ink-soft); }
+  .tile .sub.flag { color: var(--warn); }
+
+  footer {
+    margin-top: 64px;
+    padding-top: 22px;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-faint);
+    font-size: 13.5px;
+  }
+  footer p { max-width: none; margin: 0; }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">WhatsApp tracking &middot; journeys vs campaigns</p>
+  <h1>Why the campaign counts your click and the journey doesn&rsquo;t</h1>
+  <p class="standfirst">
+    Both are looking at the same tap. They are answering two different questions, and only one of
+    those questions can be answered by somebody who is logged out.
+  </p>
+
+  <section>
+    <h2>The two questions</h2>
+    <p class="lede">
+      Every tap on a tracked link lands in the same place. What differs is what each report asks about it.
+    </p>
+    <div class="duo">
+      <div class="card">
+        <span class="tag unnamed">Campaign</span>
+        <p class="question">&ldquo;Did anybody tap?&rdquo;</p>
+        <ul>
+          <li>Counts rows in <code>wa_link_clicks</code>, grouped by a key stored in the browser.</li>
+          <li>Nobody has to sign in. The tap on its own is enough.</li>
+          <li>Moves the second you tap.</li>
+        </ul>
+        <p class="verdict">This is why your campaign shows clicks immediately.</p>
+      </div>
+      <div class="card">
+        <span class="tag named">Journey</span>
+        <p class="question">&ldquo;Which student tapped?&rdquo;</p>
+        <ul>
+          <li>Counts messages in <code>journey_messages</code> carrying a <code>first_clicked_at</code> stamp.</li>
+          <li>A stamp needs a name, and a logged-out tap has none.</li>
+          <li>Moves when the person becomes known &mdash; instantly if the link carried their id, otherwise at sign-in.</li>
+        </ul>
+        <p class="verdict">This is why your journey sat at zero.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>One tap, moment by moment</h2>
+    <p class="lede">
+      You tapped <strong>Exam is Live</strong> and stayed logged out. Here is everything that was
+      written, and the one thing that was not.
+    </p>
+    <div class="steps">
+
+      <div class="step">
+        <div class="num">01</div>
+        <div>
+          <p class="when">the tap</p>
+          <h3>The phone opens <code>/login/104</code></h3>
+          <p>
+            That URL is identical in every copy of the message &mdash; it is what Meta approved, and
+            Meta sends its own stored string. Nothing in it says who you are.
+          </p>
+          <div class="writes">
+            <span class="chip hit">wa_links.click_count +1</span>
+            <span class="chip hit">wa_link_clicks row &middot; not signed in</span>
+            <span class="chip hit">campaign_attr cookie set</span>
+            <span class="chip miss">journey_messages &mdash; nothing to stamp</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num">02</div>
+        <div>
+          <p class="when">the sign-in &mdash; any time in the next 7 days</p>
+          <h3>Now there is a name to attach</h3>
+          <p>
+            The dashboard parked the link id back at step 01. On the first page load where you are
+            signed in, it sends that id back along with your user id. The tap is not counted a
+            second time &mdash; it is named.
+          </p>
+          <div class="writes">
+            <span class="chip hit">journey_messages.first_clicked_at</span>
+            <span class="chip hit">the tap row gains your phone</span>
+            <span class="chip hit">Clicked moves to 1</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num">03</div>
+        <div>
+          <p class="when">the goal &mdash; inside the attribution window</p>
+          <h3>The conversion is credited</h3>
+          <p>
+            This part never depended on the click at all. The cookie written in step 01 carries the
+            journey id, and the goal event writes a row against it.
+          </p>
+          <div class="writes">
+            <span class="chip hit">campaign_attributions row</span>
+            <span class="chip hit">Conversions moves</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    <div class="kicker">
+      <p>
+        Your test stopped at step 01. Tap the button again and log in afterwards &mdash; the Clicked
+        column will move without you changing a single setting.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>So why not just copy the campaign?</h2>
+    <p class="lede">
+      Because that number is not quite what it looks like. The journey did count this way once, and
+      it was taken back out.
+    </p>
+    <p>
+      The campaign de-duplicates taps using a random key kept in the browser&rsquo;s storage. On an
+      ordinary browser that works: one person, one key, however many taps. But WhatsApp opens links
+      in its own in-app browser, and that browser starts with <strong>empty storage every single
+      time</strong>. So every tap arrives wearing a brand-new key:
+    </p>
+    <div class="keys">
+      <span class="key">visitor:a3f1</span>
+      <span class="key">visitor:9c02</span>
+      <span class="key">visitor:41be</span>
+      <span class="key">visitor:d7a8</span>
+      <span class="key">visitor:2e55</span>
+      <span class="key">visitor:88fc</span>
+      <span class="key">visitor:b104</span>
+      <span class="key">visitor:6ad3</span>
+    </div>
+    <p>
+      Eight taps by one tester read as eight people. That is exactly what happened when the journey
+      counted this way: <strong>a single person testing produced a report showing 13 clicks.</strong>
+      An inflated number is worse than a missing one, because nobody can tell it is wrong. So the
+      journey went back to counting only what it can prove.
+    </p>
+    <div class="note">
+      <p>
+        <strong>Worth knowing about your campaign numbers too:</strong> the campaign&rsquo;s Clicked
+        figure is closer to &ldquo;taps&rdquo; than to &ldquo;people&rdquo;. It is not wrong &mdash;
+        it is answering the easier question.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>What I changed in the report</h2>
+    <p class="lede">
+      Zero was accurate and unhelpful at the same time. The taps were being recorded all along; they
+      simply had nowhere to appear.
+    </p>
+    <p>
+      The <strong>Clicked</strong> tile now carries the unnamed taps underneath it &mdash; counted as
+      taps, and labelled as taps:
+    </p>
+    <div class="tile">
+      <div class="label">Clicked</div>
+      <div class="big">0</div>
+      <div class="sub">0% of messages</div>
+      <div class="sub flag">+1 tap not identified yet</div>
+    </div>
+    <p style="margin-top:18px">
+      Nothing is inflated and nothing is hidden. When that person signs in, the tap moves up into the
+      real number on its own.
+    </p>
+  </section>
+
+  <section>
+    <h2>Three ways to get a named click</h2>
+    <p class="lede">Choose by how badly you need it to happen before the sign-in.</p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Approach</th>
+            <th>Named at the moment of the tap?</th>
+            <th>What it costs</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Link in the message body</strong><br><span class="no">the TRACKED_LINK variable</span></td>
+            <td class="yes">Yes &mdash; logged out, instantly</td>
+            <td>The link is visible in the text. Works today, already built.</td>
+          </tr>
+          <tr>
+            <td><strong>Button, named at sign-in</strong><br><span class="no">what you have now</span></td>
+            <td class="no">No &mdash; within 7 days of the tap</td>
+            <td>Nothing at all. Conversions are unaffected either way.</td>
+          </tr>
+          <tr>
+            <td><strong>Button with a variable URL</strong><br><span class="no">Meta Cloud route</span></td>
+            <td class="yes">Yes &mdash; logged out, instantly</td>
+            <td>Meta app connected to the WABA, a newly approved template, and that step leaves Netcore.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="kicker">
+      <p>
+        Why the button cannot do this on its own: Netcore accepts a per-message button value and then
+        never passes it to Meta, so WhatsApp rejects the whole message. A per-person link has to
+        travel in the message body &mdash; or go through Meta directly.
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      Where the numbers live &mdash; <code>wa_link_clicks</code>: one row per tap, named only once
+      known. <code>journey_messages.first_clicked_at</code>: the journey&rsquo;s Clicked column.
+      <code>campaign_attributions</code>: conversions, for campaigns and journeys alike.
+    </p>
+  </footer>
+</div>

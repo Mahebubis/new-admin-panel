@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 // Display names for email_campaigns.esp_transport. 'mailwizz' is retired but still a legal
 // stored value on campaigns created before it was removed, so it keeps a label here.
-const ESP_LABELS = { sendgrid: 'SendGrid', elasticemail: 'Elastic Email', mailwizz: 'MailWizz (retired)' };
+const ESP_LABELS = { sendgrid: 'SendGrid', elasticemail: 'Elastic Email', ses: 'Amazon SES', mailwizz: 'MailWizz (retired)' };
 
 const inp = { width: '100%', padding: '10px 12px', border: '1.5px solid #e2e8f0', borderRadius: 8, fontSize: 12.5, fontFamily: 'inherit', color: '#1e293b', outline: 'none', boxSizing: 'border-box' };
 const card = { background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 20, marginBottom: 18 };

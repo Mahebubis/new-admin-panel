@@ -1,0 +1,13 @@
+<?php
+/**
+ * google.php — the Google Identity Services OAuth *client id* (not a secret).
+ *
+ * auth.php checks the `aud` claim of every credential against this value, so a
+ * token minted for some other site cannot be replayed at us. Leave the file
+ * absent and that check is skipped — the token is still verified with Google,
+ * but pin the id in production.
+ *
+ * The same id must be set as VITE_GOOGLE_CLIENT_ID for the React app.
+ * Copy to google.php.
+ */
+return '000000000000-xxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com';

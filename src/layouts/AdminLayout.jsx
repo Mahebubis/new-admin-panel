@@ -1034,6 +1034,7 @@ import { createPortal } from 'react-dom';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import RestrictedPopup from '../components/RestrictedPopup';
+import { announceExpanded, onExpanded } from '../hooks/sidebarBus';
 
 // ══════════════════════════════════════════════════════════════
 // Complete sidebar menu
@@ -1200,6 +1201,12 @@ const sidebarMenu = [
       { text: 'Notes', link: '/notes', icon: 'fas fa-attendance', perm: 'notes' },
     ]
   },
+
+  {
+    key: 'lms', group: 'LMS', icon: 'fas fa-graduation-cap', items: [
+      { text: 'LMS System', link: '/lms', icon: 'fas fa-chalkboard-teacher', perm: 'lms_system' },
+    ]
+  },
 ];
 
 // Routes that need maximum table width — collapse sidebar on entry.
@@ -1225,6 +1232,11 @@ export default function AdminLayout() {
       setCollapsed(true);
     }
   }, [location.pathname]);
+
+  // The LMS section navigates from its own right-hand rail; the two are
+  // mutually exclusive, so whenever that rail expands this sidebar folds.
+  // LmsLayout announces on mount, which is what collapses us on entering /lms.
+  useEffect(() => onExpanded(which => { if (which === 'lms') setCollapsed(true); }), []);
 
   // Collapsed-sidebar tooltip flyout — rendered via portal so it escapes
   // the sidebar's overflow-hidden clipping.
@@ -1296,6 +1308,8 @@ export default function AdminLayout() {
     const next = !collapsed;
     setCollapsed(next);
     localStorage.setItem('sidebarCollapsed', next ? '1' : '0');
+    // Expanding here pushes the LMS rail closed (see hooks/sidebarBus.js).
+    if (!next) announceExpanded('admin');
   };
 
   const handleLogout = async () => { await logout(); navigate('/login'); };

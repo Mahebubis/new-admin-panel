@@ -1,0 +1,239 @@
+/* ===========================================================================
+   video.css — the dark stage the lesson plays on, and the one control bar
+   that sits on it.
+
+   The bar is ours rather than the browser's for one reason: the browser's own
+   bar carried a fullscreen button of its own, right under the stage's, and two
+   fullscreen buttons in one corner is not a control, it is a puzzle. Owning
+   the bar also buys the ±5s buttons and the landscape flip on phones.
+   =========================================================================== */
+
+.vp {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: linear-gradient(160deg, var(--player-bg) 0%, var(--player-bg-2) 100%);
+  overflow: hidden;
+}
+.vp:focus { outline: none; }
+.vp:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+
+/* Fullscreen is taken on this wrapper, not on the <video>, so the bar stays
+   over the picture. The 16:9 box has to go, or the browser letterboxes a box
+   that is already letterboxing. */
+.vp:fullscreen,
+.vp:-webkit-full-screen {
+  aspect-ratio: auto;
+  width: 100vw; height: 100vh;
+  background: #000;
+}
+
+.vp-frame, .vp-video {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  border: 0; display: block;
+  background: transparent;
+}
+.vp-video { object-fit: contain; }
+.vp-native .vp-video { cursor: pointer; }
+/* Nothing to hide the cursor from while the video is paused. */
+.vp-native.vp-idle .vp-video { cursor: none; }
+
+/* The lesson name sits over the top-left of the stage, as it does on the
+   learner site — it stays readable because of the scrim behind it, and it
+   leaves with the controls so a playing video is only the video. */
+.vp-title {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 3;
+  padding: 22px 26px 46px;
+  font-size: 27px; font-weight: 600; color: #fff; letter-spacing: -0.01em;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(9, 13, 22, 0.72) 0%, rgba(9, 13, 22, 0) 100%);
+  transition: opacity var(--base) var(--ease), transform var(--base) var(--ease);
+}
+.vp-idle .vp-title { opacity: 0; transform: translateY(-8px); }
+
+/* ── the big play button on a stopped video ───────────────────────────── */
+.vp-big {
+  position: absolute; left: 50%; top: 50%; z-index: 5;
+  transform: translate(-50%, -50%);
+  width: 78px; height: 78px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  padding-left: 5px;                       /* optical centring of a triangle */
+  color: #fff;
+  background: rgba(15, 21, 34, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  backdrop-filter: blur(3px);
+  transition: transform var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.vp-big:hover { background: var(--brand); border-color: var(--brand); transform: translate(-50%, -50%) scale(1.06); }
+.vp-big:active { transform: translate(-50%, -50%) scale(0.96); }
+
+/* ── the "+5s" flash the skip buttons leave behind ────────────────────── */
+@keyframes vpNudge {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.86); }
+  25%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  to   { opacity: 0; transform: translate(-50%, -50%) scale(1.06); }
+}
+.vp-nudge {
+  position: absolute; left: 50%; top: 50%; z-index: 6;
+  padding: 10px 18px; border-radius: var(--r-pill);
+  background: rgba(9, 13, 22, 0.72);
+  color: #fff; font-size: 15px; font-weight: 600; letter-spacing: 0.02em;
+  pointer-events: none;
+  animation: vpNudge 600ms var(--ease) forwards;
+}
+
+/* ── "Resumed from 6:02" ──────────────────────────────────────────────── */
+@keyframes vpResumed {
+  from { opacity: 0; transform: translateY(8px); }
+  12%  { opacity: 1; transform: none; }
+  85%  { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateY(-4px); }
+}
+.vp-resumed {
+  position: absolute; left: 22px; bottom: 84px; z-index: 6;
+  padding: 8px 14px; border-radius: var(--r-pill);
+  background: rgba(9, 13, 22, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #fff; font-size: 12.5px; font-weight: 500;
+  pointer-events: none;
+  animation: vpResumed 4200ms var(--ease) forwards;
+}
+
+/* ── the control bar ──────────────────────────────────────────────────── */
+.vp-ctl {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 5;
+  padding: 40px 14px 10px;
+  background: linear-gradient(0deg, rgba(9, 13, 22, 0.86) 0%, rgba(9, 13, 22, 0.55) 46%, rgba(9, 13, 22, 0) 100%);
+  transition: opacity var(--base) var(--ease), transform var(--base) var(--ease);
+}
+.vp-idle .vp-ctl { opacity: 0; transform: translateY(10px); pointer-events: none; }
+
+/* the scrubber — a real range input, invisible, over a bar we draw */
+.vp-seek { position: relative; height: 18px; margin: 0 4px 2px; }
+.vp-seek-track {
+  position: absolute; left: 0; right: 0; top: 50%; height: 4px;
+  transform: translateY(-50%);
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.24);
+  overflow: visible;
+  transition: height var(--fast) var(--ease);
+}
+.vp-seek:hover .vp-seek-track { height: 6px; }
+.vp-seek-buf, .vp-seek-fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  border-radius: var(--r-pill);
+}
+.vp-seek-buf  { background: rgba(255, 255, 255, 0.3); }
+.vp-seek-fill { background: var(--brand); }
+.vp-seek-knob {
+  position: absolute; top: 50%; width: 12px; height: 12px; margin-left: -6px;
+  transform: translateY(-50%) scale(0);
+  border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  transition: transform var(--fast) var(--ease);
+}
+.vp-seek:hover .vp-seek-knob { transform: translateY(-50%) scale(1); }
+
+.vp-seek-input {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  margin: 0; padding: 0; opacity: 0; cursor: pointer;
+  -webkit-appearance: none; appearance: none; background: transparent;
+}
+.vp-seek-input::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; }
+.vp-seek-input::-moz-range-thumb { width: 18px; height: 18px; border: 0; }
+
+/* the button row */
+.vp-row { display: flex; align-items: center; gap: 2px; }
+
+.vp-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; border-radius: var(--r-sm);
+  color: rgba(255, 255, 255, 0.9);
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease),
+              transform var(--fast) var(--ease);
+}
+.vp-btn:hover  { background: rgba(255, 255, 255, 0.14); color: #fff; }
+.vp-btn:active { transform: scale(0.9); }
+
+.vp-time {
+  margin-left: 8px; white-space: nowrap;
+  font-size: 12.5px; font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.86);
+}
+.vp-time em { font-style: normal; color: rgba(255, 255, 255, 0.45); margin: 0 2px; }
+
+.vp-gap { flex: 1; }
+
+/* volume — the slider unrolls out of the speaker on hover, so the bar stays
+   short on a narrow stage */
+.vp-vol { display: flex; align-items: center; }
+.vp-vol-input {
+  width: 0; opacity: 0; margin: 0 0 0 2px;
+  height: 4px; border-radius: var(--r-pill);
+  -webkit-appearance: none; appearance: none;
+  background: rgba(255, 255, 255, 0.28);
+  cursor: pointer;
+  transition: width var(--base) var(--ease), opacity var(--base) var(--ease);
+}
+.vp-vol:hover .vp-vol-input,
+.vp-vol-input:focus-visible { width: 74px; opacity: 1; }
+.vp-vol-input::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: #fff;
+}
+.vp-vol-input::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: #fff; }
+
+/* playback speed */
+.vp-rate-wrap { position: relative; }
+.vp-rate-btn { width: auto; padding: 0 10px; font-size: 12.5px; font-weight: 600; }
+
+@keyframes vpRateIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.vp-rate {
+  position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 7;
+  min-width: 128px; padding: 6px;
+  background: #1b2334; border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--r); box-shadow: var(--shadow-lg);
+  animation: vpRateIn var(--fast) var(--ease);
+}
+.vp-rate button {
+  display: block; width: 100%; padding: 8px 12px; border-radius: var(--r-sm);
+  font-size: 13px; color: rgba(255, 255, 255, 0.9); text-align: left;
+  transition: background var(--fast) var(--ease);
+}
+.vp-rate button:hover { background: rgba(255, 255, 255, 0.1); }
+.vp-rate button.on { color: var(--brand); font-weight: 600; }
+
+/* ── overlays ─────────────────────────────────────────────────────────── */
+.vp-overlay {
+  position: absolute; inset: 0; z-index: 4;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; text-align: center; padding: 24px;
+  color: rgba(255, 255, 255, 0.85); font-size: 13.5px;
+  background: rgba(9, 13, 22, 0.55);
+  backdrop-filter: blur(2px);
+}
+.vp-overlay-solid { background: var(--player-bg); backdrop-filter: none; }
+/* Buffering: the frame is already on screen, so nothing is drawn over it. */
+.vp-overlay-bare { background: transparent; backdrop-filter: none; pointer-events: none; }
+
+.vp-error-title { margin: 0; font-size: 16px; font-weight: 600; color: #fff; }
+.vp-error-sub   { margin: 0; max-width: 340px; color: rgba(255, 255, 255, 0.6); }
+.vp-retry { color: #fff; border-color: rgba(255, 255, 255, 0.35); }
+.vp-retry:hover { background: rgba(255, 255, 255, 0.1); border-color: #fff; }
+
+.vp-empty {
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(255, 255, 255, 0.55); font-size: 13.5px;
+}
+
+@media (max-width: 720px) {
+  .vp-title { font-size: 19px; padding: 16px 18px 36px; }
+  .vp-big { width: 62px; height: 62px; }
+  .vp-ctl { padding: 34px 8px 8px; }
+  .vp-btn { width: 40px; height: 40px; }       /* a thumb needs 40, not 38 */
+  .vp-time { margin-left: 4px; font-size: 11.5px; }
+  .vp-resumed { left: 14px; bottom: 78px; font-size: 11.5px; }
+  /* The speaker alone: a 74px slider has no room next to six other controls,
+     and phones have hardware volume keys anyway. */
+  .vp-vol-input, .vp-vol:hover .vp-vol-input { display: none; }
+}

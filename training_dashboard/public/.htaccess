@@ -1,0 +1,66 @@
+# php -- BEGIN cPanel-generated handler, do not edit
+# Set the "ea-php81" package as the default "PHP" programming language.
+<IfModule mime_module>
+  AddHandler application/x-httpd-ea-php81 .php .php8 .phtml
+</IfModule>
+# php -- END cPanel-generated handler, do not edit
+
+# ===========================================================================
+#  training.internshipstudio.com
+#
+#  Two jobs:
+#    1. Leave /api/*.php alone — those are real files and must execute.
+#    2. Send every other unmatched path to index.html, so React Router owns
+#       deep links like /course/cpp-data-structures?lesson=41 on a hard reload.
+#
+#  The cPanel handler block above is kept in this file on purpose: cPanel
+#  writes it into the live document root, so a deploy that overwrote this
+#  file without it would strip the PHP handler off the whole domain.
+# ===========================================================================
+
+# Never let Apache guess /enrollments -> enrollments.html|.php. MultiViews
+# turns an ordinary miss into a content-negotiation failure, which surfaces
+# as a 500 rather than the fallback below.
+<IfModule mod_negotiation.c>
+  Options -MultiViews
+</IfModule>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Loop stop. The fallback below rewrites to index.html and mod_rewrite then
+  # runs this whole file again on the new URI; if the -f test below ever fails
+  # to see index.html (mis-set DOCUMENT_ROOT, symlinked docroot, restrictive
+  # permissions) the fallback fires forever and Apache gives up with a 500.
+  # This line ends that pass unconditionally.
+  RewriteRule ^index\.html$ - [L]
+
+  # never rewrite the API
+  RewriteRule ^api/ - [L]
+
+  # nor anything that actually exists on disk
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  RewriteRule ^ /index.html [L]
+</IfModule>
+
+# The API's own config and log files must never be served over HTTP.
+<FilesMatch "\.(log)$">
+  Require all denied
+</FilesMatch>
+<IfModule mod_alias.c>
+  RedirectMatch 404 ^/api/config/
+</IfModule>
+
+# Hashed build assets are immutable; index.html must never be cached.
+<IfModule mod_headers.c>
+  <FilesMatch "\.(js|css|woff2?|png|jpe?g|svg|webp)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  <FilesMatch "index\.html$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+</IfModule>

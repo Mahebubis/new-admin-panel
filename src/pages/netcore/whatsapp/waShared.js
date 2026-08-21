@@ -279,6 +279,18 @@ export const WA_INBOX_CSS = `
   .wa-avatar { width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; font-weight: 700; letter-spacing: .3px; }
   .wa-unread-dot { background: ${WA.green}; color: #fff; font-size: 10px; font-weight: 800; min-width: 19px; height: 19px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; padding: 0 5px; }
 
+  /* Manual poll. The inbox checks every five minutes, so this is how you say "check now". */
+  @keyframes wa-spin { to { transform: rotate(360deg); } }
+  .wa-refresh-btn {
+    width: 26px; height: 26px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid #e2e8f0; background: #fff; color: #64748b; cursor: pointer; flex-shrink: 0;
+    transition: background 160ms cubic-bezier(.4,0,.2,1), color 160ms, border-color 160ms, transform 120ms;
+  }
+  .wa-refresh-btn:hover:not(:disabled) { background: #e8f8f0; color: ${WA.greenDark}; border-color: ${WA.green}; }
+  .wa-refresh-btn:active:not(:disabled) { transform: scale(.92); }
+  .wa-refresh-btn:focus-visible { outline: 2px solid ${WA.green}; outline-offset: 2px; }
+  .wa-refresh-btn:disabled { opacity: .55; cursor: default; }
+
   /* ── chat surface ────────────────────────────────────────────────────────────────────── */
   /* WhatsApp's wallpaper: warm paper (#efeae2) under a faint dot grid. A flat colour reads as
      "unstyled panel"; the texture is what makes it read as a chat. */

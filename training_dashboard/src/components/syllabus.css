@@ -1,0 +1,127 @@
+/* ===========================================================================
+   syllabus.css — the player's right-hand rail.
+   =========================================================================== */
+
+.syl {
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  display: flex; flex-direction: column;
+  height: calc(100vh - var(--header-h));
+  position: sticky; top: var(--header-h);
+  overflow: hidden;
+}
+
+.syl-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 22px 24px 18px;
+}
+.syl-title { font-size: 27px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+.syl-icon {
+  color: var(--text); padding: 6px; border-radius: var(--r-sm);
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.syl-icon:hover { background: var(--bg-soft); color: var(--brand); }
+.syl-search {
+  flex: 1; min-width: 0; padding: 9px 12px;
+  border: 1px solid var(--border-2); border-radius: var(--r);
+  background: var(--bg); color: var(--text); font-size: 13.5px; outline: none;
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+.syl-search:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
+
+.syl-analytics {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 0 24px 18px;
+  font-size: 13px; letter-spacing: 0.06em; color: var(--text-2);
+}
+.syl-analytics-btn {
+  padding: 11px 18px; font-size: 12px; letter-spacing: 0.06em; border-radius: var(--r-sm);
+}
+
+.syl-progress {
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 24px 20px; border-bottom: 1px solid var(--border);
+}
+.syl-progress .bar { flex: 1; }
+.syl-progress .pct { font-size: 12.5px; color: var(--text-2); }
+
+.syl-list { flex: 1; overflow-y: auto; }
+.syl-none { padding: 28px 24px; font-size: 13.5px; color: var(--text-2); }
+
+/* ── sections ──────────────────────────────────────────────────────────── */
+.syl-sec { border-bottom: 1px solid var(--border); }
+
+.syl-sec-head {
+  display: flex; align-items: flex-start; gap: 16px; width: 100%;
+  padding: 18px 24px; text-align: left; color: var(--text);
+  transition: background var(--fast) var(--ease);
+}
+.syl-sec-head:hover { background: var(--bg-soft); }
+.syl-sec.open .syl-sec-head { background: var(--bg-soft); }
+
+.syl-sec-no { font-size: 16.5px; font-weight: 700; color: var(--text-2); min-width: 22px; line-height: 1.5; }
+.syl-sec-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.syl-sec-title { font-size: 17.5px; font-weight: 700; line-height: 1.3; letter-spacing: -0.01em; }
+.syl-sec-meta { font-size: 12.5px; color: var(--text-2); }
+
+/* ── lessons ───────────────────────────────────────────────────────────── */
+@keyframes lessonsIn { from { opacity: 0; } to { opacity: 1; } }
+.syl-lessons { animation: lessonsIn var(--base) var(--ease); }
+
+.syl-lesson {
+  position: relative;
+  display: flex; align-items: flex-start; gap: 14px; width: 100%;
+  padding: 14px 24px 14px 44px; text-align: left; color: var(--text);
+  border-top: 1px solid var(--border);
+  transition: background var(--fast) var(--ease), padding-left var(--fast) var(--ease);
+}
+.syl-lesson:hover { background: var(--bg-soft); padding-left: 48px; }
+.syl-lesson.active { background: var(--brand-soft); }
+.syl-lesson.active::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--brand);
+}
+.syl-lesson.done .syl-lesson-ico { color: var(--ok); }
+
+.syl-lesson-ico { color: var(--text-2); flex-shrink: 0; margin-top: 2px; display: inline-flex; }
+.syl-lesson.active .syl-lesson-ico { color: var(--brand); }
+
+.syl-lesson-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.syl-lesson-title { font-size: 14px; font-weight: 500; line-height: 1.4; }
+.syl-lesson.active .syl-lesson-title { font-weight: 600; }
+.syl-lesson-meta { font-size: 12px; color: var(--text-2); display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.syl-att { font-style: normal; color: var(--link); display: inline-flex; align-items: center; gap: 4px; }
+
+/* ── "you were here" ─────────────────────────────────────────────────────
+   A lesson already played reads dark blue: the title tints, the meta line
+   says how far in, and a line runs along the foot of the row to that point.
+   Orange stays reserved for the lesson playing NOW, so the two never blur
+   into each other. */
+.syl-left {
+  font-style: normal; color: var(--seen); font-weight: 600;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.syl-lesson.seen .syl-lesson-title { color: var(--seen); font-weight: 600; }
+.syl-lesson.seen .syl-lesson-ico   { color: var(--seen-2); }
+/* Except while it is the one playing — then the current-lesson orange wins,
+   because "here now" beats "here before". */
+.syl-lesson.seen.active .syl-lesson-title { color: var(--text); }
+.syl-lesson.seen.active .syl-lesson-ico   { color: var(--brand); }
+
+.syl-seen-bar {
+  position: absolute; left: 0; bottom: 0; height: 2px;
+  background: var(--seen); opacity: 0.85;
+  border-radius: 0 var(--r-pill) var(--r-pill) 0;
+}
+
+.syl-seen-tag { background: var(--seen-soft); color: var(--seen); }
+
+.syl-upnext {
+  flex-shrink: 0; align-self: center;
+  padding: 3px 8px; border-radius: var(--r-sm);
+  background: var(--bg-sunken); color: var(--text-2);
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+}
+
+@media (max-width: 1024px) {
+  .syl { height: auto; position: static; border-left: none; border-top: 1px solid var(--border); }
+}

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../../../api/axios';
 import toast from 'react-hot-toast';
 import { WA_SET_API, FORM, WA, inp, label } from './waShared';
@@ -50,6 +50,41 @@ export default function WaAddNumberModal({ wabaId, existing = null, onClose, onD
   const [code, setCode] = useState('');
   const [pin, setPin] = useState('');
   const [status, setStatus] = useState(null);
+
+  /*
+   * What Meta actually says about this number, read once when Connect opens.
+   *
+   * Without it the dialog had to GUESS, and it guessed one case for everyone: "a BSP still holds
+   * this number, registering here will cut them off". That is right for a Netcore hand-over and
+   * wrong — alarmingly wrong — for the far more common case of a number that was moved to a new
+   * WhatsApp Business Account and simply has no Cloud API registration yet. Nothing is being
+   * taken away from anybody there, and the red warning stops people finishing a step that is
+   * completely safe.
+   *
+   * It also picks the right starting step: ownership only ever has to be proved once, so a number
+   * Meta already reports as VERIFIED should not open on "we'll text you a code".
+   */
+  const [probe, setProbe] = useState(null);   // null while loading, {} when Meta could not be read
+  useEffect(() => {
+    if (!takeover || !phoneNumberId) { setProbe({}); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.post(WA_SET_API,
+          new URLSearchParams({ action: 'number_status', phone_number_id: phoneNumberId }), FORM);
+        if (cancelled) return;
+        const d = (res.data.success && res.data.data?.status) || {};
+        setProbe(d);
+        if (String(d.code_verification_status || '').toUpperCase() === 'VERIFIED') setStep(2);
+      } catch { if (!cancelled) setProbe({}); }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const platform = String(probe?.platform_type || '').toUpperCase();
+  const onPremise = platform === 'ON_PREMISE';
+  const alreadyCloud = platform === 'CLOUD_API';
 
   /* Meta's last refusal, kept so a caller can react to a specific one rather than only knowing
      that something failed — "already verified" in particular is not really an error. */
@@ -145,12 +180,30 @@ export default function WaAddNumberModal({ wabaId, existing = null, onClose, onD
             : 'Registered directly on your WhatsApp Business Account — no other panel needed.'}
         </div>
 
-        {takeover && (
+        {takeover && probe === null && (
+          <Notice tone="info" style={{ marginBottom: 18 }}>Reading this number's state from Meta…</Notice>
+        )}
+        {takeover && onPremise && (
           <Notice tone="danger" title="This disconnects your current provider" style={{ marginBottom: 18 }}>
-            WhatsApp allows only <b>one app per number</b>. This number is currently registered to another
-            app (your BSP — Netcore), which is why sending from here fails with <b>#200</b>. Registering it
+            WhatsApp allows only <b>one app per number</b>. Meta reports this number as <b>ON_PREMISE</b> —
+            another app (your BSP — Netcore) holds it, which is why sending from here fails. Registering it
             here fixes that, and <b>anything still sending through the old provider on this number stops
             immediately</b>. Move a spare number first if you have one, and avoid doing this mid-campaign.
+          </Notice>
+        )}
+        {takeover && probe && !onPremise && !alreadyCloud && (
+          <Notice tone="warn" title="Not registered on Cloud API yet" style={{ marginBottom: 18 }}>
+            Meta reports this number as registered <b>nowhere</b>, which is why every send is rejected with
+            <b> #133010</b>. A number moved to a different WhatsApp Business Account loses its registration —
+            it has to be registered again against the new one. <b>Nothing is disconnected by doing this</b>;
+            no other app is using the number.
+          </Notice>
+        )}
+        {takeover && alreadyCloud && (
+          <Notice tone="success" title="Already registered on Cloud API" style={{ marginBottom: 18 }}>
+            Meta already has this number on <b>CLOUD_API</b>, so sending should work. If it still fails, the
+            cause is the token or the WABA assignment rather than registration — press <b>Check</b> on the
+            number instead. Re-registering here is harmless but will not change anything.
           </Notice>
         )}
 
@@ -204,8 +257,8 @@ export default function WaAddNumberModal({ wabaId, existing = null, onClose, onD
           <>
             <div style={{ fontSize: 12.5, color: '#334155', marginBottom: 12, lineHeight: 1.6 }}>
               Meta will call or text <b>{displayNumber}</b> with a 6-digit code.
-              {takeover && <> Its verification has expired, so it has to be re-verified before it can be
-                registered to this app.</>}
+              {takeover && <> Ownership has to be proved once before the number can be registered. If Meta
+                already has it verified, use the skip link below — this step is then unnecessary.</>}
             </div>
             <div style={{ display: 'flex', gap: 18, marginBottom: 12 }}>
               {['SMS', 'VOICE'].map(m => (
@@ -241,7 +294,11 @@ export default function WaAddNumberModal({ wabaId, existing = null, onClose, onD
             <div style={{ fontSize: 12.5, color: '#334155', marginBottom: 12, lineHeight: 1.6 }}>
               Last step — set a 6-digit PIN. This is the number's two-factor PIN, needed again if it's ever
               re-registered. It's stored with the number so you don't have to remember it.
-              {takeover && <> Pick a new one; you don't need whatever PIN the previous provider used.</>}
+              {takeover && (onPremise
+                ? <> Pick a new one; you don't need whatever PIN the previous provider used.</>
+                : <> If two-step verification is already switched on for this number in WhatsApp Manager,
+                  enter <b>that</b> PIN — Meta rejects any other with <b>#133005</b>. If nobody knows it,
+                  reset it first under the number's <b>Two-step verification</b> tab.</>)}
             </div>
             <label style={label}>6-digit PIN</label>
             <input style={{ ...inp, maxWidth: 200, letterSpacing: '.3em', fontSize: 16, fontWeight: 700 }}

@@ -1,0 +1,118 @@
+/* ===========================================================================
+   upcoming.css — the "not open yet" cards.
+
+   Muted on purpose: these sit alongside the real courses and must not compete
+   with them. Compact by design too — a learner with eleven internships should
+   be able to take the whole list in without scrolling past a hero figure.
+   =========================================================================== */
+
+.upc { margin-top: 26px; }
+.upc-lede {
+  margin: 18px 0 0;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: #6b7280;
+}
+
+.upc-head { display: flex; align-items: center; gap: 10px; }
+.upc-title { margin: 0; font-size: 19px; font-weight: 700; color: var(--ink, #0f172a); }
+.upc-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; height: 22px; padding: 0 7px;
+  border-radius: 999px; background: #fef3c7; color: #92400e;
+  font-size: 12px; font-weight: 700;
+}
+.upc-sub { margin: 6px 0 16px; font-size: 13.5px; color: #6b7280; }
+
+.upc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 16px;
+}
+
+.upc-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e6e8ec;
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+  /* No hover lift and no pointer: nothing happens if you click it. */
+  cursor: default;
+}
+
+.upc-thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: linear-gradient(135deg, #f1f5f9, #e2e8f0);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 30px; font-weight: 700; color: #94a3b8;
+  flex-shrink: 0;
+}
+.upc-thumb img {
+  width: 100%; height: 100%; object-fit: cover;
+  /* Greyed and dimmed so it reads as locked at a glance, before any text. */
+  filter: grayscale(1); opacity: .5;
+}
+
+/* A corner badge, not a full overlay — covering the whole thumbnail hid the
+   artwork (and the fallback initial) that tells the cards apart. */
+.upc-lock {
+  position: absolute; top: 8px; right: 8px;
+  width: 26px; height: 26px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(17, 24, 39, .72);
+  font-size: 13px; line-height: 1;
+}
+
+.upc-body { padding: 12px 14px 14px; }
+.upc-name {
+  font-size: 14px; font-weight: 700; color: #0f172a; line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.upc-when { margin-top: 5px; font-size: 12.5px; color: #6b7280; }
+.upc-when b { color: #0f172a; font-weight: 600; }
+
+.upc-chip {
+  display: inline-block; margin-top: 9px;
+  padding: 3px 9px; border-radius: 999px;
+  background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
+  font-size: 11px; font-weight: 600;
+}
+
+/* "Being prepared" is a different kind of wait from "batch not started", so
+   it gets its own colour rather than sharing the amber of a known date. */
+.upc-chip.pending { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+.upc-card.is-pending .upc-thumb { background: linear-gradient(135deg, #eff6ff, #dbeafe); }
+
+/* ── phones ────────────────────────────────────────────────────────────
+   The card turns on its side: a small square thumbnail on the left and the
+   text beside it. Six stacked 16:9 cards is a very long scroll on a phone,
+   and the artwork is decoration here — the name and the date are the point. */
+@media (max-width: 640px) {
+  .upc-grid { grid-template-columns: 1fr; gap: 10px; }
+
+  .upc-card { flex-direction: row; align-items: stretch; border-radius: 12px; }
+
+  .upc-thumb {
+    aspect-ratio: 1;
+    width: 84px;
+    flex: 0 0 84px;
+    font-size: 22px;
+  }
+  .upc-lock { top: 5px; right: 5px; width: 21px; height: 21px; font-size: 11px; }
+
+  .upc-body { padding: 10px 12px; display: flex; flex-direction: column; justify-content: center; }
+  .upc-name { -webkit-line-clamp: 2; font-size: 13.5px; }
+  .upc-when { font-size: 12px; }
+  .upc-chip { margin-top: 7px; align-self: flex-start; }
+
+  .upc-title { font-size: 17px; }
+  .upc-sub, .upc-lede { font-size: 13px; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .upc-card { background: #111827; border-color: #1f2937; }
+  .upc-name { color: #e5e7eb; }
+  .upc-when b { color: #e5e7eb; }
+}

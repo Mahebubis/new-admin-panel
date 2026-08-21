@@ -1,0 +1,75 @@
+/* ===========================================================================
+   analytics.css — the course-analytics screen.
+   =========================================================================== */
+
+.an-section { font-size: 22px; font-weight: 600; letter-spacing: -0.015em; margin: 0 0 20px; }
+
+.an-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(288px, 1fr));
+  gap: 24px; margin-bottom: 46px;
+}
+
+.an-card {
+  border: 1px solid var(--border); border-radius: var(--r);
+  padding: 30px 26px 26px; text-align: center; background: var(--bg);
+  transition: border-color var(--base) var(--ease), box-shadow var(--base) var(--ease);
+}
+.an-card:hover { border-color: var(--border-2); box-shadow: var(--shadow); }
+.an-card-title { font-size: 22px; font-weight: 600; margin: 0 0 26px; }
+
+/* ── the ring ──────────────────────────────────────────────────────────── */
+.donut { position: relative; width: 190px; margin: 0 auto 28px; }
+.donut svg { width: 100%; height: auto; display: block; }
+.donut-track { fill: none; stroke: var(--border); stroke-width: 6; }
+.donut-value {
+  fill: none; stroke: var(--brand); stroke-width: 6; stroke-linecap: round;
+  transition: stroke-dasharray var(--slow) var(--ease);
+}
+.donut-label {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 38px; font-weight: 500; letter-spacing: -0.02em; color: var(--text);
+}
+
+/* ── the legend under each ring ────────────────────────────────────────── */
+.an-legend { display: grid; gap: 12px; text-align: left; }
+.an-legend-row { display: flex; align-items: center; gap: 12px; font-size: 13.5px; }
+.an-legend-label { flex: 1; color: var(--text-2); }
+.an-legend-value { font-variant-numeric: tabular-nums; color: var(--text); }
+.an-dot { width: 13px; height: 13px; border-radius: 3px; flex-shrink: 0; }
+.an-dot.muted { background: var(--bg-sunken); border: 1px solid var(--border); }
+.an-dot.brand { background: var(--brand); }
+
+/* ── quiz strip ────────────────────────────────────────────────────────── */
+.an-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.an-viewall {
+  background: var(--bg-sunken); color: var(--text-2);
+  padding: 11px 22px; border-radius: var(--r);
+}
+.an-viewall:not(:disabled):hover { background: var(--border); color: var(--text); }
+
+.an-strip {
+  display: flex; align-items: stretch; flex-wrap: wrap;
+  border: 1px solid var(--border); border-radius: var(--r); overflow: hidden;
+}
+.an-strip-lead {
+  padding: 26px 34px; min-width: 220px;
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; justify-content: center;
+}
+.an-strip-cap { font-size: 12.5px; color: var(--text-2); }
+.an-strip-big { font-size: 44px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.1; }
+.an-strip-sub { font-size: 15px; color: var(--text-3); }
+
+.an-strip-cells { flex: 1; display: flex; flex-wrap: wrap; }
+.an-cell {
+  flex: 1 1 130px; padding: 26px 20px; text-align: center;
+  display: flex; flex-direction: column; justify-content: center; gap: 4px;
+}
+.an-cell-v { font-size: 34px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.1; }
+.an-cell-l { font-size: 15px; color: var(--text-3); }
+
+@media (max-width: 720px) {
+  .an-strip-lead { border-right: none; border-bottom: 1px solid var(--border); width: 100%; }
+  .an-cell-v { font-size: 26px; }
+}

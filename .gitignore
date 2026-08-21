@@ -37,3 +37,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Learning-portal secrets — the shared handoff HMAC key and DB credentials.
+# The .example files ARE tracked; the real ones must never be.
+training_dashboard/public/api/config/secret.php
+training_dashboard/public/api/config/db.php
+training_dashboard/public/api/config/google.php
+training_dashboard/public/api/*.log

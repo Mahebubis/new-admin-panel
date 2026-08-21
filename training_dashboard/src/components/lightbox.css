@@ -1,0 +1,52 @@
+/* ===========================================================================
+   lightbox.css
+   =========================================================================== */
+
+.lb {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;                 /* above the header (which is sticky) */
+  background: rgba(10, 12, 16, .88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2.5vh 24px;
+  animation: lb-in .14s ease;
+  cursor: zoom-out;
+}
+
+@keyframes lb-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* 95% of the viewport HEIGHT is the constraint; width follows the aspect
+   ratio, capped so a very wide panorama still fits. */
+.lb-img {
+  max-height: 95vh;
+  max-width: 95vw;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .5);
+  cursor: default;
+}
+
+.lb-x {
+  position: absolute;
+  top: 14px; right: 18px;
+  width: 42px; height: 42px;
+  border: none; border-radius: 50%;
+  background: rgba(255, 255, 255, .14);
+  color: #fff; font-size: 26px; line-height: 1;
+  cursor: pointer;
+  transition: background .15s;
+}
+.lb-x:hover { background: rgba(255, 255, 255, .28); }
+
+/* On a phone the viewport is portrait, so height stops being the binding
+   constraint — width is. Padding shrinks so the image gets the screen. */
+@media (max-width: 720px) {
+  .lb { padding: 12px; }
+  .lb-img { max-width: 100%; max-height: 88vh; }
+  .lb-x { top: 8px; right: 10px; width: 38px; height: 38px; font-size: 23px; }
+}

@@ -1,0 +1,98 @@
+/* ===========================================================================
+   courseRow.css — the wide course card.
+   =========================================================================== */
+
+.crow {
+  display: flex; gap: 26px; align-items: flex-start;
+  padding: 22px 24px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  cursor: pointer;
+  transition: border-color var(--base) var(--ease), box-shadow var(--base) var(--ease),
+              transform var(--base) var(--ease);
+}
+.crow:hover { border-color: var(--border-2); box-shadow: var(--shadow); transform: translateY(-2px); }
+.crow:active { transform: translateY(0); }
+.crow.is-expired { opacity: 0.92; }
+
+.crow-thumb {
+  position: relative;
+  width: 196px; height: 110px; flex-shrink: 0;   /* 16:9 — the shape thumbnails are authored in */
+  border-radius: var(--r-sm); overflow: hidden;
+  background: var(--bg-sunken);
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* Thumbnails are uploaded at whatever aspect ratio the admin had to hand:
+   16:9, 4:3, the occasional square poster. `cover` filled the box by slicing
+   the edges off, which is how "Resume Building" lost half its artwork. So the
+   real image is `contain` — always whole, never cropped — and a blurred,
+   dimmed copy of itself sits behind it to fill whatever the letterbox leaves.
+   The card keeps a colour block that belongs to the image instead of two grey
+   bars. */
+.crow-thumb-blur {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  filter: blur(16px) saturate(1.3);
+  transform: scale(1.25);            /* covers the blur's own soft edge */
+  opacity: 0.5;
+}
+.crow-thumb-img {
+  position: relative;
+  width: 100%; height: 100%; object-fit: contain; display: block;
+  transition: transform var(--slow) var(--ease);
+}
+.crow:hover .crow-thumb-img { transform: scale(1.04); }
+.crow-thumb-fallback { font-size: 34px; font-weight: 700; color: var(--text-3); }
+
+.crow-body { flex: 1; min-width: 0; }
+
+.crow-kicker { font-size: 13.5px; color: var(--text-2); margin-bottom: 4px; }
+
+.crow-title {
+  font-size: 20px; font-weight: 600; letter-spacing: -0.01em; margin: 0;
+  color: var(--text);
+  transition: color var(--fast) var(--ease);
+}
+.crow:hover .crow-title { color: var(--brand); }
+
+.crow-chips { margin: 10px 0 12px; }
+
+.crow-meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+  font-size: 13.5px; color: var(--text-2);
+}
+.crow-meta > span + span::before {
+  content: "•"; margin-right: 10px; color: var(--text-3);
+}
+
+.crow-desc {
+  margin: 12px 0 0; font-size: 13.5px; line-height: 1.6; color: var(--text-2);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+/* ── "you were watching this" ────────────────────────────────────────────
+   The one line that tells a returning learner this row is not a fresh start.
+   Dark blue rather than the brand orange, matching the same mark in the
+   syllabus rail: orange is where you are, blue is where you have been. */
+.crow-seen {
+  display: inline-flex; align-items: center; gap: 7px;
+  margin-top: 14px; padding: 5px 11px 5px 9px;
+  border-radius: var(--r-pill);
+  background: var(--seen-soft); color: var(--seen);
+  font-size: 12.5px; line-height: 1.4;
+}
+.crow-seen b { font-weight: 600; }
+.crow-seen svg { flex-shrink: 0; }
+/* The progress bar underneath stays brand orange on purpose: it measures how
+   much of the course is finished, which is a different fact from when they
+   were last here, and two accents on one card would say neither clearly. */
+
+.crow-bar { margin-top: 14px; }
+
+@media (max-width: 700px) {
+  .crow { flex-direction: column; gap: 16px; }
+  .crow-thumb { width: 100%; height: 180px; }
+  .crow-title { font-size: 17px; }
+}

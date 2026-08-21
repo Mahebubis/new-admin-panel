@@ -1,0 +1,95 @@
+/* ===========================================================================
+   auth.css — sign in / sign up / forgot password.
+
+   One narrow column, centred both ways, no header and no footer: the learner
+   site strips its chrome here and so do we.
+   =========================================================================== */
+
+.auth {
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 48px 20px;
+  background: var(--bg-page);
+}
+
+.auth-card { width: 100%; max-width: 470px; text-align: center; }
+
+.auth-logo {
+  font-size: 46px; font-weight: 700; letter-spacing: -0.045em;
+  margin-bottom: 46px; color: var(--text);
+}
+.auth-logo span { color: var(--brand); }
+
+.auth-title {
+  font-size: 31px; font-weight: 600; letter-spacing: -0.02em;
+  margin: 0 0 12px; color: var(--text);
+}
+
+.auth-switch { font-size: 15px; color: var(--text-2); margin: 0 0 34px; }
+.auth-switch a {
+  color: var(--brand); font-weight: 500; letter-spacing: 0.04em;
+  border-bottom: 1px solid currentColor; padding-bottom: 1px;
+  transition: opacity var(--fast) var(--ease);
+}
+.auth-switch a:hover { opacity: 0.75; }
+
+.auth-field { margin-bottom: 16px; text-align: left; }
+.auth-field .field { text-align: left; }
+
+.auth-note, .auth-error {
+  text-align: left; font-size: 13px; line-height: 1.55;
+  padding: 12px 14px; border-radius: var(--r); margin-bottom: 18px;
+}
+.auth-note  { background: var(--warn-soft);   color: var(--warn);   border: 1px solid rgba(176, 112, 0, 0.2); }
+.auth-error { background: var(--danger-soft); color: var(--danger); border: 1px solid rgba(229, 72, 77, 0.22); }
+
+.auth-forgot {
+  display: inline-block; margin-top: 26px;
+  font-size: 13.5px; letter-spacing: 0.04em; color: var(--text-2);
+  border-bottom: 1px solid var(--border-2); padding-bottom: 2px;
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.auth-forgot:hover { color: var(--text); border-color: var(--text); }
+
+.auth-or {
+  display: flex; align-items: center; gap: 18px;
+  margin: 32px 0 26px; color: var(--text-3); font-size: 14px;
+}
+.auth-or::before, .auth-or::after {
+  content: ""; flex: 1; height: 1px; background: var(--border);
+}
+
+/* Google's own button is rendered into a slot, so this is only the frame
+   around it (plus the fallback button when the script has not loaded). */
+.auth-google { display: flex; justify-content: center; min-height: 46px; }
+.auth-google-fallback {
+  display: inline-flex; align-items: center; gap: 12px; justify-content: center;
+  width: 100%; padding: 13px 18px;
+  border: 1px solid var(--border-2); border-radius: var(--r);
+  font-size: 14.5px; font-weight: 500; color: var(--text);
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease),
+              box-shadow var(--base) var(--ease);
+}
+.auth-google-fallback:hover:not(:disabled) {
+  background: var(--bg-soft); border-color: var(--text-3); box-shadow: var(--shadow-xs);
+}
+
+.auth-explore { margin: 34px 0 0; font-size: 15px; color: var(--text-2); }
+.auth-explore a {
+  color: var(--brand); letter-spacing: 0.04em;
+  border-bottom: 1px solid currentColor; padding-bottom: 1px;
+}
+.auth-explore a:hover { opacity: 0.75; }
+
+.auth-strength { display: flex; gap: 10px; margin: 10px 0 4px; }
+.auth-strength i {
+  flex: 1; height: 4px; border-radius: var(--r-pill); background: var(--bg-sunken);
+  transition: background var(--base) var(--ease);
+}
+.auth-strength i.on-weak   { background: var(--danger); }
+.auth-strength i.on-medium { background: var(--brand); }
+.auth-strength i.on-strong { background: var(--ok); }
+.auth-hint {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 13px; color: var(--text-2); text-align: left; margin: 2px 0 0;
+}

@@ -1,0 +1,111 @@
+/* ===========================================================================
+   header.css — the top bar and its account menu.
+   =========================================================================== */
+
+.hdr {
+  position: sticky; top: 0; z-index: 60;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  transition: background var(--base) var(--ease), border-color var(--base) var(--ease);
+}
+.hdr-inner {
+  height: var(--header-h);
+  display: flex; align-items: center; gap: 20px;
+}
+
+/* ── logo ─────────────────────────────────────────────────────────────── */
+.hdr-logo {
+  font-size: 25px; font-weight: 700; letter-spacing: -0.03em;
+  color: var(--text); flex-shrink: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.hdr-logo:hover { opacity: 0.75; }
+.hdr-logo-i { color: var(--brand); }
+
+/* ── search ───────────────────────────────────────────────────────────── */
+.hdr-search {
+  display: flex; align-items: center; gap: 12px;
+  width: 340px; max-width: 34vw; height: 46px; padding: 0 16px;
+  border: 1px solid var(--border-2); border-radius: var(--r);
+  color: var(--text-3); background: var(--bg);
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+.hdr-search:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
+.hdr-search input {
+  flex: 1; min-width: 0; border: none; outline: none; background: none;
+  font-size: 15px; color: var(--text);
+}
+.hdr-search input::placeholder { color: var(--text-3); }
+
+/* ── theme toggle ─────────────────────────────────────────────────────── */
+.hdr-theme {
+  display: inline-flex; align-items: center; gap: 9px;
+  height: 46px; padding: 0 20px;
+  border: 1px solid var(--border-2); border-radius: var(--r);
+  font-size: 14px; font-weight: 500; letter-spacing: 0.06em; color: var(--text);
+  transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease),
+              transform var(--fast) var(--ease);
+}
+.hdr-theme:hover { background: var(--bg-soft); border-color: var(--text-3); }
+.hdr-theme:active { transform: scale(0.98); }
+
+/* ── right cluster ────────────────────────────────────────────────────── */
+.hdr-right { margin-left: auto; display: flex; align-items: center; gap: 22px; }
+
+.hdr-link {
+  font-size: 15px; color: var(--text); position: relative; padding: 4px 0;
+  transition: color var(--fast) var(--ease);
+}
+.hdr-link::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: var(--brand); transform: scaleX(0); transform-origin: left;
+  transition: transform var(--base) var(--ease);
+}
+.hdr-link:hover { color: var(--brand); }
+.hdr-link:hover::after { transform: scaleX(1); }
+
+.hdr-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: var(--r-pill); color: var(--text-2);
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.hdr-icon:hover { background: var(--bg-soft); color: var(--text); }
+
+/* ── avatar + menu ────────────────────────────────────────────────────── */
+.hdr-avatar-wrap { position: relative; }
+.hdr-avatar {
+  width: 42px; height: 42px; border-radius: var(--r-pill); overflow: hidden;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--brand); color: #fff; font-size: 17px; font-weight: 600;
+  transition: box-shadow var(--fast) var(--ease), transform var(--fast) var(--ease);
+}
+.hdr-avatar:hover { box-shadow: 0 0 0 4px var(--brand-ring); }
+.hdr-avatar:active { transform: scale(0.96); }
+.hdr-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+@keyframes menuIn { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
+.hdr-menu {
+  position: absolute; top: calc(100% + 12px); right: 0; min-width: 260px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--r);
+  box-shadow: var(--shadow-lg); padding: 8px 0; overflow: hidden;
+  animation: menuIn var(--base) var(--ease);
+}
+.hdr-menu-head { padding: 12px 20px 14px; border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+.hdr-menu-name { font-size: 14.5px; font-weight: 600; }
+.hdr-menu-mail { font-size: 12.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; }
+.hdr-menu-item {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 12px 20px; font-size: 15px; color: var(--text); text-align: left;
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease),
+              padding-left var(--fast) var(--ease);
+}
+.hdr-menu-item:hover { background: var(--bg-soft); padding-left: 24px; }
+.hdr-menu-item.danger { color: var(--danger); }
+.hdr-menu-item.danger:hover { background: var(--danger-soft); }
+
+@media (max-width: 900px) {
+  .hdr-search { display: none; }
+  .hdr-theme span { display: none; }
+  .hdr-theme { padding: 0 14px; }
+  .hdr-right { gap: 14px; }
+}

@@ -43,6 +43,19 @@ const EXTRA_SECTION_PERMISSIONS = {
     assignment_panel: 'Assignment Panel',
     purchased_starter_kit: 'Purchased Starter Kit',
   },
+  /* LMS System — `lms_system` opens the page itself, every other key gates one
+     tab inside it (keys must match LMS_TABS in pages/lms/LmsLayout.jsx). */
+  'LMS': {
+    lms_system: 'LMS System (page access)',
+    lms_dashboard: 'LMS — Dashboard tab',
+    lms_courses: 'LMS — Courses, modules & lessons',
+    lms_learners: 'LMS — Users / Learners',
+    lms_enrollments: 'LMS — Enrollments',
+    lms_quizzes: 'LMS — Quizzes & questions',
+    lms_forms: 'LMS — Form Responses',
+    lms_reports: 'LMS — Reports',
+    lms_settings: 'LMS — Settings',
+  },
 };
 
 /* ─── section → icon emoji map (mirrors PHP sectionIconMap) ─── */
@@ -68,6 +81,7 @@ const SECTION_ICONS = {
   'Admin Panel': '🔧',
   'Permissions': '🔐',
   'Notes': '📝',
+  'LMS': '🎓',
 };
 
 /* ─── helpers ─── */

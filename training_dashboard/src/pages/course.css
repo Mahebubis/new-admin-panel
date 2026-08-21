@@ -1,0 +1,241 @@
+/* ===========================================================================
+   course.css — the player screen: stage on the left, syllabus on the right.
+   =========================================================================== */
+
+.course {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  align-items: start;
+  min-height: calc(100vh - var(--header-h));
+}
+
+.course-main { min-width: 0; }
+
+/* ── the strip above the stage ─────────────────────────────────────────── */
+.course-top {
+  display: flex; align-items: center; gap: 14px;
+  padding: 18px 26px;
+  border-bottom: 1px solid var(--border);
+}
+.course-back {
+  display: inline-flex; padding: 6px; border-radius: var(--r-sm); color: var(--text);
+  transition: background var(--fast) var(--ease), transform var(--fast) var(--ease);
+}
+.course-back:hover { background: var(--bg-soft); transform: translateX(-2px); }
+
+.course-name {
+  flex: 1; min-width: 0; margin: 0;
+  font-size: 21px; font-weight: 600; letter-spacing: -0.01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.course-fav {
+  display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0;
+  font-size: 13px; font-weight: 500; letter-spacing: 0.06em; color: var(--text);
+  padding: 8px 12px; border-radius: var(--r);
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.course-fav:hover { background: var(--bg-soft); color: var(--brand); }
+.course-fav.on { color: var(--brand); }
+.course-fav.on svg { fill: currentColor; }
+
+/* ── the stage and its floating controls ───────────────────────────────── */
+.course-stage { position: relative; background: var(--player-bg); }
+
+/* Top-right, not bottom-right: the player's control bar owns the bottom of
+   the stage now, and these used to sit right on top of it. */
+.stage-controls {
+  position: absolute; right: 14px; top: 14px; z-index: 6;
+  display: flex; align-items: center; gap: 6px;
+}
+.stage-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; border-radius: var(--r-sm);
+  color: rgba(255, 255, 255, 0.88);
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease),
+              transform var(--fast) var(--ease);
+}
+.stage-btn:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+.stage-btn:active { transform: scale(0.92); }
+
+.stage-menu-wrap { position: relative; }
+.stage-menu-scrim { position: fixed; inset: 0; z-index: 6; }
+
+/* Opens downward, since the button it hangs from is now at the top. */
+@keyframes stageMenuIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.stage-menu {
+  position: absolute; right: 0; top: calc(100% + 10px); z-index: 7;
+  min-width: 224px; padding: 6px;
+  background: #1b2334; border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--r); box-shadow: var(--shadow-lg);
+  animation: stageMenuIn var(--base) var(--ease);
+}
+.stage-menu button {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 12px 14px; border-radius: var(--r-sm);
+  font-size: 14.5px; color: rgba(255, 255, 255, 0.92); text-align: left;
+  transition: background var(--fast) var(--ease);
+}
+.stage-menu button:hover { background: rgba(255, 255, 255, 0.1); }
+
+/* ── article lessons on the same stage ─────────────────────────────────── */
+.article-stage {
+  min-height: 420px; padding: 26px 30px 40px;
+  background: linear-gradient(160deg, var(--player-bg) 0%, var(--player-bg-2) 100%);
+  color: rgba(255, 255, 255, 0.9);
+}
+.article-title { font-size: 27px; font-weight: 600; color: #fff; margin-bottom: 20px; }
+.article-stage .rich { color: rgba(255, 255, 255, 0.82); }
+.article-stage .rich a { color: #8ab4ff; }
+
+/* ── tabs ──────────────────────────────────────────────────────────────── */
+.course-tabs {
+  display: flex; align-items: center; gap: 34px;
+  padding: 0 30px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto; scrollbar-width: none;
+}
+.course-tabs::-webkit-scrollbar { display: none; }
+
+.course-tab {
+  position: relative; padding: 18px 2px;
+  font-size: 13.5px; font-weight: 500; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--text-2); white-space: nowrap;
+  transition: color var(--fast) var(--ease);
+}
+.course-tab::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 3px;
+  background: var(--brand); border-radius: 3px 3px 0 0;
+  transform: scaleX(0); transform-origin: center;
+  transition: transform var(--base) var(--ease);
+}
+.course-tab:hover { color: var(--text); }
+.course-tab.active { color: var(--text); }
+.course-tab.active::after { transform: scaleX(1); }
+
+/* ── tab bodies ────────────────────────────────────────────────────────── */
+.course-panel { min-height: 320px; }
+.panel-pad { padding: 26px 30px 48px; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.panel-h { font-size: 25px; font-weight: 600; letter-spacing: -0.015em; margin: 0; display: flex; align-items: center; gap: 12px; }
+.panel-n {
+  min-width: 34px; height: 26px; padding: 0 9px; border-radius: var(--r-pill);
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--bg-sunken); color: var(--text-2); font-size: 12.5px; font-weight: 600;
+}
+
+.about-stats { display: flex; gap: 34px; flex-wrap: wrap; margin-bottom: 26px; }
+.about-stat-v { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
+.about-stat-l { font-size: 12.5px; color: var(--text-2); }
+
+.about-files { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 18px; }
+.about-file {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 14px; border: 1px solid var(--border-2); border-radius: var(--r);
+  font-size: 13px; color: var(--link);
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.about-file:hover { background: var(--bg-soft); border-color: var(--link); }
+
+/* Course/lesson bodies come from the admin's rich-text editor. */
+.rich { font-size: 14.5px; line-height: 1.75; color: var(--text-2); }
+.rich h1, .rich h2, .rich h3 { color: var(--text); margin: 22px 0 10px; }
+.rich p { margin: 0 0 12px; }
+.rich ul, .rich ol { padding-left: 22px; margin: 0 0 12px; }
+.rich img { border-radius: var(--r); margin: 12px 0; }
+.rich a { color: var(--link); text-decoration: underline; }
+
+/* ── the note composer ─────────────────────────────────────────────────── */
+.note-input {
+  width: 100%; margin: 20px 0 14px; padding: 16px 18px; resize: vertical;
+  border: 1px solid var(--border-2); border-radius: var(--r);
+  background: var(--bg); color: var(--text); font-size: 15px; outline: none;
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+.note-input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
+
+.note-add {
+  padding: 12px 22px; letter-spacing: 0.07em;
+  background: var(--bg-sunken); color: var(--text-3);
+}
+.note-add.ready { background: var(--brand-strong); color: #fff; }
+.note-add.ready:hover:not(:disabled) { background: #a9521f; box-shadow: 0 6px 16px var(--brand-ring); transform: translateY(-1px); }
+
+.note-list { list-style: none; padding: 0; margin: 26px 0 0; display: grid; gap: 12px; }
+.note {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 18px;
+  padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--r);
+  transition: border-color var(--fast) var(--ease), box-shadow var(--base) var(--ease);
+}
+.note:hover { border-color: var(--border-2); box-shadow: var(--shadow-xs); }
+.note-lesson { font-size: 12px; color: var(--brand); font-weight: 600; margin-bottom: 4px; }
+.note-text { margin: 0; font-size: 14.5px; line-height: 1.65; white-space: pre-wrap; }
+.note-date { font-size: 11.5px; color: var(--text-3); margin-top: 8px; }
+.note-del {
+  flex-shrink: 0; font-size: 12px; color: var(--text-3);
+  transition: color var(--fast) var(--ease);
+}
+.note-del:hover { color: var(--danger); }
+
+/* ── the transient confirmation ────────────────────────────────────────── */
+@keyframes toastIn { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
+.course-toast {
+  position: fixed; left: 50%; bottom: 32px; z-index: 80;
+  padding: 12px 22px; border-radius: var(--r-pill);
+  background: #101828; color: #fff; font-size: 13.5px; font-weight: 500;
+  box-shadow: var(--shadow-lg);
+  animation: toastIn var(--base) var(--ease);
+}
+
+.about-spot { margin: 6px 0 0; font-size: 13.5px; color: var(--text-2); }
+.about-spot b { color: var(--text); font-weight: 600; }
+.about-done { color: var(--ok); font-weight: 600; }
+
+@media (max-width: 1024px) {
+  .course { grid-template-columns: minmax(0, 1fr); }
+
+  /* ── the video stays put ────────────────────────────────────────────────
+     On a phone the stage used to scroll away the moment anyone reached for
+     the lesson list, so watching and reading the syllabus were mutually
+     exclusive. It now pins under the header and everything below it — tabs,
+     about, and the whole syllabus — scrolls behind it.
+
+     `display: contents` is what makes that work. A sticky element only stays
+     stuck while its own PARENT is on screen, and .course-main ends where the
+     syllabus begins — so pinning the stage inside it came unstuck at exactly
+     the moment the learner started scrolling the lesson list. Dissolving the
+     wrapper on mobile promotes the stage to a child of .course, whose box
+     covers the syllabus too, so it holds all the way down.
+
+     `top` is the header height because the header is sticky as well; the two
+     stack rather than overlap. The bar above the stage (back arrow, course
+     name, favourite) scrolls away as normal — it is not worth the pixels on a
+     small screen once you are watching. */
+  .course-main { display: contents; }
+
+  .course-stage {
+    position: sticky;
+    top: var(--header-h);
+    z-index: 30;
+    box-shadow: 0 10px 24px -18px rgba(9, 13, 22, 0.9);
+  }
+
+  /* The syllabus is the thing being scrolled now, so it must not try to be a
+     full-height pane of its own with its own inner scrollbar. */
+  .syl { overflow: visible; }
+  .syl-list { overflow: visible; }
+}
+
+/* Landscape on a phone: the stage would eat the whole viewport and there
+   would be nothing left to scroll, so it gives back half of it. */
+@media (max-width: 1024px) and (orientation: landscape) and (max-height: 520px) {
+  .course-stage .vp { aspect-ratio: auto; height: 62vh; }
+}
+
+@media (max-width: 620px) {
+  .course-top { padding: 14px 16px; }
+  .course-name { font-size: 17px; }
+  .course-fav span { display: none; }
+  .panel-pad { padding: 20px 16px 40px; }
+  .course-tabs { padding: 0 16px; gap: 22px; }
+}

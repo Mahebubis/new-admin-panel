@@ -208,17 +208,23 @@ import NetcoreSegmentCreate from './pages/netcore/NetcoreSegmentCreate';
 import NetcoreSegmentUsers from './pages/netcore/NetcoreSegmentUsers';
 import NetcoreLists from './pages/netcore/NetcoreLists';
 import NetcoreListContacts from './pages/netcore/NetcoreListContacts';
+import JourneyList from './pages/netcore/journey/JourneyList';
+import JourneyBuilder from './pages/netcore/journey/JourneyBuilder';
+import JourneyReport from './pages/netcore/journey/JourneyReport';
+import DndSettings from './pages/netcore/journey/DndSettings';
 import ImportContactsWizard from './pages/netcore/ImportContactsWizard';
 import ContactLogs from './pages/netcore/ContactLogs';
 import { NetcoreBlocklist, BlocklistLogs, BlocklistImport } from './pages/netcore/NetcoreBlocklist';
 import NetcoreAttributes from './pages/netcore/NetcoreAttributes';
 import AttributeLogs from './pages/netcore/AttributeLogs';
-import CampaignsList from './pages/netcore/CampaignsList';
+import CampaignsUnified from './pages/netcore/CampaignsUnified';
+import CampaignDetail from './pages/netcore/CampaignDetail';
 import CampaignWizard from './pages/netcore/CampaignWizard';
 import CampaignReport from './pages/netcore/CampaignReport';
 import TemplatesList from './pages/netcore/TemplatesList';
 import TemplateEditor from './pages/netcore/TemplateEditor';
 import EspSettings from './pages/netcore/EspSettings';
+import EmailDomains from './pages/netcore/EmailDomains';
 import WaCampaignsList from './pages/netcore/whatsapp/WaCampaignsList';
 import WaCampaignWizard from './pages/netcore/whatsapp/WaCampaignWizard';
 import WaCampaignReport from './pages/netcore/whatsapp/WaCampaignReport';
@@ -294,6 +300,18 @@ import DomainManagement from './pages/admin-panel/ResultPageData';
 import { SkillEditSkill, SkillSegments, SkillSegmentSkills } from './pages/admin-panel/Skills';
 import Notes from './pages/notes/Notes';
 import FunnelEconomicsView from './pages/reports/FunnelEconomics';
+import LmsLayout, { LmsGate } from './pages/lms/LmsLayout';
+import LmsDashboard from './pages/lms/LmsDashboard';
+import LmsCourses from './pages/lms/LmsCourses';
+import LmsCourseBuilder from './pages/lms/LmsCourseBuilder';
+import LmsLessonEditor from './pages/lms/LmsLessonEditor';
+import LmsLearners from './pages/lms/LmsLearners';
+import LmsEnrollments from './pages/lms/LmsEnrollments';
+import LmsQuizzes from './pages/lms/LmsQuizzes';
+import LmsQuizBuilder from './pages/lms/LmsQuizBuilder';
+import LmsResponses from './pages/lms/LmsResponses';
+import LmsReports from './pages/lms/LmsReports';
+import LmsSettings from './pages/lms/LmsSettings';
 
 // Helper to keep the route table readable
 const G = (perm, Element) => (
@@ -316,15 +334,17 @@ export default function App() {
       <Route path="/netcore/campaigns/:id/report" element={<ProtectedRoute>{G('netcore_behaviour', <CampaignReport />)}</ProtectedRoute>} />
       <Route path="/netcore/templates/new"        element={<ProtectedRoute>{G('netcore_behaviour', <TemplateEditor />)}</ProtectedRoute>} />
       <Route path="/netcore/templates/:id"        element={<ProtectedRoute>{G('netcore_behaviour', <TemplateEditor />)}</ProtectedRoute>} />
-      <Route path="/netcore/settings"             element={<ProtectedRoute>{G('netcore_behaviour', <EspSettings />)}</ProtectedRoute>} />
       {/* WhatsApp campaigns — same full-screen (no AdminLayout chrome) treatment as the email
           wizard/editor, since each of these owns the whole viewport. */}
       <Route path="/netcore/whatsapp/new"           element={<ProtectedRoute>{G('netcore_behaviour', <WaCampaignWizard />)}</ProtectedRoute>} />
-      <Route path="/netcore/whatsapp/settings"      element={<ProtectedRoute>{G('netcore_behaviour', <WaSettings />)}</ProtectedRoute>} />
       <Route path="/netcore/whatsapp/templates/new" element={<ProtectedRoute>{G('netcore_behaviour', <WaTemplateEditor />)}</ProtectedRoute>} />
       <Route path="/netcore/whatsapp/templates/:id" element={<ProtectedRoute>{G('netcore_behaviour', <WaTemplateEditor />)}</ProtectedRoute>} />
       <Route path="/netcore/whatsapp/:id/report"    element={<ProtectedRoute>{G('netcore_behaviour', <WaCampaignReport />)}</ProtectedRoute>} />
       <Route path="/netcore/whatsapp/:id"           element={<ProtectedRoute>{G('netcore_behaviour', <WaCampaignWizard />)}</ProtectedRoute>} />
+
+      {/* Journey builder — full-screen canvas, same treatment as the campaign wizards above */}
+      <Route path="/netcore/journeys/new"           element={<ProtectedRoute>{G('netcore_behaviour', <JourneyBuilder />)}</ProtectedRoute>} />
+      <Route path="/netcore/journeys/:id"           element={<ProtectedRoute>{G('netcore_behaviour', <JourneyBuilder />)}</ProtectedRoute>} />
 
       <Route element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>
         {/* Dashboard is open to every authenticated user */}
@@ -372,11 +392,28 @@ export default function App() {
           <Route path="blocklist/logs" element={<BlocklistLogs />} />
           <Route path="attributes" element={<NetcoreAttributes />} />
           <Route path="attributes/logs" element={<AttributeLogs />} />
-          <Route path="campaigns" element={<CampaignsList />} />
+          {/* One list for both channels. CampaignsList (email-only) is retired from routing —
+              its wizard, report and create flow are all still reachable from here. */}
+          <Route path="campaigns" element={<CampaignsUnified />} />
           <Route path="templates" element={<TemplatesList />} />
+          <Route path="domains" element={<EmailDomains />} />
+          {/* Settings live INSIDE the sub-layout so the Settings sub-nav stays visible while
+              moving between them. They used to be full-screen routes with nothing linking to
+              them at all. */}
+          <Route path="settings" element={<EspSettings />} />
+          <Route path="whatsapp/settings" element={<WaSettings />} />
+          {/* Performance + Preview for one campaign, either channel. Static 'campaigns/:channel/:id'
+              cannot collide with the full-screen wizard route, which is /netcore/campaigns/:id. */}
+          <Route path="campaigns/:channel/:id" element={<CampaignDetail />} />
+          <Route path="journeys" element={<JourneyList />} />
+          <Route path="journeys/:id/report" element={<JourneyReport />} />
+          {/* Account-level quiet hours. Static, so it outranks journeys/:id/report. */}
+          <Route path="journeys/dnd" element={<DndSettings />} />
           {/* Static paths, so they outrank the full-screen /netcore/whatsapp/:id route above
               (React Router v6 ranks by specificity, not declaration order). */}
-          <Route path="whatsapp" element={<WaCampaignsList />} />
+          {/* Retired — the merged Campaigns list covers both channels. Kept as a redirect so
+              old bookmarks and any link left in an email still land somewhere sensible. */}
+          <Route path="whatsapp" element={<Navigate to="/netcore/campaigns" replace />} />
           <Route path="whatsapp/templates" element={<WaTemplatesList />} />
           <Route path="whatsapp/inbox" element={<WaInbox />} />
         </Route>
@@ -483,6 +520,21 @@ export default function App() {
             </PermissionGate>
           }
         />
+
+        {/* LMS System — one gated page, then a permission per tab (see LMS_TABS) */}
+        <Route path="lms" element={G('lms_system', <LmsLayout />)}>
+          <Route index element={<LmsGate perm="lms_dashboard"><LmsDashboard /></LmsGate>} />
+          <Route path="courses" element={<LmsGate perm="lms_courses"><LmsCourses /></LmsGate>} />
+          <Route path="courses/:courseId" element={<LmsGate perm="lms_courses"><LmsCourseBuilder /></LmsGate>} />
+          <Route path="courses/:courseId/lessons/:lessonId" element={<LmsGate perm="lms_courses"><LmsLessonEditor /></LmsGate>} />
+          <Route path="learners" element={<LmsGate perm="lms_learners"><LmsLearners /></LmsGate>} />
+          <Route path="enrollments" element={<LmsGate perm="lms_enrollments"><LmsEnrollments /></LmsGate>} />
+          <Route path="quizzes" element={<LmsGate perm="lms_quizzes"><LmsQuizzes /></LmsGate>} />
+          <Route path="quizzes/:quizId" element={<LmsGate perm="lms_quizzes"><LmsQuizBuilder /></LmsGate>} />
+          <Route path="responses" element={<LmsGate perm="lms_forms"><LmsResponses /></LmsGate>} />
+          <Route path="reports" element={<LmsGate perm="lms_reports"><LmsReports /></LmsGate>} />
+          <Route path="settings" element={<LmsGate perm="lms_settings"><LmsSettings /></LmsGate>} />
+        </Route>
 
         <Route path="notes" element={G('notes', <Notes />)} />
 

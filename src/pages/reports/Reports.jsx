@@ -9,6 +9,9 @@ import toast from 'react-hot-toast';
    ────────────────────────────────────────────────────────── */
 const META_API   = '/api/reports/reports.php?action=meta';
 const EXAM_VER_API = '/api/reports/reports.php?action=exam_versions';
+/* Same CIT list + resolved date windows the Meta Ads Dashboard and Agency
+   Report 2 use, so a "CIT 175" export here covers exactly the same days. */
+const CIT_VER_API = '/api/reports/cit_versions.php';
 const DL_BASE    = (import.meta.env.VITE_API_URL || 'https://cit3.internshipstudio.com/admin/react-api')
                  + '/api/reports/reports.php';
 const COMPANY_DL = 'https://portal.internshipstudio.com/api/generate_companies_excel.php';
@@ -96,6 +99,103 @@ function BatchModal({ batches, onConfirm, onClose }) {
         <div className="rep-modal-foot">
           <button className="rep-btn-cancel" onClick={onClose}>Cancel</button>
           <button className="rep-btn-primary" onClick={() => onConfirm(sel)}>⬇️ Download</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Single CIT version picker (version-wise exports) ──────────
+   One version per download — the export's whole date window is derived
+   from it, so a multi-select would be meaningless here. */
+function CITVersionModal({ title, versions, loading, onConfirm, onClose }) {
+  const [sel, setSel] = useState('');
+
+  /* Default to the newest version whose window is actually usable. The
+     in-progress CIT row often still has to_date < from_date, which would
+     resolve to an inverted window and export nothing. */
+  useEffect(() => {
+    if (sel || !versions.length) return;
+    setSel((versions.find(v => v.from_date <= v.to_date) || versions[0]).name);
+  }, [versions, sel]);
+
+  const active = versions.find(v => v.name === sel);
+  const inverted = active && active.from_date > active.to_date;
+
+  return (
+    <div className="rep-modal-ovl" onClick={onClose}>
+      <div className="rep-modal" onClick={e => e.stopPropagation()}>
+        <div className="rep-modal-head">
+          <span>📥 {title}</span>
+          <button className="rep-modal-close" onClick={onClose}>×</button>
+        </div>
+
+        <div className="rep-modal-body">
+          {loading ? (
+            <div className="rep-loader" style={{ padding: '40px 20px', minHeight: 0 }}>
+              <div className="rep-spinner" /> Loading CIT versions...
+            </div>
+          ) : versions.length === 0 ? (
+            <p className="rep-modal-sub">No CIT versions found in exam_batch_for_reports.</p>
+          ) : (
+            <>
+              <p className="rep-modal-sub">Pick the CIT version to export:</p>
+
+              <select
+                value={sel}
+                onChange={e => setSel(e.target.value)}
+                style={{
+                  width: '100%', padding: '10px 12px', borderRadius: 9,
+                  border: '1.5px solid #e2e8f0', background: '#fff',
+                  fontSize: 13.5, fontWeight: 600, color: '#0f172a',
+                  fontFamily: 'inherit', cursor: 'pointer',
+                }}
+              >
+                {versions.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+              </select>
+
+              {active && (
+                <div style={{
+                  marginTop: 14, padding: '12px 14px', borderRadius: 10,
+                  background: inverted ? '#fef2f2' : '#eef2ff',
+                  border: `1.5px solid ${inverted ? '#fecaca' : '#c7d2fe'}`,
+                }}>
+                  <div style={{
+                    fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
+                    textTransform: 'uppercase', marginBottom: 5,
+                    color: inverted ? '#dc2626' : '#6366f1',
+                  }}>
+                    Date window
+                  </div>
+                  <div style={{
+                    fontSize: 13.5, fontWeight: 700,
+                    color: inverted ? '#991b1b' : '#3730a3',
+                  }}>
+                    {active.from_date} &nbsp;→&nbsp; {active.to_date}
+                  </div>
+                  {inverted && (
+                    <div style={{ fontSize: 11.5, color: '#b91c1c', marginTop: 6, fontWeight: 500 }}>
+                      This CIT's <code>to_date</code> is before its <code>from_date</code> in
+                      exam_batch_for_reports, so the export will be empty. Fix the batch row first.
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="rep-modal-foot">
+          <button className="rep-btn-cancel" onClick={onClose}>Cancel</button>
+          <button
+            className="rep-btn-primary"
+            onClick={() => {
+              if (!sel) { toast.error('Select a CIT version'); return; }
+              onConfirm(sel);
+            }}
+          >
+            ⬇️ Download
+          </button>
         </div>
       </div>
     </div>
@@ -293,6 +393,9 @@ export default function AllReports() {
   const [examVersions, setExamVersions] = useState([]);
   const [examVerLoading, setExamVerLoading] = useState(false);
   const [examVerLoaded, setExamVerLoaded] = useState(false);
+  const [citWindows, setCitWindows] = useState([]);
+  const [citWinLoading, setCitWinLoading] = useState(false);
+  const [citWinLoaded, setCitWinLoaded] = useState(false);
 
   useEffect(() => {
     api.get(META_API)
@@ -318,6 +421,29 @@ export default function AllReports() {
   /* ── handlers ── */
   const downloadOld = (slug) => setModal({ kind: 'old', slug });
   const downloadNew = (slug) => setModal({ kind: 'new', slug });
+
+  /* Version-wise exports — lazy-load the CIT windows on first open */
+  const downloadByVersion = (slug) => {
+    setModal({ kind: 'cit_ver', slug });
+    if (!citWinLoaded && !citWinLoading) {
+      setCitWinLoading(true);
+      api.get(CIT_VER_API)
+        .then(res => {
+          const list = (res.data?.versions || []).filter(v => v.from_date && v.to_date);
+          if (list.length) setCitWindows(list);
+          else toast.error(res.data?.error || 'Failed to load CIT versions');
+        })
+        .catch(() => toast.error('Failed to load CIT versions'))
+        .finally(() => { setCitWinLoading(false); setCitWinLoaded(true); });
+    }
+  };
+
+  const confirmByVersion = (versionName) => {
+    const { slug } = modal; setModal(null);
+    const num = (versionName.match(/(\d+)/) || [])[1];
+    if (!num) { toast.error('Could not read the CIT number'); return; }
+    window.open(dlUrl({ type: slug, versions: num }), '_blank');
+  };
 
   const confirmOld = (ids) => {
     const { slug } = modal; setModal(null);
@@ -636,7 +762,7 @@ export default function AllReports() {
               count={3}
             >
               {/* <DLBtn accent="indigo" onClick={() => downloadOld('complete_data')}>Complete User Data</DLBtn> */}
-              <DLBtn accent="indigo" onClick={() => downloadOld('simplified_complete_data')}>Simplified User Data</DLBtn>
+              <DLBtn accent="indigo" onClick={() => downloadByVersion('simplified_complete_data')}>Simplified User Data</DLBtn>
               <DLBtn accent="indigo" onClick={() => downloadOld('profile_completion_report')}>Profile Completion Data</DLBtn>
             </Section>
 
@@ -756,6 +882,16 @@ export default function AllReports() {
           title="Select CIT Versions (New)"
           items={citNew.map(c => ({ id: c.id, label: c.cit_name }))}
           onConfirm={confirmNew}
+          onClose={() => setModal(null)}
+        />
+      )}
+
+      {modal?.kind === 'cit_ver' && (
+        <CITVersionModal
+          title="Select CIT Version"
+          versions={citWindows}
+          loading={citWinLoading}
+          onConfirm={confirmByVersion}
           onClose={() => setModal(null)}
         />
       )}

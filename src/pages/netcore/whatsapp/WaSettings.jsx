@@ -195,10 +195,15 @@ export default function WaSettings() {
   /* Asks Meta what this token is actually allowed to do, and turns the answer into the specific
      click-path that fixes it. Exists because Meta returns one identical #200 for three unrelated
      causes, each with a different remedy. */
-  const runDiagnose = async () => {
+  const runDiagnose = async (senderId = 0) => {
     setDiagnosing(true); setDiagnosis(null);
     try {
-      const res = await api.post(WA_SET_API, new URLSearchParams({ action: 'diagnose' }), FORM);
+      // Aimed at ONE number when asked. The account-level checks are the same either way, but
+      // "is this number registered on Cloud API" is per number — running it against the default
+      // sender while a different number is the one failing answers the wrong question.
+      const body = { action: 'diagnose' };
+      if (senderId) body.sender_id = String(senderId);
+      const res = await api.post(WA_SET_API, new URLSearchParams(body), FORM);
       if (res.data.success) setDiagnosis(res.data.data);
       else toast.error(explainError(res.data.message), { duration: 12000 });
     } catch (e) { toast.error(explainError(e?.response?.data?.message), { duration: 12000 }); }
@@ -235,13 +240,13 @@ export default function WaSettings() {
   };
 
   if (loading || !row) {
-    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}><Spinner /></div>;
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 320 }}><Spinner /></div>;
   }
 
   const webhookUrl = API_BASE + webhookPath;
 
   return (
-    <div style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", background: '#f8fafc', minHeight: '100vh' }}>
+    <div style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", background: '#f8fafc', minHeight: '100%' }}>
       <style>{WA_CSS}</style>
 
       {/* Full width, two columns. The old 860px centred column left half the screen empty and
@@ -459,6 +464,14 @@ export default function WaSettings() {
                           Connect
                         </button>
                       )}
+                      {/* Runs the same checks as the Diagnostics panel but aimed at THIS number,
+                          including the Cloud API registration check — the one that explains a send
+                          rejected with #133010 while the token and WABA both read back fine. */}
+                      <button className="wa-btn wa-btn-text wa-btn-sm" disabled={diagnosing}
+                        title="Check this number against Meta — token, WABA access and Cloud API registration"
+                        onClick={() => { runDiagnose(s.id); document.getElementById('wa-diagnostics')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }}>
+                        Check
+                      </button>
                       <button className="wa-btn wa-btn-outlined wa-btn-sm" onClick={() => setSenderModal({ sender: s })}>
                         Edit
                       </button>
@@ -533,7 +546,7 @@ export default function WaSettings() {
         </div>
 
         {/* ── Connection test ─────────────────────────────────────────────────────────── */}
-        <div style={card}>
+        <div id="wa-diagnostics" style={card}>
           <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>Check the credentials</div>
           <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 14 }}>
             Reads your WhatsApp Business Account back from Meta: a success proves the token is live and has
@@ -553,7 +566,7 @@ export default function WaSettings() {
                 "does the token work at all"; this asks "WHY does it not work" — it reads the
                 token's own scopes and asset grants back from Meta, which is the only way to tell
                 Meta's three different causes of #200 apart. */}
-            <button onClick={runDiagnose} disabled={diagnosing}
+            <button onClick={() => runDiagnose()} disabled={diagnosing}
               style={{ padding: '10px 20px', border: '1.5px solid #e2e8f0', background: '#fff', color: WA.primary, borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: diagnosing ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
               {diagnosing ? 'Reading…' : 'Diagnose #200'}
             </button>

@@ -1,0 +1,546 @@
+// ===========================================================================
+//  Course.jsx — "/course/:slug", the player.
+//
+//  Two columns, as on the learner site:
+//    left   the dark video stage with the lesson name over it, the floating
+//           bookmark / kebab controls in its top corner, and the ABOUT ·
+//           RECENTLY ADDED · BOOKMARKS tabs beneath it. Fullscreen belongs to
+//           the player's own bar — see VideoPlayer.jsx
+//    right  the Syllabus rail: course analytics, the progress ring, then every
+//           section as an accordion of lessons, with the current one highlighted
+//           and the next one queued
+//
+//  Progress
+//    Position is sent at most once every 10 seconds (the player reports far
+//    more often than that) and a lesson auto-completes when it ends. "Mark As
+//    Complete" in the kebab does the same thing by hand, because the iframe
+//    providers cannot always tell us a video finished.
+// ===========================================================================
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { api } from '../lib/api';
+import { markActive, trackPage } from '../lib/tracking';
+import VideoPlayer from '../components/VideoPlayer';
+import QuizStage from '../components/QuizStage';
+import Syllabus from '../components/Syllabus';
+import { EmptyState, PageLoader } from '../components/Layout';
+import { Bookmark, Check, ChevronLeft, Kebab, SkipNext } from '../components/icons';
+import './course.css';
+
+const TABS = [
+  { key: 'about',  label: 'About' },
+  { key: 'recent', label: 'Recently Added' },
+  { key: 'notes',  label: 'Bookmarks' },
+];
+
+/* Lessons added in the last week feed the "Recently Added" tab. The API does
+   not send created_at per lesson, so this is derived from the order the course
+   returns — see the note in that tab's body. */
+export default function Course() {
+  const { slug, id } = useParams();
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [activeId, setActiveId] = useState(Number(params.get('lesson')) || 0);
+  const [tab, setTab] = useState('about');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [notes, setNotes] = useState([]);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
+  const [fav, setFav] = useState(false);
+  const [toast, setToast] = useState('');
+
+  const stageRef = useRef(null);
+
+  /* ── load the course ─────────────────────────────────────────────────── */
+  /* Navigating between two courses without unmounting has to show the loader
+     again, so the reset happens during render keyed on the route. */
+  const routeKey = slug || `id:${id}`;
+  const [seenRoute, setSeenRoute] = useState(routeKey);
+  if (seenRoute !== routeKey) {
+    setSeenRoute(routeKey);
+    setLoading(true);
+    setError('');
+    setData(null);
+  }
+
+  useEffect(() => {
+    let alive = true;
+    (slug ? api.course(slug) : api.courseById(id))
+      .then((d) => {
+        if (!alive) return;
+        setData(d);
+        if (!d.expired) {
+          /* Where to open, in order of authority:
+               1. ?lesson= — an explicit link, including the dashboard's
+                  "Resume" handoff, which names the lesson it means
+               2. the server's resume pick: the lesson this learner was last
+                  on. Opening lesson one of section one every time was the
+                  single most-reported annoyance with this screen
+               3. the first unfinished lesson, for a course never opened */
+          const wanted = Number(params.get('lesson')) || 0;
+          const pick = d.lessons?.find((l) => l.id === wanted)
+            || d.lessons?.find((l) => l.id === (d.resume?.lesson_id || 0))
+            || d.lessons?.find((l) => l.status !== 'completed')
+            || d.lessons?.[0];
+          setActiveId(pick?.id || 0);
+        }
+      })
+      .catch((e) => alive && setError(e.message))
+      .finally(() => alive && setLoading(false));
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug, id]);
+
+  const course = data?.course;
+  /* Memoised so the `|| []` fallback does not hand every downstream memo a new
+     array identity on each render. */
+  const lessons = useMemo(() => data?.lessons || [], [data?.lessons]);
+  const active = useMemo(() => lessons.find((l) => l.id === activeId) || null, [lessons, activeId]);
+  const activeIndex = useMemo(() => lessons.findIndex((l) => l.id === activeId), [lessons, activeId]);
+  const next = activeIndex >= 0 ? lessons[activeIndex + 1] : null;
+
+  /* ── notes for the Bookmarks tab ─────────────────────────────────────── */
+  useEffect(() => {
+    if (!course?.id) return;
+    let alive = true;
+    api.notes(course.id)
+      .then((d) => alive && setNotes(d.notes || []))
+      .catch(() => {/* the tab shows its empty state */});
+    return () => { alive = false; };
+  }, [course?.id]);
+
+  /* ── analytics: a lesson change is a page view ───────────────────────── */
+  useEffect(() => {
+    if (!course?.id) return;
+    trackPage({
+      path: `/course/${course.slug || course.id}`,
+      title: active ? `${course.title} — ${active.title}` : course.title,
+      courseId: course.id,
+      lessonId: active?.id || 0,
+    });
+  }, [course, active]);
+
+  /* Keep ?lesson= in step so a refresh — or a shared link — reopens here. */
+  useEffect(() => {
+    if (!activeId) return;
+    const n = new URLSearchParams(params);
+    n.set('lesson', String(activeId));
+    setParams(n, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId]);
+
+  const flash = useCallback((msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(''), 2600);
+  }, []);
+
+  /* ── progress ──────────────────────────────────────────────────────────
+     The player decides WHEN to report (every ten watched seconds, and on
+     pause / tab-hidden / lesson change), because only it can tell watching
+     apart from scrubbing. This just writes what it is handed and keeps the
+     local copy of the lesson in step, so the syllabus tick and the "12:30 of
+     41:02" line move without refetching the course. */
+  /* Keyed on activeId — a number — and NOT on the `active` object. The object
+     is rebuilt every time a heartbeat comes back, and a new identity here
+     would re-run the player's flush effect on each response: its cleanup would
+     fire another save, which would come back and re-run it again. */
+  const onProgress = useCallback((report) => {
+    const lessonId = activeId;
+    if (!lessonId) return;
+    /* Watching a video is engagement even with no clicks or scrolling, so it
+       keeps the analytics idle timer alive. */
+    markActive();
+
+    api.savePosition(lessonId, report)
+      .then((d) => {
+        if (!d) return;
+        setData((prev) => {
+          if (!prev) return prev;
+          const patch = (l) => (l.id === lessonId
+            ? {
+              ...l,
+              status: d.status || l.status,
+              watched_secs: d.watched_secs ?? l.watched_secs,
+              resume_secs: d.last_position_secs ?? l.resume_secs,
+              watch_secs: d.watch_time_secs ?? l.watch_secs,
+              duration: l.duration || d.duration_secs || 0,
+            }
+            : l);
+          return {
+            ...prev,
+            /* Only sent when the server just auto-completed the lesson. */
+            progress: d.progress || prev.progress,
+            lessons: prev.lessons.map(patch),
+            sections: prev.sections.map((s) => ({ ...s, lessons: s.lessons.map(patch) })),
+          };
+        });
+      })
+      .catch(() => {/* a dropped heartbeat is not worth interrupting a video */});
+  }, [activeId]);
+
+  const setComplete = useCallback(async (done) => {
+    if (!active?.id) return;
+    try {
+      const d = await api.markComplete(active.id, done);
+      setData((prev) => prev && {
+        ...prev,
+        progress: d.progress,
+        lessons: prev.lessons.map((l) => (l.id === active.id ? { ...l, status: d.status } : l)),
+        sections: prev.sections.map((s) => ({
+          ...s,
+          lessons: s.lessons.map((l) => (l.id === active.id ? { ...l, status: d.status } : l)),
+        })),
+      });
+      flash(done ? 'Marked as complete' : 'Marked as not complete');
+    } catch (e) {
+      flash(e.message);
+    }
+  }, [active, flash]);
+
+  const goNext = useCallback(() => {
+    if (!next) { flash('This is the last lesson in the course'); return; }
+    setActiveId(next.id);
+    stageRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [next, flash]);
+
+  const onEnded = useCallback(() => {
+    /* Finishing the video is the clearest possible signal of completion, so it
+       is recorded without asking — the learner can still undo it. */
+    if (active?.status !== 'completed') setComplete(true);
+  }, [active, setComplete]);
+
+  const toggleFav = async () => {
+    if (!course?.id) return;
+    try {
+      const d = await api.toggleFav(course.id);
+      setFav(d.favourite);
+      flash(d.favourite ? 'Added to favourites' : 'Removed from favourites');
+    } catch (e) { flash(e.message); }
+  };
+
+  const addNote = async () => {
+    const note = noteDraft.trim();
+    if (!note || savingNote || !course?.id) return;
+    setSavingNote(true);
+    try {
+      const d = await api.addNote({ course_id: course.id, lesson_id: active?.id || 0, note });
+      setNotes((n) => [{ ...d, lesson_title: active?.title }, ...n]);
+      setNoteDraft('');
+    } catch (e) { flash(e.message); }
+    setSavingNote(false);
+  };
+
+  const removeNote = async (noteId) => {
+    setNotes((n) => n.filter((x) => x.id !== noteId));
+    api.deleteNote(noteId).catch(() => {});
+  };
+
+  /* ── states before the player ────────────────────────────────────────── */
+  if (loading) return <PageLoader label="Opening your course…" />;
+
+  if (error) {
+    return (
+      <div className="wrap">
+        <EmptyState
+          title="We could not open this course"
+          message={error}
+          action={<Link to="/enrollments" className="btn btn-outline">Back to my enrollments</Link>}
+        />
+      </div>
+    );
+  }
+
+  if (data?.expired) {
+    return (
+      <div className="wrap">
+        <EmptyState
+          title="Your access to this course has ended"
+          message={`${course?.title || 'This course'} expired on ${course?.expiry_date || 'its expiry date'}. Renew it from your dashboard to pick up where you left off.`}
+          action={<Link to="/enrollments" className="btn btn-outline">Back to my enrollments</Link>}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="course">
+      {/* ── left: stage + tabs ─────────────────────────────────────────── */}
+      <div className="course-main">
+        <div className="course-top">
+          <button className="course-back" onClick={() => navigate('/enrollments')} aria-label="Back to my enrollments">
+            <ChevronLeft size={20} />
+          </button>
+          <h1 className="course-name">{course?.title}</h1>
+
+          <button className={`course-fav${fav ? ' on' : ''}`} onClick={toggleFav}>
+            <Bookmark size={18} />
+            {fav ? 'IN FAVOURITES' : 'ADD TO FAVOURITES'}
+          </button>
+        </div>
+
+        <div className="course-stage" ref={stageRef}>
+          {/* The stage used to fall through to the video player for every
+              type that was not article or pdf, so a quiz lesson showed an
+              empty player reading "This lesson has no video attached yet."
+              Each type now gets the surface it actually needs. */}
+          {active?.type === 'quiz' ? (
+            <QuizStage lesson={active} onPassed={() => setComplete(true)} />
+          ) : active?.type === 'article' || active?.type === 'pdf' || active?.type === 'form' ? (
+            <ArticleStage lesson={active} />
+          ) : (
+            <VideoPlayer
+              video={active?.video}
+              title={active?.title}
+              poster={course?.thumbnail_url}
+              /* The playhead, not the furthest point reached: someone who
+                 scrubbed back to re-watch a step wants that step again. */
+              startAt={active?.resume_secs || active?.watched_secs || 0}
+              onProgress={onProgress}
+              onEnded={onEnded}
+            />
+          )}
+
+          {/* Bookmark and the kebab only. Fullscreen used to live here too,
+              directly over the player's own fullscreen button — two of them in
+              one corner. It now belongs to the player, which is the thing that
+              can also turn a phone landscape when it opens. These sit at the
+              TOP of the stage so they clear the control bar underneath. */}
+          <div className="stage-controls">
+            <button className="stage-btn" onClick={toggleFav} aria-label="Bookmark this course">
+              <Bookmark size={19} />
+            </button>
+            <div className="stage-menu-wrap">
+              <button
+                className="stage-btn"
+                onClick={() => setMenuOpen((o) => !o)}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                aria-label="Lesson options"
+              >
+                <Kebab size={19} />
+              </button>
+
+              {menuOpen && (
+                <>
+                  <div className="stage-menu-scrim" onClick={() => setMenuOpen(false)} />
+                  <div className="stage-menu" role="menu">
+                    <button role="menuitem" onClick={() => { setMenuOpen(false); goNext(); }}>
+                      <SkipNext size={18} /> Next Lesson
+                    </button>
+                    <button
+                      role="menuitem"
+                      onClick={() => { setMenuOpen(false); setComplete(active?.status !== 'completed'); }}
+                    >
+                      <Check size={18} />
+                      {active?.status === 'completed' ? 'Mark As Incomplete' : 'Mark As Complete'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="course-tabs" role="tablist">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              role="tab"
+              aria-selected={tab === t.key}
+              className={`course-tab${tab === t.key ? ' active' : ''}`}
+              onClick={() => setTab(t.key)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="course-panel">
+          {tab === 'about' && <AboutTab course={course} lesson={active} progress={data?.progress} />}
+          {tab === 'recent' && <RecentTab />}
+          {tab === 'notes' && (
+            <NotesTab
+              notes={notes}
+              draft={noteDraft}
+              setDraft={setNoteDraft}
+              onAdd={addNote}
+              onRemove={removeNote}
+              saving={savingNote}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* ── right: syllabus ────────────────────────────────────────────── */}
+      <Syllabus
+        course={course}
+        sections={data?.sections || []}
+        progress={data?.progress}
+        activeId={activeId}
+        nextId={next?.id || 0}
+        onPick={(lessonId) => setActiveId(lessonId)}
+      />
+
+      {toast && <div className="course-toast" role="status">{toast}</div>}
+    </div>
+  );
+}
+
+/* mm:ss, or h:mm:ss once there is an hour to show. */
+function clock(secs) {
+  const s = Math.max(0, Math.floor(Number(secs) || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  const pad = (v) => String(v).padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(r)}` : `${m}:${pad(r)}`;
+}
+
+/* ── the ABOUT tab ─────────────────────────────────────────────────────── */
+function AboutTab({ course, lesson, progress }) {
+  /* Where they are in THIS video, which is the number a learner coming back
+     actually looks for. Only shown once the length is known — a lesson whose
+     duration nobody ever measured would otherwise read "6:02 of 0:00". */
+  const spot = lesson?.duration > 0
+    ? `${clock(lesson.resume_secs || lesson.watched_secs || 0)} of ${clock(lesson.duration)}`
+    : null;
+
+  return (
+    <div className="panel-pad fade-up">
+      <div className="about-stats">
+        <Stat label="Lessons" value={progress?.total ?? 0} />
+        <Stat label="Completed" value={progress?.completed ?? 0} />
+        <Stat label="Progress" value={`${progress?.percent ?? 0}%`} />
+        {progress?.watch_secs > 0 && (
+          <Stat label="Time watched" value={clock(progress.watch_secs)} />
+        )}
+      </div>
+
+      {lesson?.title && (
+        <>
+          <h3 className="panel-h">{lesson.title}</h3>
+          {spot && (
+            <p className="about-spot">
+              You are at <b>{spot}</b>
+              {lesson.status === 'completed' && <span className="about-done"> · completed</span>}
+            </p>
+          )}
+          {lesson.attachments?.length > 0 && (
+            <div className="about-files">
+              {lesson.attachments.map((a) => (
+                <a key={a.id} href={a.url} target="_blank" rel="noreferrer" className="about-file">
+                  {a.title || a.file_name || 'Attachment'}
+                </a>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {course?.description ? (
+        <div className="rich" dangerouslySetInnerHTML={{ __html: course.description }} />
+      ) : (
+        <p className="muted" style={{ marginTop: 12 }}>No description has been added for this course yet.</p>
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value }) {
+  return (
+    <div className="about-stat">
+      <div className="about-stat-v">{value}</div>
+      <div className="about-stat-l">{label}</div>
+    </div>
+  );
+}
+
+/* ── the RECENTLY ADDED tab ────────────────────────────────────────────── */
+function RecentTab() {
+  return (
+    <div className="panel-pad fade-up">
+      <div className="panel-head">
+        <h3 className="panel-h">New Lesson <span className="panel-n">00</span></h3>
+      </div>
+      <p className="muted" style={{ marginTop: 2 }}>View all the lessons added in past 7 days</p>
+      <EmptyState
+        title="No Recent Lessons"
+        message="No lessons have been added in the past 7 days"
+      />
+    </div>
+  );
+}
+
+/* ── the BOOKMARKS tab ─────────────────────────────────────────────────── */
+function NotesTab({ notes, draft, setDraft, onAdd, onRemove, saving }) {
+  const count = String(notes.length).padStart(2, '0');
+  return (
+    <div className="panel-pad fade-up">
+      <div className="panel-head">
+        <h3 className="panel-h">Lesson Bookmarks <span className="panel-n">{count}</span></h3>
+      </div>
+
+      <textarea
+        className="note-input"
+        rows={4}
+        placeholder="Add a note here"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        aria-label="Add a note"
+      />
+      <button
+        className={`btn note-add${draft.trim() ? ' ready' : ''}`}
+        onClick={onAdd}
+        disabled={!draft.trim() || saving}
+      >
+        {saving ? 'ADDING…' : 'ADD NOTE'}
+      </button>
+
+      {notes.length === 0 ? (
+        <EmptyState title="No Bookmark Available" message="There is no Bookmark available to read" />
+      ) : (
+        <ul className="note-list">
+          {notes.map((n) => (
+            <li key={n.id} className="note">
+              <div>
+                {n.lesson_title && <div className="note-lesson">{n.lesson_title}</div>}
+                <p className="note-text">{n.note}</p>
+                <div className="note-date">
+                  {new Date(String(n.created_at).replace(' ', 'T')).toLocaleString('en-IN', {
+                    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+                  })}
+                </div>
+              </div>
+              <button className="note-del" onClick={() => onRemove(n.id)} aria-label="Delete note">Remove</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/* ── article / PDF lessons share the stage with video ──────────────────── */
+function ArticleStage({ lesson }) {
+  if (lesson.type === 'pdf' && lesson.video?.src) {
+    return (
+      <div className="vp">
+        <iframe className="vp-frame" src={lesson.video.src} title={lesson.title} />
+      </div>
+    );
+  }
+  const fallback = lesson.type === 'form'
+    ? '<p>This lesson collects an assignment. The form is not available in the portal yet.</p>'
+    : '<p>This lesson has no content yet.</p>';
+
+  return (
+    <div className="article-stage">
+      <div className="article-title">{lesson.title}</div>
+      <div className="rich" dangerouslySetInnerHTML={{ __html: lesson.content || fallback }} />
+    </div>
+  );
+}

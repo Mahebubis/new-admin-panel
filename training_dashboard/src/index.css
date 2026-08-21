@@ -1,0 +1,278 @@
+@import "tailwindcss";
+
+/* ===========================================================================
+   iStudio learning portal — design system.
+
+   Everything the portal renders is built from the tokens below, so the whole
+   site changes colour from one place and the dark toggle in the header is a
+   single attribute flip on <html>. Tailwind is still available for one-off
+   layout, but every recurring surface (cards, chips, the player, the syllabus
+   rail) has a real class here — that is what keeps the screens consistent
+   rather than a pile of ad-hoc utility strings.
+   =========================================================================== */
+
+:root {
+  /* brand */
+  --brand:            #e2761b;   /* the orange on buttons, tabs and progress */
+  --brand-strong:     #c1622a;   /* pressed / solid CTA */
+  --brand-soft:       #fdf1e5;
+  --brand-ring:       rgba(226, 118, 27, 0.28);
+
+  /* the welcome banner runs dark-brown → light-orange, left to right */
+  --banner-from:      #8a4413;
+  --banner-to:        #f0a860;
+
+  /* surfaces */
+  --bg:               #ffffff;
+  --bg-page:          #ffffff;
+  --bg-soft:          #f6f7f9;
+  --bg-sunken:        #f1f2f4;
+  --player-bg:        #0f1522;   /* the near-black video stage */
+  --player-bg-2:      #161d2e;
+
+  /* text */
+  --text:             #14213d;
+  --text-2:           #5a6478;
+  --text-3:           #949cab;
+  --text-inverse:     #ffffff;
+
+  /* lines */
+  --border:           #e6e8ec;
+  --border-2:         #d6d9df;
+
+  /* status */
+  --danger:           #e5484d;
+  --danger-soft:      #fdeceb;
+  --warn:             #b07000;
+  --warn-soft:        #fdf3d7;
+  --ok:               #12a150;
+  --ok-soft:          #e8f8ef;
+  --link:             #3b5bdb;
+
+  /* "you have been here before" — the dark blue on a lesson the learner has
+     already played and on the course they were last watching. Deliberately
+     not the brand orange: orange means "where you are now", this means
+     "where you have been", and the two have to be told apart at a glance. */
+  --seen:             #1b3a8f;
+  --seen-2:           #4062b8;
+  --seen-soft:        #eaefff;
+
+  /* depth + shape */
+  --r-sm: 4px;
+  --r:    8px;
+  --r-lg: 14px;
+  --r-pill: 999px;
+  --shadow-xs: 0 1px 2px rgba(20, 33, 61, 0.05);
+  --shadow:    0 2px 8px rgba(20, 33, 61, 0.07);
+  --shadow-lg: 0 12px 28px rgba(20, 33, 61, 0.12);
+
+  /* motion — one curve everywhere, so the whole UI decelerates alike */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --fast: 0.15s;
+  --base: 0.24s;
+  --slow: 0.4s;
+
+  --header-h: 74px;
+}
+
+:root[data-theme="dark"] {
+  --bg:          #10141d;
+  --bg-page:     #0c0f16;
+  --bg-soft:     #171c27;
+  --bg-sunken:   #1c222f;
+  --text:        #eef1f6;
+  --text-2:      #a6afbf;
+  --text-3:      #6f7889;
+  --border:      #242b39;
+  --border-2:    #303950;
+  --brand-soft:  #2a1c0e;
+  /* The dark blue has to become a LIGHT blue on a dark surface, or the mark
+     disappears into the background it is meant to stand out from. */
+  --seen:        #9cb8ff;
+  --seen-2:      #7d9cf0;
+  --seen-soft:   #17203a;
+  --danger-soft: #2c1618;
+  --warn-soft:   #2a2210;
+  --ok-soft:     #12261b;
+  --shadow-xs:   0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow:      0 2px 10px rgba(0, 0, 0, 0.5);
+  --shadow-lg:   0 14px 34px rgba(0, 0, 0, 0.6);
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg-page);
+  color: var(--text);
+  font-family: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background var(--base) var(--ease), color var(--base) var(--ease);
+}
+
+a { color: inherit; text-decoration: none; }
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
+button:disabled { cursor: not-allowed; }
+input, textarea, select { font: inherit; color: inherit; }
+img { max-width: 100%; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: var(--r-pill); }
+::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+/* Keyboard users get a visible ring; mouse users never see it. */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* ── layout ─────────────────────────────────────────────────────────────── */
+.shell { display: flex; min-height: 100%; flex-direction: column; }
+.shell-main { flex: 1; }
+.wrap { width: 100%; max-width: 1240px; margin: 0 auto; padding: 0 24px; }
+.wrap-narrow { max-width: 900px; }
+
+/* ── typography ─────────────────────────────────────────────────────────── */
+.h1 { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; margin: 0; line-height: 1.2; }
+.h2 { font-size: 26px; font-weight: 700; letter-spacing: -0.015em; margin: 0; line-height: 1.25; }
+.h3 { font-size: 17px; font-weight: 600; margin: 0; }
+.muted { color: var(--text-2); }
+.tiny { font-size: 12px; color: var(--text-3); }
+
+/* ── buttons ────────────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 11px 20px; border-radius: var(--r); border: 1px solid transparent;
+  font-size: 13.5px; font-weight: 600; letter-spacing: 0.01em; white-space: nowrap;
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease),
+              border-color var(--fast) var(--ease), box-shadow var(--base) var(--ease),
+              transform var(--fast) var(--ease);
+}
+.btn:active:not(:disabled) { transform: translateY(0) scale(0.985); }
+.btn:disabled { opacity: 0.5; }
+
+.btn-brand { background: var(--brand-strong); color: #fff; box-shadow: var(--shadow-xs); }
+.btn-brand:hover:not(:disabled) { background: #a9521f; box-shadow: 0 6px 16px var(--brand-ring); transform: translateY(-1px); }
+
+.btn-dark { background: #101828; color: #fff; }
+.btn-dark:hover:not(:disabled) { background: #1d2939; box-shadow: 0 6px 16px rgba(16, 24, 40, 0.24); transform: translateY(-1px); }
+:root[data-theme="dark"] .btn-dark { background: #eef1f6; color: #10141d; }
+:root[data-theme="dark"] .btn-dark:hover:not(:disabled) { background: #fff; }
+
+.btn-outline { background: transparent; border-color: var(--border-2); color: var(--text); }
+.btn-outline:hover:not(:disabled) { border-color: var(--text-3); background: var(--bg-soft); }
+
+.btn-ghost { color: var(--text-2); }
+.btn-ghost:hover:not(:disabled) { background: var(--bg-soft); color: var(--text); }
+
+.btn-block { width: 100%; }
+.btn-lg { padding: 14px 24px; font-size: 15px; }
+
+/* The store's sign-in button starts flat and only fills once the form is
+   usable — the same "inactive until valid" cue the learner site gives. */
+.btn-auth {
+  width: 100%; padding: 15px; border-radius: var(--r); font-size: 15px; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  border: 1px solid var(--border-2); background: transparent; color: var(--text-3);
+  transition: background var(--base) var(--ease), color var(--base) var(--ease),
+              border-color var(--base) var(--ease), box-shadow var(--base) var(--ease),
+              transform var(--fast) var(--ease);
+}
+.btn-auth.ready { background: var(--brand-strong); border-color: var(--brand-strong); color: #fff; }
+.btn-auth.ready:hover:not(:disabled) { background: #a9521f; box-shadow: 0 8px 20px var(--brand-ring); transform: translateY(-1px); }
+.btn-auth:active:not(:disabled) { transform: scale(0.99); }
+
+/* ── inputs ─────────────────────────────────────────────────────────────── */
+.field {
+  width: 100%; padding: 15px 16px; border-radius: var(--r);
+  border: 1px solid var(--border-2); background: var(--bg); color: var(--text);
+  font-size: 15px; outline: none;
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+.field::placeholder { color: var(--text-3); }
+.field:hover { border-color: var(--text-3); }
+.field:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
+.field-wrap { position: relative; }
+.field-btn {
+  position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+  color: var(--text-3); display: inline-flex; padding: 6px; border-radius: var(--r-sm);
+  transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.field-btn:hover { color: var(--text); background: var(--bg-soft); }
+
+/* ── chips ──────────────────────────────────────────────────────────────── */
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 9px; border-radius: var(--r-sm);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.chip-expired  { background: var(--danger-soft); color: var(--danger); }
+.chip-purchased{ background: var(--warn-soft);   color: var(--warn); }
+.chip-free     { background: var(--ok-soft);     color: var(--ok); }
+.chip-soon     { background: var(--bg-sunken);   color: var(--text-2); }
+
+/* ── cards ──────────────────────────────────────────────────────────────── */
+.card {
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--r);
+  transition: border-color var(--base) var(--ease), box-shadow var(--base) var(--ease),
+              transform var(--base) var(--ease);
+}
+.card-hover:hover { border-color: var(--border-2); box-shadow: var(--shadow); transform: translateY(-2px); }
+
+/* ── progress ───────────────────────────────────────────────────────────── */
+.bar { height: 4px; border-radius: var(--r-pill); background: var(--bg-sunken); overflow: hidden; }
+.bar > i { display: block; height: 100%; border-radius: var(--r-pill); background: var(--brand);
+           transition: width var(--slow) var(--ease); }
+.bar-row { display: flex; align-items: center; gap: 12px; }
+.bar-row .bar { flex: 1; }
+.bar-row .pct { font-size: 12px; color: var(--text-2); min-width: 34px; text-align: right; }
+
+/* ── the welcome banner ─────────────────────────────────────────────────── */
+.banner {
+  background: linear-gradient(90deg, var(--banner-from) 0%, var(--banner-to) 100%);
+  color: #fff; padding: 44px 0;
+}
+.banner .hi { font-size: 15px; font-weight: 400; opacity: 0.95; margin: 0 0 6px; }
+.banner .h1 { color: #fff; }
+
+/* ── the empty-state illustration block ─────────────────────────────────── */
+.empty { display: flex; flex-direction: column; align-items: center; text-align: center;
+         padding: 64px 24px; gap: 6px; }
+.empty h3 { font-size: 17px; font-weight: 600; margin: 18px 0 0; }
+.empty p  { font-size: 13.5px; color: var(--text-2); margin: 0; max-width: 460px; }
+
+/* ── loaders ────────────────────────────────────────────────────────────── */
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+.skeleton { position: relative; overflow: hidden; background: var(--bg-sunken); border-radius: var(--r); }
+.skeleton::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  animation: shimmer 1.4s infinite;
+}
+:root[data-theme="dark"] .skeleton::after { background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent); }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.22); border-top-color: #fff;
+  animation: spin 0.75s linear infinite;
+}
+.spinner-dark { border-color: var(--bg-sunken); border-top-color: var(--brand); }
+
+@keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.fade-up { animation: fadeUp var(--slow) var(--ease) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

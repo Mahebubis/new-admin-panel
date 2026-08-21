@@ -1,0 +1,17 @@
+<?php
+/**
+ * db.php — local/dev database credentials.
+ *
+ * On the live cPanel box this file is NOT needed: _bootstrap.php finds
+ * /home/istudio/public_html/cit/common/helper.php and uses connect_db()
+ * exactly like react-api does, so the credentials stay in one place.
+ *
+ * Copy this to db.php for local development. db.php must never be committed.
+ */
+return [
+    'host' => '127.0.0.1',
+    'user' => 'root',
+    'pass' => '',
+    'name' => 'istudio_cit',
+    'port' => 3306,
+];
