@@ -241,6 +241,21 @@ export const LMS_CSS = `
 .lms-lesson-row{display:flex;align-items:center;gap:12px;padding:13px 18px;border-top:1px solid var(--lms-border);
   transition:background .12s;}
 .lms-lesson-row:hover{background:var(--lms-bg-page);}
+/* The lesson you came back from. It stays marked for as long as the outline
+   is on screen rather than flashing once and fading — the point is to answer
+   "where was I?" at a glance, and a 2-second flash is gone by the time the
+   smooth scroll has finished. The pulse only announces the arrival. */
+.lms-lesson-row.is-current{background:var(--lms-green-soft);
+  box-shadow:inset 3px 0 0 0 var(--lms-green);animation:lms-return .9s ease-out both;}
+.lms-lesson-row.is-current:hover{background:#dcf7e7;}
+.lms-lesson-row.is-current .lms-lesson-title{font-weight:600;color:var(--lms-green-dark);}
+@keyframes lms-return{
+  0%{background:#c7f0d8;}
+  100%{background:var(--lms-green-soft);}
+}
+@media (prefers-reduced-motion:reduce){
+  .lms-lesson-row.is-current{animation:none;}
+}
 .lms-lesson-num{font-size:13px;color:var(--lms-text-2);min-width:16px;}
 .lms-lesson-ico{color:var(--lms-green);display:flex;flex-shrink:0;}
 .lms-lesson-title{font-size:13.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;}
@@ -363,6 +378,23 @@ export const LMS_CSS = `
 .lms-root .lms-combo-item.selected{color:var(--lms-green-dark);font-weight:600;}
 .lms-root .lms-combo-item.selected.active{background:var(--lms-green-soft);}
 .lms-combo-empty{padding:22px 12px;text-align:center;font-size:12.5px;color:var(--lms-text-3);}
+
+/* ── quiz picker: the same popup, but each row carries badges ──── */
+/* A quiz row is two lines — title, then the internship badge, the draft flag
+   and the question count — so it overrides the single-line combo item rather
+   than trying to squeeze all of that onto one baseline. */
+.lms-root .lms-combo-item.lms-qpick-item{align-items:flex-start;padding:10px 11px;}
+.lms-qpick-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;text-align:left;}
+.lms-qpick-title{font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lms-qpick-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.lms-qpick-count{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--lms-text-3);}
+/* The closed control shows the same badges as the row it came from, so the
+   answer to "which internship is bound here?" is on screen without opening
+   the list again. */
+.lms-qpick-picked{flex:1;min-width:0;display:flex;align-items:center;gap:8px;overflow:hidden;}
+.lms-qpick-picked .t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lms-qpick-picked .lms-pill{flex-shrink:0;max-width:190px;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;display:inline-block;}
 .lms-filter-grid .lms-help{margin-top:5px;}
 
 /* ── forms ────────────────────────────────────────────────────── */
@@ -421,6 +453,47 @@ export const LMS_CSS = `
 .lms-toggle-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px 0;
   border-bottom:1px solid var(--lms-border);}
 .lms-toggle-row:last-child{border-bottom:none;}
+
+/* The course-level routing switch on the builder header. Boxed, because it is
+   the one control up there that reports a state rather than starting an
+   action, and a bare toggle beside two buttons reads as a third button. */
+.lms-course-switch{display:flex;align-items:center;gap:14px;padding:7px 14px;
+  border:1px solid var(--lms-border);border-radius:var(--lms-r);background:var(--lms-bg);}
+.lms-course-switch-label{font-size:13px;font-weight:600;line-height:1.3;white-space:nowrap;}
+.lms-course-switch-hint{font-size:11px;color:var(--lms-text-3);line-height:1.3;white-space:nowrap;}
+
+/* ── spreadsheet question import ──────────────────────────────────────── */
+/* The column key. Two columns on a wide modal, one on a narrow one — the
+   names are the contract with the file, so they get to be legible. */
+.lms-import-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:1px;
+  background:var(--lms-border);border:1px solid var(--lms-border);border-radius:var(--lms-r);overflow:hidden;}
+.lms-import-col{display:flex;flex-direction:column;gap:1px;padding:9px 12px;background:var(--lms-bg);}
+.lms-import-col b{font-size:12.5px;font-weight:600;}
+.lms-import-col span{font-size:11.5px;color:var(--lms-text-3);}
+
+.lms-import-summary{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:16px;
+  padding:11px 14px;background:var(--lms-bg-soft);border-radius:var(--lms-r);font-size:13px;}
+.lms-import-summary span{display:inline-flex;align-items:center;gap:6px;}
+.lms-import-summary .ok{color:var(--lms-green-dark);font-weight:600;}
+.lms-import-summary .bad{color:var(--lms-red-dark);font-weight:600;}
+.lms-import-summary .muted{color:var(--lms-text-3);margin-left:auto;font-size:12px;}
+
+/* Capped and scrollable: ten questions is enough to catch a systematic
+   mis-read, and an unbounded list would push the Import button off screen —
+   which is the button the whole preview exists to inform. */
+.lms-import-preview{max-height:320px;overflow-y:auto;border:1px solid var(--lms-border);
+  border-radius:var(--lms-r);padding:6px;display:flex;flex-direction:column;gap:6px;}
+.lms-import-q{padding:10px 12px;border-radius:6px;background:var(--lms-bg-page);}
+.lms-import-q-head{display:flex;align-items:flex-start;gap:9px;flex-wrap:wrap;margin-bottom:8px;}
+.lms-import-q-head .n{font-size:12px;font-weight:600;color:var(--lms-text-3);min-width:16px;padding-top:2px;}
+.lms-import-q-head p{margin:0;}
+.lms-import-opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:4px 14px;
+  padding-left:25px;}
+.lms-import-opt{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--lms-text-2);
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lms-import-opt.right{color:var(--lms-green-dark);font-weight:600;}
+.lms-import-opt .dot{width:13px;height:13px;border:1.5px solid var(--lms-border-2);border-radius:50%;flex-shrink:0;}
+.lms-import-opt svg{flex-shrink:0;}
 
 /* ── tables ───────────────────────────────────────────────────── */
 .lms-table-wrap{border:1px solid var(--lms-border);border-radius:var(--lms-r-lg);overflow:hidden;background:var(--lms-bg);}

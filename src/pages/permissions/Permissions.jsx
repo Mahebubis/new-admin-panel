@@ -54,7 +54,12 @@ const EXTRA_SECTION_PERMISSIONS = {
     lms_quizzes: 'LMS — Quizzes & questions',
     lms_forms: 'LMS — Form Responses',
     lms_reports: 'LMS — Reports',
+    lms_support: 'LMS — Support tickets',
     lms_settings: 'LMS — Settings',
+  },
+  /* Synthetic monitoring — the API checks the same key (`monitoring`). */
+  'Monitoring': {
+    monitoring: 'Monitoring (uptime & synthetic checks)',
   },
 };
 
@@ -82,6 +87,7 @@ const SECTION_ICONS = {
   'Permissions': '🔐',
   'Notes': '📝',
   'LMS': '🎓',
+  'Monitoring': '📡',
 };
 
 /* ─── helpers ─── */

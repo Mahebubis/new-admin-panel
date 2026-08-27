@@ -237,3 +237,61 @@
      and phones have hardware volume keys anyway. */
   .vp-vol-input, .vp-vol:hover .vp-vol-input { display: none; }
 }
+
+/* ── our skip controls over an embedded player ────────────────────────────
+   Bunny, Vimeo and YouTube each draw their own control bar along the bottom
+   of the iframe, so this floats ABOVE it: overlapping it would put two rows
+   of buttons on the same pixels and make both unusable.
+
+   72px clears every one of those bars at desktop sizes. It is a small pill
+   rather than a full-width bar because it adds exactly two controls the
+   embeds do not offer — a five-second step in each direction — and must not
+   look like it has taken the player over. */
+.vp-embed-ctl {
+  position: absolute; left: 50%; bottom: 72px; z-index: 6;
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 4px;
+  padding: 5px 6px; border-radius: var(--r-pill);
+  background: rgba(9, 13, 22, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(4px);
+  opacity: 0.72;
+  transition: opacity var(--fast) var(--ease);
+}
+.vp-embed-ctl:hover { opacity: 1; }
+
+.vp-embed-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: 50%;
+  color: rgba(255, 255, 255, 0.92);
+  transition: background var(--fast) var(--ease), transform var(--fast) var(--ease);
+}
+.vp-embed-btn:hover { background: rgba(255, 255, 255, 0.16); }
+.vp-embed-btn:active { transform: scale(0.92); }
+
+.vp-embed-time {
+  padding: 0 6px; font-size: 11.5px; font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.82); white-space: nowrap;
+}
+.vp-embed-time em { font-style: normal; color: rgba(255, 255, 255, 0.45); }
+
+/* A phone's embed bar is shorter, and so is the room above it. */
+@media (max-width: 620px) {
+  .vp-embed-ctl { bottom: 56px; opacity: 0.9; gap: 2px; }
+  .vp-embed-btn { width: 30px; height: 30px; }
+  .vp-embed-time { font-size: 11px; padding: 0 4px; }
+}
+
+/* Autoplay was refused (a fresh page load with no prior user gesture). Saying
+   so is better than a video that silently declines to start. */
+.vp-blocked {
+  position: absolute; left: 50%; top: calc(50% + 62px); z-index: 6;
+  transform: translateX(-50%);
+  padding: 7px 14px; border-radius: var(--r-pill);
+  background: rgba(9, 13, 22, 0.78); border: 1px solid rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.92); font-size: 12px; white-space: nowrap;
+  pointer-events: none;
+}
+@media (max-width: 620px) {
+  .vp-blocked { font-size: 11px; top: calc(50% + 52px); }
+}

@@ -35,12 +35,19 @@ $in     = learn_input();
 function quiz_load($conn, $uid, $lessonId) {
     $lessonId = (int)$lessonId;
     if (!$lessonId) learn_error('A lesson id is required');
+    learn_soon_columns($conn);
 
     /* One query does the lookup AND the entitlement check, so there is no way
        to reach a quiz through a lesson the learner does not own. */
+    /* GREATEST over both flags: a lesson is locked either by its own switch
+       or by the module above it. learn_soon_columns() has already guaranteed
+       the columns exist; the COALESCEs cover the LEFT JOIN missing. */
     $res = $conn->query("SELECT l.id lesson_id, l.course_id, l.quiz_id, l.title lesson_title,
-                                e.expiry_date
+                                e.expiry_date,
+                                GREATEST(COALESCE(l.is_coming_soon, 0),
+                                         COALESCE(s.is_coming_soon, 0)) coming_soon
                            FROM lms_lessons l
+                           LEFT JOIN lms_sections s ON s.id = l.section_id
                            JOIN lms_enrollments e
                              ON e.course_id = l.course_id
                             AND e.user_id = " . (int)$uid . "
@@ -54,6 +61,9 @@ function quiz_load($conn, $uid, $lessonId) {
     if ($l['expiry_date'] && $l['expiry_date'] < date('Y-m-d')) {
         learn_error('Your access to this course has ended', 403);
     }
+    /* The rail greys a coming-soon row out, but the URL is still typeable and
+       an old bookmark still points here — the lock has to live server-side. */
+    if ((int)$l['coming_soon'] === 1) learn_error('This quiz is not open yet', 403);
 
     $qid = (int)$l['quiz_id'];
     if (!$qid) learn_error('No quiz has been attached to this lesson yet', 404);

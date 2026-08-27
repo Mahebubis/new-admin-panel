@@ -252,6 +252,58 @@ function learn_install($conn) {
         INDEX idx_user_course (user_id, course_id),
         INDEX idx_lesson (lesson_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    /* ── the support desk ──────────────────────────────────────────────────
+       A learner raises a ticket here; an admin answers it from the LMS panel
+       (react-api/api/lms/lms_api.php, ?resource=support) and the reply appears
+       in the same thread the learner is already watching.
+
+       The two `*_unread` counters are what let each side show a badge without
+       a per-message read table: the learner's reply bumps admin_unread and
+       zeroes their own, and opening a thread zeroes the counter for whoever
+       opened it. That is enough for a desk this size and it survives a message
+       being deleted, which a "last read id" pointer does not.
+
+       Both sides run this identical DDL (lms_api.php has its own copy for the
+       case where the admin panel is deployed first), so whichever executes
+       first creates the tables and the other becomes a metadata no-op. */
+    $conn->query("CREATE TABLE IF NOT EXISTS lms_support_tickets (
+        id              INT AUTO_INCREMENT PRIMARY KEY,
+        user_id         INT          NOT NULL,
+        subject         VARCHAR(190) NOT NULL,
+        /* The pre-set query the learner picked, or 'other' when they typed
+           their own. Kept as a plain string, not an ENUM: the list on the
+           portal will grow and an ENUM would need a migration each time. */
+        topic           VARCHAR(60)       DEFAULT 'other',
+        course_id       INT               DEFAULT 0,
+        status          ENUM('open','answered','closed') DEFAULT 'open',
+        messages        INT               DEFAULT 0,
+        admin_unread    INT               DEFAULT 0,
+        learner_unread  INT               DEFAULT 0,
+        last_message_at DATETIME          DEFAULT NULL,
+        created_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_user_created (user_id, created_at),
+        INDEX idx_status (status, last_message_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    /* One row per message, either direction. The optional attachment lives on
+       the message rather than in a table of its own — the portal accepts at
+       most one file per message, so a join would buy nothing. file_url is
+       ABSOLUTE, because the admin panel reads these rows from a different
+       host and a portal-relative path would 404 there. */
+    $conn->query("CREATE TABLE IF NOT EXISTS lms_support_messages (
+        id         INT AUTO_INCREMENT PRIMARY KEY,
+        ticket_id  INT          NOT NULL,
+        sender     ENUM('learner','admin') NOT NULL DEFAULT 'learner',
+        author     VARCHAR(120)      DEFAULT NULL,
+        body       TEXT,
+        file_url   VARCHAR(500)      DEFAULT NULL,
+        file_name  VARCHAR(190)      DEFAULT NULL,
+        file_type  VARCHAR(90)       DEFAULT NULL,
+        file_size  INT               DEFAULT 0,
+        created_at TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_ticket (ticket_id, id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 }
 learn_install($conn);
 
@@ -300,6 +352,55 @@ function learn_watch_columns($conn) {
 
     @file_put_contents($marker, json_encode($cols));
     return $cols;
+}
+
+/**
+ * The coming-soon columns on lms_sections and lms_lessons.
+ *
+ * Same deal as learn_watch_columns above: these belong to
+ * react-api/api/lms/lms_api.php, but selecting a column that does not exist is
+ * a fatal SQL error, not a NULL — so the portal cannot simply COALESCE its way
+ * around an admin API that has not been redeployed yet. It adds them itself,
+ * with byte-identical DDL, and whichever side runs first wins.
+ *
+ * is_enabled is deliberately NOT in this list. The portal never reads it: it
+ * is a routing flag for user_dashboard, and a module switched off there must
+ * stay open for learners already inside the course.
+ *
+ * Cached in a marker file for an hour — the course page reads this on every
+ * load and SHOW COLUMNS twice per request is a waste.
+ */
+function learn_soon_columns($conn) {
+    static $done = null;
+    if ($done !== null) return $done;
+
+    $marker = sys_get_temp_dir() . '/istudio-lms-soon-columns.json';
+    if (is_file($marker) && (time() - (int)@filemtime($marker)) < 3600) {
+        $done = true;
+        return $done;
+    }
+
+    $want = [
+        'is_coming_soon'   => '`is_coming_soon` TINYINT(1) NOT NULL DEFAULT 0',
+        'coming_soon_note' => '`coming_soon_note` VARCHAR(255) NULL DEFAULT NULL',
+    ];
+
+    foreach (['lms_sections', 'lms_lessons'] as $table) {
+        $have = [];
+        $r = $conn->query("SHOW COLUMNS FROM $table");
+        while ($r && ($row = $r->fetch_assoc())) $have[strtolower((string)$row['Field'])] = true;
+        if (!$have) continue;                       // table missing: nothing to do
+        foreach ($want as $name => $ddl) {
+            if (isset($have[$name])) continue;
+            if (!$conn->query("ALTER TABLE $table ADD COLUMN $ddl")) {
+                learn_log('SCHEMA', "could not add $table.$name: " . $conn->error);
+            }
+        }
+    }
+
+    @file_put_contents($marker, json_encode(['at' => time()]));
+    $done = true;
+    return $done;
 }
 
 /* ── 6. the logged-in learner ──────────────────────────────────────────── */

@@ -1,0 +1,139 @@
+/* ===========================================================================
+   docstage.css — the non-video stage: PDFs, images, attachments, articles.
+
+   Deliberately NOT the player's near-black: a document is a page, and a white
+   PDF glowing out of a black slab is both ugly and hard to read. It uses the
+   portal's own surfaces, so it follows the light/dark toggle like every other
+   panel.
+   =========================================================================== */
+
+.doc {
+  display: flex; flex-direction: column;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── the bar across the top ───────────────────────────────────────────── */
+.doc-bar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 20px;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+}
+.doc-closed .doc-bar { border-bottom: none; }
+
+.doc-ico {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; flex-shrink: 0;
+  border-radius: var(--r-sm);
+  background: var(--brand-soft); color: var(--brand);
+}
+
+.doc-heading { flex: 1; min-width: 0; }
+.doc-title {
+  font-size: 16px; font-weight: 600; line-height: 1.35; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.doc-sub { font-size: 12px; color: var(--text-2); margin-top: 1px; }
+
+.doc-acts { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.doc-act {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; border-radius: var(--r-sm);
+  border: 1px solid var(--border-2);
+  font-size: 12.5px; font-weight: 500; color: var(--text);
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.doc-act:hover { background: var(--bg); border-color: var(--brand); color: var(--brand); }
+
+.doc-fold {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  padding: 7px 12px; border-radius: var(--r-sm);
+  font-size: 12.5px; font-weight: 600; color: var(--text-2);
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.doc-fold:hover { background: var(--bg-sunken); color: var(--text); }
+
+/* ── the body ─────────────────────────────────────────────────────────── */
+.doc-body { padding: 16px 20px 20px; }
+
+/* one tab per attachment — a lesson with eight templates is browsed here */
+.doc-tabs {
+  display: flex; gap: 8px; margin-bottom: 14px;
+  overflow-x: auto; scrollbar-width: thin; padding-bottom: 4px;
+}
+.doc-tabs::-webkit-scrollbar { height: 5px; }
+.doc-tab {
+  flex-shrink: 0; max-width: 240px;
+  padding: 8px 14px; border-radius: var(--r-pill);
+  border: 1px solid var(--border-2); background: var(--bg);
+  font-size: 12.5px; font-weight: 500; color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.doc-tab:hover { border-color: var(--brand); color: var(--brand); }
+.doc-tab.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+
+.doc-rich { margin-bottom: 18px; font-size: 14.5px; line-height: 1.7; color: var(--text); }
+
+/* the embedded PDF */
+.doc-frame-wrap { display: flex; flex-direction: column; gap: 8px; }
+.doc-frame {
+  width: 100%; height: 620px; display: block;
+  border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--bg-sunken);
+}
+.doc-fallback { margin: 0; font-size: 12.5px; color: var(--text-2); }
+.doc-fallback a { color: var(--link); text-decoration: underline; }
+
+.doc-image-wrap {
+  display: flex; align-items: center; justify-content: center;
+  padding: 12px; border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--bg-sunken);
+}
+.doc-image { max-width: 100%; max-height: 600px; border-radius: var(--r-sm); display: block; }
+
+/* anything the browser will not render inline */
+.doc-card {
+  display: flex; align-items: center; gap: 16px;
+  padding: 20px; border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--bg-soft);
+}
+.doc-card-ico {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 48px; height: 48px; flex-shrink: 0; border-radius: var(--r);
+  background: var(--bg); color: var(--brand); border: 1px solid var(--border);
+}
+.doc-card-text { flex: 1; min-width: 0; }
+.doc-card-name { font-size: 14.5px; font-weight: 600; word-break: break-word; }
+.doc-card-sub { font-size: 12.5px; color: var(--text-2); margin-top: 2px; }
+.doc-card-btn { flex-shrink: 0; }
+
+.doc-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 46px 20px; text-align: center; color: var(--text-2);
+}
+.doc-empty p { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); }
+.doc-empty span { font-size: 13px; max-width: 400px; }
+
+/* ── phones ───────────────────────────────────────────────────────────────
+   The stage is sticky under the header here (course.css), so its height is
+   height that cannot be scrolled away. Capped against the viewport, and the
+   Hide control in the bar folds it to a single strip. */
+@media (max-width: 1024px) {
+  .doc-body { max-height: 56vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .doc-frame { height: 46vh; min-height: 260px; }
+  .doc-image { max-height: 42vh; }
+}
+
+@media (max-width: 620px) {
+  .doc-bar { padding: 10px 14px; gap: 10px; flex-wrap: wrap; }
+  .doc-ico { width: 32px; height: 32px; }
+  .doc-title { font-size: 14.5px; white-space: normal; }
+  .doc-body { padding: 12px 14px 16px; }
+  /* Icon-only on a narrow bar: the two words are what pushed Hide off screen. */
+  .doc-act span { display: none; }
+  .doc-act { padding: 7px 9px; }
+  .doc-card { flex-direction: column; align-items: flex-start; gap: 12px; padding: 16px; }
+  .doc-card-btn { width: 100%; }
+}

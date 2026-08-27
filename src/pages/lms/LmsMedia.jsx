@@ -20,7 +20,7 @@ import {
   UploadCloud, Link2, Image as ImageIcon, PlayCircle, X, AlertTriangle, ExternalLink,
 } from 'lucide-react';
 import { Confirm } from './LmsStyles';
-import { detectVideo, unwrapIframe } from './lmsVideoSource';
+import { detectVideo, unwrapIframe, bunnyEmbedUrl } from './lmsVideoSource';
 
 const fmtBytes = (b) => {
   const n = Number(b) || 0;
@@ -148,7 +148,7 @@ const PLACEHOLDER = {
    to click in the other product, not what the string is called. */
 const HELP = {
   vimeo: 'Open the video on Vimeo, click Share, and copy either the link (vimeo.com/534539046) or the whole Embed box that starts with <iframe. Both work — we pull the video out for you.',
-  bunny: 'In Bunny Stream open the video, click Embed / Share, and copy either the iframe code or the link inside it (iframe.mediadelivery.net/embed/…). Either one is fine.',
+  bunny: 'Open the video in Bunny Stream and paste whatever you have: the address of the dashboard page itself (dash.bunny.net/stream/…?vid=…), the Embed / Share iframe code, or the link inside it. We turn all three into the embed URL for you.',
   url: 'A link that ends in .mp4, .mov, .webm or .m3u8 — the address of the video file itself, not the page it sits on. YouTube links work here too.',
 };
 
@@ -181,9 +181,23 @@ export function VideoPicker({ url, provider, onChange, onUpload, uploading = fal
   };
 
   const applyUrl = () => {
-    const v = unwrapIframe(draft).trim();
+    let v = unwrapIframe(draft).trim();
     if (!v) return;
     if (!/^https?:\/\//i.test(v)) return toast.error('Enter a full URL starting with https://');
+
+    /* On the Bunny tab the link that is actually to hand is the one in the
+       address bar of Bunny's own dashboard — a page in their control panel,
+       which shows a login screen if you frame it. Rebuild it into the embed
+       URL rather than making the admin hunt for the Embed button. Only here:
+       the other tabs save exactly what was typed. */
+    if (source === 'bunny') {
+      const embed = bunnyEmbedUrl(v);
+      if (embed && embed !== v) {
+        const wasDashboard = !/iframe\.mediadelivery\.net/i.test(v);
+        v = embed;
+        if (wasDashboard) toast.success('Converted the Bunny link into its embed URL');
+      }
+    }
 
     const kind = detectVideo(v).kind;
     /* A gentle nudge, not a block: an admin who really wants a Vimeo link on

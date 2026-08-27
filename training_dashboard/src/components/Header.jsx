@@ -17,7 +17,9 @@ const MENU = [
   { to: '/account',     label: 'Account',        icon: User },
   { to: '/enrollments', label: 'My Enrollments', icon: Book },
   { to: '/favourites',  label: 'Favourites',     icon: Star },
-  { to: '/helpdesk',    label: 'Helpdesk',       icon: Help },
+  /* Was a mailto: page called Helpdesk. It is a real ticket desk now, and
+     /helpdesk still resolves to it (see App.jsx) for anything bookmarked. */
+  { to: '/support',     label: 'Support',        icon: Help },
 ];
 
 export default function Header() {

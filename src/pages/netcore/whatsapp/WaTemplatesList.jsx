@@ -19,8 +19,64 @@ const APPROVALS = [
   { key: 'approved', label: 'Approved', tone: 'good' },
   { key: 'pending', label: 'Pending', tone: 'warn' },
   { key: 'rejected', label: 'Rejected', tone: 'bad' },
+  /*
+    Disabled is not one of Meta's statuses — it is ours, and it is the one worth surfacing
+    hardest. Meta re-files templates without telling anybody: a UTILITY template approved in
+    March can be MARKETING in April, at a higher price, requiring marketing opt-in and subject
+    to a per-user cap that drops it silently. Everything in this bucket has drifted that way
+    and has been taken out of the campaign and journey pickers until somebody decides what to
+    do about it.
+  */
+  { key: 'disabled', label: 'Disabled by Meta', tone: 'bad' },
   { key: 'unknown', label: 'Unknown' },
 ];
+
+/* Per-business-account approval. A template lives on every WABA this panel sends from, and each
+   one reviews it separately — so a single badge can only ever be right about one of them. */
+const WABA_TONE = {
+  approved:      { fg: '#15803d', bg: '#f0fdf4', border: '#bbf7d0', label: 'Approved' },
+  pending:       { fg: '#b45309', bg: '#fffbeb', border: '#fde68a', label: 'In review' },
+  rejected:      { fg: '#dc2626', bg: '#fef2f2', border: '#fecaca', label: 'Rejected' },
+  not_submitted: { fg: '#64748b', bg: '#f8fafc', border: '#e2e8f0', label: 'Not submitted' },
+  unknown:       { fg: '#64748b', bg: '#f8fafc', border: '#e2e8f0', label: 'Unknown' },
+};
+
+function WabaRow({ w, onSubmit, busy }) {
+  const tone = WABA_TONE[w.approval_status] || WABA_TONE.unknown;
+  const label = w.waba_name || w.numbers || w.waba_id;
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0',
+      borderTop: '1px solid #f1f5f9', fontSize: 11.5,
+    }}>
+      <span style={{
+        minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        color: w.inactive ? '#94a3b8' : '#475467', fontWeight: 600,
+      }} title={`${label} · WABA ${w.waba_id}`}>
+        {label}{w.inactive ? ' (number switched off)' : ''}
+      </span>
+      {w.meta_category && (
+        <span style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.03em' }}>
+          {w.meta_category}
+        </span>
+      )}
+      <span style={{
+        padding: '1px 8px', borderRadius: 999, fontSize: 10, fontWeight: 800,
+        color: tone.fg, background: tone.bg, border: `1px solid ${tone.border}`, whiteSpace: 'nowrap',
+      }} title={w.rejected_reason || w.last_error || ''}>
+        {tone.label}
+      </span>
+      {(w.approval_status === 'not_submitted' || w.approval_status === 'rejected') && !w.inactive && (
+        <button className="wa-btn wa-btn-text wa-btn-sm" disabled={busy}
+                onClick={() => onSubmit(w.waba_id)}
+                title={`Submit this template to ${label} for approval`}
+                style={{ padding: '1px 6px', fontSize: 10.5 }}>
+          {busy ? '…' : 'Submit'}
+        </button>
+      )}
+    </div>
+  );
+}
 
 /* One filter pill, used by both the category and approval rows so they stay visually identical. */
 function Chip({ on, tone, onClick, children }) {
@@ -58,6 +114,10 @@ export default function WaTemplatesList() {
   const [approvalCounts, setApprovalCounts] = useState({});
   const [syncing, setSyncing] = useState(false);
   const [checkingId, setCheckingId] = useState(null);
+  const [submittingId, setSubmittingId] = useState(null);
+  /* Every business account this panel sends from — the header says how many, because "one
+     template, approved on each of them" is not obvious until the number is on screen. */
+  const [wabas, setWabas] = useState([]);
   const [confirm, setConfirm] = useState(null);
   const [importOpen, setImportOpen] = useState(false);
 
@@ -70,30 +130,99 @@ export default function WaTemplatesList() {
         const d = res.data.data;
         setRows(d.templates || []); setPage(d.page); setPages(d.pages); setTotal(d.total);
         setApprovalCounts(d.approval_counts || {});
+        setWabas(d.wabas || []);
       }
     } finally { setLoading(false); }
   };
   useEffect(() => { fetchPage(1, search, status, category, approval); }, [status, category, approval]); // eslint-disable-line
 
-  /* Re-checks one template with Meta. Offered per card because the useful question with 130+
-     templates is "did THIS one get approved yet", not "re-read all of them". */
+  /* Re-checks one template with Meta, on EVERY business account it lives on — and reads the
+     current CATEGORY as well as the status, which is what notices a reclassification. */
   const checkStatus = async (id) => {
     setCheckingId(id);
     try {
       const res = await api.post(WA_TPL_API, new URLSearchParams({ action: 'refresh_status', id }), FORM);
       if (res.data.success) {
-        const next = res.data.data.approval_status;
-        const why  = res.data.data.rejected_message || '';
+        const d = res.data.data;
+        const next = d.approval_status;
+        const why  = d.rejected_message || '';
         /* A rejection with no reason is the one status an admin can do nothing with, so Meta's
            own explanation is shown as a persistent error rather than a passing success toast. */
-        if (next === 'rejected' && why) toast.error(`Rejected — ${why}`, { duration: 20000 });
+        if (d.auto_disabled) toast.error(d.disabled_reason || 'Meta has re-classified this template.', { duration: 25000 });
+        else if (next === 'rejected' && why) toast.error(`Rejected — ${why}`, { duration: 20000 });
         else toast.success(`Status: ${next}`);
         setRows(rs => rs.map(r => (r.id === id
-          ? { ...r, approval_status: next, rejected_message: why }
+          ? { ...r, approval_status: next, rejected_message: why, wabas: d.wabas || r.wabas,
+              auto_disabled: d.auto_disabled, disabled_reason: d.disabled_reason,
+              meta_category: d.meta_category }
           : r)));
       } else toast.error(res.data.message || 'Could not check', { duration: 10000 });
     } catch (e) { toast.error(e?.response?.data?.message || 'Could not check', { duration: 10000 }); }
     finally { setCheckingId(null); }
+  };
+
+  /*
+    Submit for approval — to every business account by default, or to one when a per-account
+    row's Submit button asks for it.
+
+    Submitting everywhere from one press is the whole point of a single template library: the
+    alternative is remembering which of two accounts a template has been through, which is
+    exactly what nobody manages to do reliably.
+  */
+  const submitToMeta = async (id, wabaId = '') => {
+    setSubmittingId(id);
+    const t = toast.loading(wabaId ? 'Submitting to that account…' : 'Submitting to every business account…');
+    try {
+      const body = new URLSearchParams({ action: 'submit_to_meta', id });
+      if (wabaId) body.set('waba_id', wabaId);
+      const res = await api.post(WA_TPL_API, body, FORM);
+      if (res.data.success) {
+        const d = res.data.data;
+        const okN = d.submitted_to || 0, badN = d.failed || 0;
+        // Partial success is reported as partial, not as success: the accounts that refused it
+        // are the ones somebody has to act on, and a green "Submitted" would bury them.
+        if (badN) {
+          toast.success(`Submitted to ${okN} account${okN === 1 ? '' : 's'}`, { id: t });
+          const firstErr = (d.results || []).find(r => !r.ok);
+          if (firstErr) toast.error(`${badN} account${badN === 1 ? '' : 's'} refused it — ${firstErr.error}`, { duration: 20000 });
+        } else {
+          toast.success(`Submitted to ${okN} business account${okN === 1 ? '' : 's'} — Meta reviews each one separately`, { id: t });
+        }
+        setRows(rs => rs.map(r => (r.id === id
+          ? { ...r, approval_status: d.approval_status, wabas: d.wabas || r.wabas,
+              auto_disabled: d.auto_disabled, disabled_reason: d.disabled_reason }
+          : r)));
+      } else toast.error(res.data.message || 'Could not submit', { id: t, duration: 15000 });
+    } catch (e) { toast.error(e?.response?.data?.message || 'Could not submit', { id: t, duration: 15000 }); }
+    finally { setSubmittingId(null); }
+  };
+
+  /*
+    What to do about a template Meta has re-filed.
+
+    Two honest answers, and the admin picks. "Accept" changes our category to match Meta's, so
+    everything downstream starts treating it as what it now is. "Send anyway" keeps it usable
+    under protest, for the case where the reclassification is being appealed and the messages
+    still have to go out. There is deliberately no third option that just hides the warning:
+    the next sweep re-reads Meta, so hiding it would un-hide itself within the hour.
+  */
+  const resolveCategory = async (id, mode, tpl) => {
+    if (mode === 'override' && !window.confirm(
+      `Keep "${tpl.name}" usable as ${String(tpl.category || '').toUpperCase()}?\n\n`
+      + `Meta has it filed as ${String(tpl.meta_category || '').toUpperCase()}, and Meta's rules are the ones that apply: `
+      + 'you will be billed at that rate, and the opt-in and frequency rules for that category '
+      + 'will decide who actually receives it.')) return;
+
+    const t = toast.loading('Working…');
+    try {
+      const res = await api.post(WA_TPL_API, new URLSearchParams({ action: 'resolve_category', id, mode }), FORM);
+      if (res.data.success) {
+        toast.success(mode === 'accept'
+          ? `Category updated to ${String(res.data.data.category || '').toUpperCase()} — the template is selectable again`
+          : 'Kept usable. It will still be sent under Meta\'s rules for its real category.', { id: t });
+        fetchPage(page);
+      } else toast.error(res.data.message || 'Could not update', { id: t, duration: 12000 });
+    } catch (e) { toast.error(e?.response?.data?.message || 'Could not update', { id: t, duration: 12000 }); }
   };
 
   const runAction = async (action, id) => {
@@ -134,6 +263,13 @@ export default function WaTemplatesList() {
               </h2>
               <div style={{ fontSize: 12.5, color: '#64748b', marginTop: 3 }}>
                 Reusable message templates for your WhatsApp campaigns
+                {/* One library, several business accounts. Worth saying on the page rather than
+                    leaving it to be inferred from the per-card rows, because the whole model
+                    changes with the second account: a template is written once and approved
+                    separately on each, and "approved" on the card means approved on all of them. */}
+                {wabas.length > 1 && (
+                  <> · one library across <b>{wabas.length}</b> business accounts, each approving separately</>
+                )}
               </div>
             </div>
           </div>
@@ -240,9 +376,38 @@ export default function WaTemplatesList() {
                         buttons={t.buttons || []}
                       />
 
-                      {/* Only APPROVED templates deliver, so the other states say what to do
-                          rather than just showing a badge. */}
-                      {t.approval_status !== 'approved' && (
+                      {/* ── Meta re-classified this template ───────────────────────────────
+                          Shown above everything else on the card, and in red, because it is the
+                          only state here that costs money quietly. A UTILITY template moved to
+                          MARKETING is billed at the marketing rate, needs marketing opt-in, and
+                          is dropped for anyone over their marketing cap — the campaign still
+                          reports thousands sent. The template has already been pulled out of
+                          every picker; these two buttons are the only ways back. */}
+                      {t.auto_disabled ? (
+                        <div style={{ marginTop: 10, fontSize: 11, color: '#b42318', background: '#fef3f2',
+                                      border: '1px solid #fecaca', borderRadius: 8, padding: '9px 11px', lineHeight: 1.55 }}>
+                          <div style={{ fontWeight: 800, marginBottom: 3 }}>
+                            Disabled — Meta now files this as {String(t.meta_category || '?').toUpperCase()}
+                          </div>
+                          <div>{t.disabled_reason}</div>
+                          <div style={{ display: 'flex', gap: 6, marginTop: 7, flexWrap: 'wrap' }}>
+                            <button className="wa-btn wa-btn-outlined wa-btn-sm"
+                                    onClick={() => resolveCategory(t.id, 'accept', t)}
+                                    title={`Change this template's category here to ${String(t.meta_category || '').toUpperCase()} so everything treats it correctly`}>
+                              Accept {String(t.meta_category || '').toUpperCase()}
+                            </button>
+                            <button className="wa-btn wa-btn-text wa-btn-sm" style={{ color: '#b42318' }}
+                                    onClick={() => resolveCategory(t.id, 'override', t)}
+                                    title="Keep it usable anyway — Meta's rules still apply to what actually gets delivered">
+                              Send anyway
+                            </button>
+                            <button className="wa-btn wa-btn-text wa-btn-sm" style={{ color: '#b42318' }}
+                                    onClick={() => checkStatus(t.id)} disabled={checkingId === t.id}>
+                              {checkingId === t.id ? 'Re-checking' : 'Re-check Meta'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : t.approval_status !== 'approved' && (
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginTop: 10, fontSize: 11, color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '7px 10px', lineHeight: 1.5 }}>
                           {/* Meta's own reason once we have it — "rejected" alone gives an admin
                               nothing to change, and the reason is the entire point of pressing
@@ -258,6 +423,24 @@ export default function WaTemplatesList() {
                               {checkingId === t.id ? 'Checking' : 'Check'}
                             </button>
                           )}
+                        </div>
+                      )}
+
+                      {/* ── One row per business account ──────────────────────────────────
+                          Only when there is more than one: with a single WABA the badge at the
+                          top of the card already says everything, and a section labelled
+                          "business accounts" listing one row is noise. With two, the single
+                          badge is the pessimistic rollup and this is where you find out WHICH
+                          account is holding it up. */}
+                      {Array.isArray(t.wabas) && t.wabas.length > 1 && (
+                        <div style={{ marginTop: 12 }}>
+                          <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.4px', marginBottom: 2 }}>
+                            BUSINESS ACCOUNTS
+                          </div>
+                          {t.wabas.map(w => (
+                            <WabaRow key={w.waba_id} w={w} busy={submittingId === t.id}
+                                     onSubmit={wid => submitToMeta(t.id, wid)} />
+                          ))}
                         </div>
                       )}
                     </div>
@@ -278,8 +461,8 @@ export default function WaTemplatesList() {
                           </button>
                           <button className="wa-btn wa-btn-contained wa-btn-sm"
                             onClick={() => nav(`/netcore/whatsapp/new?template_id=${t.id}`)}
-                            disabled={t.approval_status !== 'approved'}
-                            title={t.approval_status === 'approved' ? 'Start a campaign with this template' : 'Only approved templates can be sent'}>
+                            disabled={t.approval_status !== 'approved' || !!t.auto_disabled}
+                            title={t.auto_disabled ? 'Disabled — Meta re-classified this template' : (t.approval_status === 'approved' ? 'Start a campaign with this template' : 'Only approved templates can be sent')}>
                             Use
                           </button>
                         </>

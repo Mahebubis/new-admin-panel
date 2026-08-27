@@ -533,19 +533,49 @@ if ($action === 'course') {
         ];
     }
 
+    /* ── coming soon ───────────────────────────────────────────────────────
+       A module or a lesson can be marked "coming soon" in the admin panel.
+       It is NOT the same as hiding it: the row stays in the syllabus on
+       purpose — the point is to show a learner what is being built — but it
+       does not open, does not count towards their progress, and is never what
+       "resume" lands on.
+
+       lms_sections/lms_lessons also carry is_enabled. That one is deliberately
+       not read here: it is a routing flag for user_dashboard, and honouring it
+       would pull modules out from under learners already inside the course.
+
+       The columns themselves are guaranteed by learn_soon_columns() just
+       above: SELECTing a column that does not exist is a fatal error, not a
+       NULL, so COALESCE alone could not have covered an LMS database that
+       predates them. The COALESCE that remains is for the note, which is
+       genuinely nullable. */
+    learn_soon_columns($conn);
+
+    $sectionSoon = [];
     $sections = [];
-    $sr = $conn->query("SELECT id, title, description, sort_order FROM lms_sections
+    $sr = $conn->query("SELECT id, title, description, sort_order,
+                               COALESCE(is_coming_soon, 0) is_coming_soon,
+                               COALESCE(coming_soon_note, '') coming_soon_note
+                        FROM lms_sections
                         WHERE course_id = $cidReal AND status = 'active'
                         ORDER BY sort_order, id");
     while ($sr && ($s = $sr->fetch_assoc())) {
-        $sections[(int)$s['id']] = [
-            'id' => (int)$s['id'], 'title' => $s['title'], 'description' => $s['description'],
+        $sid  = (int)$s['id'];
+        $soon = (int)$s['is_coming_soon'] === 1;
+        $sectionSoon[$sid] = ['soon' => $soon, 'note' => (string)$s['coming_soon_note']];
+        $sections[$sid] = [
+            'id' => $sid, 'title' => $s['title'], 'description' => $s['description'],
+            'coming_soon'      => $soon,
+            'coming_soon_note' => (string)$s['coming_soon_note'],
             'lessons' => [], 'lesson_count' => 0, 'quiz_count' => 0, 'attachment_count' => 0,
+            'coming_soon_count' => 0,
         ];
     }
 
     $lr = $conn->query("SELECT id, section_id, title, lesson_type, video_provider, video_url,
-                               duration_secs, content, quiz_id, is_free_preview, sort_order
+                               duration_secs, content, quiz_id, is_free_preview, sort_order,
+                               COALESCE(is_coming_soon, 0) is_coming_soon,
+                               COALESCE(coming_soon_note, '') coming_soon_note
                         FROM lms_lessons
                         WHERE course_id = $cidReal AND is_hidden = 0 AND status = 'published'
                         ORDER BY sort_order, id");
@@ -553,6 +583,13 @@ if ($action === 'course') {
     while ($lr && ($l = $lr->fetch_assoc())) {
         $lid   = (int)$l['id'];
         $video = learn_video_source($l['video_url'], $l['video_provider']);
+        /* The module's flag wins: marking a module coming soon has to lock
+           everything in it without touching eighteen lesson rows one at a
+           time. The lesson's own note is preferred when it has one, so a
+           lesson can say something more specific than its module. */
+        $secSoon  = $sectionSoon[(int)$l['section_id']] ?? ['soon' => false, 'note' => ''];
+        $soon     = $secSoon['soon'] || (int)$l['is_coming_soon'] === 1;
+        $soonNote = (string)$l['coming_soon_note'] !== '' ? (string)$l['coming_soon_note'] : $secSoon['note'];
         $item  = [
             'id'           => $lid,
             'section_id'   => (int)$l['section_id'],
@@ -561,6 +598,8 @@ if ($action === 'course') {
             'duration'     => (int)$l['duration_secs'],
             'quiz_id'      => (int)$l['quiz_id'],
             'free_preview' => (int)$l['is_free_preview'] === 1,
+            'coming_soon'      => $soon,
+            'coming_soon_note' => $soonNote,
             'video'        => $video,
             /* Article/PDF bodies are small; sending them with the syllabus lets
                the player switch lessons without a second round trip. */
@@ -588,10 +627,16 @@ if ($action === 'course') {
             $sections[$sid]['lesson_count']  += 1;
             $sections[$sid]['quiz_count']    += ($l['lesson_type'] === 'quiz' ? 1 : 0);
             $sections[$sid]['attachment_count'] += count($item['attachments']);
+            $sections[$sid]['coming_soon_count'] += ($soon ? 1 : 0);
         }
     }
 
-    $doneCount = count(array_filter($flat, fn($l) => $l['status'] === 'completed'));
+    /* Everything below counts against the lessons a learner can actually
+       open. A coming-soon lesson is in $flat — the syllabus has to render it
+       — but it is not something they have failed to finish, and letting it
+       into the denominator means a course can never reach 100%. */
+    $open      = array_values(array_filter($flat, fn($l) => !$l['coming_soon']));
+    $doneCount = count(array_filter($open, fn($l) => $l['status'] === 'completed'));
 
     /* Where to open. The lesson they were last on wins outright — a learner
        coming back wants the video they stopped, not lesson one of section one
@@ -600,7 +645,7 @@ if ($action === 'course') {
 
        A hidden or unpublished lesson can still hold the newest progress row,
        so the pick is validated against the list actually being sent. */
-    $ids      = array_column($flat, 'id');
+    $ids      = array_column($open, 'id');
     $resumeId = in_array($lastLesson, $ids, true) ? $lastLesson : 0;
 
     /* One exception: if they FINISHED that lesson, they are not in the middle
@@ -609,17 +654,19 @@ if ($action === 'course') {
        credits they already sat through. */
     if ($resumeId) {
         $at = array_search($resumeId, $ids, true);
-        if ($at !== false && $flat[$at]['status'] === 'completed') {
-            for ($i = $at + 1; $i < count($flat); $i++) {
-                if ($flat[$i]['status'] !== 'completed') { $resumeId = $flat[$i]['id']; break; }
+        if ($at !== false && $open[$at]['status'] === 'completed') {
+            for ($i = $at + 1; $i < count($open); $i++) {
+                if ($open[$i]['status'] !== 'completed') { $resumeId = $open[$i]['id']; break; }
             }
         }
     }
 
     if (!$resumeId) {
-        foreach ($flat as $l) { if ($l['status'] !== 'completed') { $resumeId = $l['id']; break; } }
+        foreach ($open as $l) { if ($l['status'] !== 'completed') { $resumeId = $l['id']; break; } }
     }
-    if (!$resumeId && $flat) $resumeId = $flat[0]['id'];
+    /* Last resort is the first OPEN lesson, never lesson one when lesson one
+       is locked — that would drop the learner on a wall on their first visit. */
+    if (!$resumeId && $open) $resumeId = $open[0]['id'];
 
     learn_ok([
         'course' => [
@@ -644,13 +691,16 @@ if ($action === 'course') {
             'started'   => $lastLesson > 0,
         ],
         'progress'  => [
-            'total'      => count($flat),
+            'total'      => count($open),
             'completed'  => $doneCount,
-            'percent'    => count($flat) ? (int)round($doneCount * 100 / count($flat)) : 0,
+            'percent'    => count($open) ? (int)round($doneCount * 100 / count($open)) : 0,
+            /* Reported separately so the rail can say "3 coming soon" rather
+               than quietly leaving them out of every count. */
+            'coming_soon' => count($flat) - count($open),
             /* Real viewing time across the whole course, and the length of it,
                for the "1h 12m of 4h 30m watched" line. */
-            'watch_secs' => array_sum(array_column($flat, 'watch_secs')),
-            'total_secs' => array_sum(array_column($flat, 'duration')),
+            'watch_secs' => array_sum(array_column($open, 'watch_secs')),
+            'total_secs' => array_sum(array_column($open, 'duration')),
         ],
     ]);
 }
@@ -659,9 +709,15 @@ if ($action === 'course') {
 if ($action === 'lesson') {
     $lid = (int)($_GET['id'] ?? 0);
     if (!$lid) learn_error('A lesson id is required');
+    learn_soon_columns($conn);
 
-    $res = $conn->query("SELECT l.*, c.title course_title, c.slug course_slug, e.expiry_date
+    $res = $conn->query("SELECT l.*, c.title course_title, c.slug course_slug, e.expiry_date,
+                                GREATEST(COALESCE(l.is_coming_soon, 0),
+                                         COALESCE(s.is_coming_soon, 0)) coming_soon,
+                                COALESCE(NULLIF(l.coming_soon_note, ''),
+                                         COALESCE(s.coming_soon_note, '')) coming_soon_note
                          FROM lms_lessons l
+                         LEFT JOIN lms_sections s ON s.id = l.section_id
                          JOIN lms_courses c     ON c.id = l.course_id
                          JOIN lms_enrollments e ON e.course_id = l.course_id AND e.user_id = " . (int)$uid . "
                          WHERE l.id = $lid AND l.is_hidden = 0 AND l.status = 'published'
@@ -677,6 +733,8 @@ if ($action === 'lesson') {
         'duration' => (int)$l['duration_secs'],
         'content'  => $l['content'],
         'quiz_id'  => (int)$l['quiz_id'],
+        'coming_soon'      => (int)$l['coming_soon'] === 1,
+        'coming_soon_note' => (string)$l['coming_soon_note'],
         'video'    => learn_video_source($l['video_url'], $l['video_provider']),
         'course'   => ['id' => (int)$l['course_id'], 'title' => $l['course_title'], 'slug' => $l['course_slug']],
     ]]);

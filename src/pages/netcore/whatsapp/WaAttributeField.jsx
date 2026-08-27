@@ -14,6 +14,42 @@ import { label as labelStyle } from './waShared';
  * Server-side substitution for every token offered here already exists and is shared with the
  * email builder: campaigns/lib/MergeTags.php (XX_..._XX) and AttributeResolver.php ([NAME]).
  */
+/*
+ * The tracked link — the ONLY token that makes a WhatsApp click identifiable.
+ *
+ * ── Why this is not just another attribute ──────────────────────────────────
+ * A WhatsApp template's BUTTON url is frozen at approval and is byte-identical in every copy
+ * of the message ever sent, because Meta refuses to approve a button whose URL carries a
+ * variable. So a button tap physically cannot say who tapped it: the landing page sees a
+ * stranger, and the click is recorded as an anonymous visitor.
+ *
+ * Meta itself never reports URL-button clicks either — the Cloud API sends sent / delivered /
+ * read / failed and nothing else. There is no webhook to turn on. Identifying a click can
+ * therefore only happen on OUR landing page, which means the identity has to be IN the link.
+ *
+ * A body variable can carry it. Body text is free-form, WhatsApp auto-links whatever arrives,
+ * and the server expands this token into the recipient's own URL:
+ *
+ *     https://dashboard.internshipstudio.com/login?campaign_id=…&medium=whatsapp
+ *         &phone=919…&goal=…&attr_window=2&wa_rid=<this message's id>
+ *
+ * phone and wa_rid are the identity. The landing page reads them with no session at all, which
+ * is exactly the "identified click without login" case — see wa_render_for_recipient().
+ */
+const TRACKED_LINK_TAGS = [
+  {
+    title: 'Tracked link (identifies the click)',
+    value: 'https://dashboard.internshipstudio.com/login?XX_WA_ATTR_XX',
+    hint: 'Put this in a body variable. Each recipient gets their own link carrying their phone '
+        + 'and this message id, so a tap is credited to them even if they never sign in.',
+  },
+  {
+    title: 'Tracked link — attribution only',
+    value: 'XX_WA_ATTR_XX',
+    hint: 'Just the query string, for appending to a URL you have typed yourself.',
+  },
+];
+
 export default function WaAttributeField({
   label,
   value,
@@ -23,6 +59,7 @@ export default function WaAttributeField({
   hint,
   customTags = [],
   showExamTags = false,
+  showTrackedLink = false,
   multiline = false,
   rows = 4,
   maxLength,
@@ -52,8 +89,15 @@ export default function WaAttributeField({
     }
     const custom = customTags.filter(match);
     if (custom.length) out.push({ title: `YOUR ATTRIBUTES (${customTags.length})`, tags: custom });
+    /* Last, and only where a link is useful. It is the longest entry in the list and belongs
+       under the attributes somebody is actually looking for — but it is also the only way to
+       identify a WhatsApp click, so it must be findable rather than folklore. */
+    if (showTrackedLink) {
+      const tracked = TRACKED_LINK_TAGS.filter(match);
+      if (tracked.length) out.push({ title: 'TRACKED LINK', tags: tracked });
+    }
     return out;
-  }, [search, customTags, showExamTags]);
+  }, [search, customTags, showExamTags, showTrackedLink]);
 
   const insert = token => insertTokenAtCursor(inputRef.current, token, value || '', onChange);
   const Field = multiline ? 'textarea' : 'input';

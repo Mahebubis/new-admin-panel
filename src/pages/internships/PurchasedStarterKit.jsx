@@ -31,6 +31,33 @@ const PROVIDERS = [
 
 const PER_PAGE_OPTIONS = [20, 50, 100, 200];
 
+/* every ₹99 store course is priced the same — the add-order form multiplies
+   this by the number of courses picked, and the admin can still override it */
+const UNIT_PRICE = 99;
+
+/* Reference formats copied from the genuine rows so a hand-added order is not
+   obviously different at a glance:
+     order_id   skit_1787550062065          (prefix + epoch ms)
+     payment_id 6309112827                  (Cashfree — plain numeric)
+                pay_S1kQ9dLm2xT4Vb          (Razorpay — pay_ + 14 alnum) */
+const genOrderId = () => 'skit_' + Date.now();
+const genPaymentId = (provider) => {
+  if (provider === 'razorpay') {
+    const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let s = '';
+    for (let i = 0; i < 14; i++) s += A[Math.floor(Math.random() * A.length)];
+    return 'pay_' + s;
+  }
+  return String(Math.floor(1e9 + Math.random() * 9e9)); // 10-digit Cashfree-style id
+};
+
+/* <input type="datetime-local"> wants local wall-clock, not an ISO Z string */
+const nowLocal = () => {
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+
 const COLUMNS = ['#','Name','Email','Mobile','State','Courses','Batch','Payment ID','Order ID','Provider','Amount','Status','Date'];
 
 const inr = n => '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -61,6 +88,7 @@ export default function PurchasedStarterKit() {
   const [end,      setEnd]      = useState('');
   const [provider, setProvider] = useState('all');
   const [downloading, setDownloading] = useState(false);
+  const [showAdd,  setShowAdd]  = useState(false);
 
   const [rows,     setRows]     = useState([]);
   const [total,    setTotal]    = useState(0);
@@ -320,6 +348,12 @@ export default function PurchasedStarterKit() {
                 {PER_PAGE_OPTIONS.map(n => <option key={n} value={n}>{n}</option>)}
               </select>
             </label>
+            <button onClick={() => setShowAdd(true)}
+              style={{ padding:'8px 16px', borderRadius:8, border:'none', fontSize:12, fontWeight:700,
+                fontFamily:'inherit', display:'flex', alignItems:'center', gap:6, cursor:'pointer',
+                background:'linear-gradient(135deg,#4f46e5,#7c3aed)', color:'#fff' }}>
+              ＋ Add Order
+            </button>
             <button onClick={downloadExcel} disabled={downloading || !rangeReady}
               style={{ padding:'8px 16px', borderRadius:8, border:'none', fontSize:12, fontWeight:700,
                 fontFamily:'inherit', display:'flex', alignItems:'center', gap:6,
@@ -429,8 +463,307 @@ export default function PurchasedStarterKit() {
             </div>
           </div>
         )}
+
+        {showAdd && (
+          <AddOrderModal
+            onClose={() => setShowAdd(false)}
+            onCreated={() => { setShowAdd(false); setPage(1); fetchStats(); fetchList(); }}
+          />
+        )}
       </div>
     </>
+  );
+}
+
+/* ───────────────────────── Add Order popup ─────────────────────────
+   An admin-entered ₹99 store purchase. The email is the key: it pre-fills the
+   name and phone from the learner's account (falling back to their own last
+   store order), and it is what the LMS matches a purchase on later.
+   order_id / payment_id are minted here, the amount defaults to ₹99 per
+   course, and the picked date-time is written to BOTH created_at and
+   updated_at so the row lands in the range being reconciled. */
+function AddOrderModal({ onClose, onCreated }) {
+  const [email,     setEmail]     = useState('');
+  const [first,     setFirst]     = useState('');
+  const [last,      setLast]      = useState('');
+  const [phone,     setPhone]     = useState('');
+  const [picked,    setPicked]    = useState([]);          // course slugs
+  const [amount,    setAmount]    = useState(String(UNIT_PRICE));
+  const [amtTouched, setAmtTouched] = useState(false);
+  const [status,    setStatus]    = useState('success');
+  const [prov,      setProv]      = useState('cashfree');
+  const [orderId,   setOrderId]   = useState(genOrderId);
+  const [payId,     setPayId]     = useState(() => genPaymentId('cashfree'));
+  const [when,      setWhen]      = useState(nowLocal);
+
+  const [courses,  setCourses]  = useState([]);
+  const [cLoading, setCLoading] = useState(true);
+  const [looking,  setLooking]  = useState(false);
+  const [lookMsg,  setLookMsg]  = useState('');
+  const [saving,   setSaving]   = useState(false);
+  const [err,      setErr]      = useState('');
+
+  /* the catalogue comes from the store's own orders, so it stays right even
+     if a fifth course is added later */
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await api.post(API, mk({ action:'fetch_courses' }), FH);
+        if (alive && res.data.status === 'success') setCourses(res.data.data.courses || []);
+      } catch { /* the form still works — the list just stays empty */ }
+      finally { if (alive) setCLoading(false); }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  /* ₹99 × courses until the admin types their own figure */
+  useEffect(() => {
+    if (!amtTouched) setAmount(String(picked.length * UNIT_PRICE || UNIT_PRICE));
+  }, [picked, amtTouched]);
+
+  /* a Razorpay id looks nothing like a Cashfree one — re-mint on switch */
+  const changeProvider = (p) => { setProv(p); setPayId(genPaymentId(p)); };
+
+  const toggleCourse = (slug) =>
+    setPicked(p => p.includes(slug) ? p.filter(s => s !== slug) : [...p, slug]);
+
+  const lookup = async () => {
+    const e = email.trim().toLowerCase();
+    if (!e) { setLookMsg(''); return; }
+    setLooking(true); setLookMsg('');
+    try {
+      const res = await api.post(API, mk({ action:'lookup_email', email:e }), FH);
+      if (res.data.status !== 'success') { setLookMsg(res.data.message || 'Lookup failed'); return; }
+      const d = res.data.data;
+      if (!d.found) { setLookMsg('No account or past order for this email — type the details manually'); return; }
+      if (d.first_name) setFirst(d.first_name);
+      if (d.last_name)  setLast(d.last_name);
+      if (d.phone)      setPhone(d.phone);
+      setLookMsg(
+        (d.from === 'account' ? 'Filled from their account' : 'Filled from their last store order')
+        + (d.orders ? ` · ${d.orders} existing order(s)` : '')
+      );
+    } catch { setLookMsg('Lookup failed'); }
+    finally { setLooking(false); }
+  };
+
+  const submit = async () => {
+    const e = email.trim().toLowerCase();
+    const digits = phone.replace(/\D/g, '');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return setErr('Enter a valid email address');
+    if (!first.trim())      return setErr('First name is required');
+    if (!last.trim())       return setErr('Last name is required');
+    if (digits.length < 10) return setErr('Enter a valid phone number (at least 10 digits)');
+    if (!picked.length)     return setErr('Select at least one course');
+    if (!(Number(amount) > 0)) return setErr('Enter a valid amount');
+    if (!orderId.trim())    return setErr('Order ID is required');
+    if (!payId.trim())      return setErr('Payment ID is required');
+    if (!when)              return setErr('Pick the purchase date & time');
+    setErr('');
+
+    const cart = picked.map(slug => {
+      const c = courses.find(x => x.slug === slug) || { slug, name: slug };
+      return { slug: c.slug, name: c.name, price: UNIT_PRICE };
+    });
+
+    setSaving(true);
+    try {
+      const res = await api.post(API, mk({
+        action:'create_order',
+        email: e,
+        first_name: first.trim(),
+        last_name:  last.trim(),
+        phone,
+        courses: JSON.stringify(cart),
+        amount,
+        status,
+        provider: prov,
+        order_id: orderId.trim(),
+        payment_id: payId.trim(),
+        created_at: when,
+      }), FH);
+      if (res.data.status === 'success') {
+        toast.success(res.data.message || 'Order added');
+        onCreated();
+      } else {
+        setErr(res.data.message || 'Could not add the order');
+      }
+    } catch (ex) {
+      setErr(ex?.response?.data?.message || 'Could not add the order');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div onClick={onClose}
+      style={{ position:'fixed', inset:0, background:'rgba(15,23,42,.45)', zIndex:1000,
+        display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'40px 16px', overflowY:'auto' }}>
+      <div onClick={ev => ev.stopPropagation()}
+        style={{ background:'#fff', borderRadius:14, width:'100%', maxWidth:680,
+          boxShadow:'0 20px 60px rgba(15,23,42,.25)', overflow:'hidden' }}>
+
+        {/* header */}
+        <div style={{ padding:'16px 20px', background:'linear-gradient(135deg,#4f46e5,#7c3aed)',
+          display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <div style={{ color:'#fff', fontSize:15, fontWeight:800 }}>Add Starter Kit Order</div>
+          <button onClick={onClose}
+            style={{ background:'rgba(255,255,255,.18)', border:'none', color:'#fff', width:26, height:26,
+              borderRadius:7, cursor:'pointer', fontSize:14, lineHeight:1, fontFamily:'inherit' }}>✕</button>
+        </div>
+
+        <div style={{ padding:20, display:'flex', flexDirection:'column', gap:14 }}>
+
+          {/* email + lookup */}
+          <Field label="Email" required
+            hint={lookMsg || 'The name and phone are pulled from this email'}
+            hintColor={lookMsg && lookMsg.startsWith('No account') ? '#b45309' : '#16a34a'}>
+            <div style={{ display:'flex', gap:8 }}>
+              <input type="email" value={email} autoFocus
+                onChange={ev => { setEmail(ev.target.value); setLookMsg(''); }}
+                onBlur={lookup}
+                placeholder="student@gmail.com" style={inpS}/>
+              <button onClick={lookup} disabled={looking || !email.trim()}
+                style={{ padding:'0 16px', borderRadius:8, border:'none', fontSize:12, fontWeight:700,
+                  fontFamily:'inherit', whiteSpace:'nowrap',
+                  cursor: (looking || !email.trim()) ? 'not-allowed' : 'pointer',
+                  background: (looking || !email.trim()) ? '#cbd5e1' : 'linear-gradient(135deg,#0891b2,#0e7490)',
+                  color:'#fff' }}>
+                {looking ? 'Fetching…' : 'Fetch'}
+              </button>
+            </div>
+          </Field>
+
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            <Field label="First Name" required>
+              <input value={first} onChange={ev => setFirst(ev.target.value)} placeholder="First name" style={inpS}/>
+            </Field>
+            <Field label="Last Name" required>
+              <input value={last} onChange={ev => setLast(ev.target.value)} placeholder="Last name" style={inpS}/>
+            </Field>
+          </div>
+
+          <Field label="Mobile Number" required>
+            <input value={phone} onChange={ev => setPhone(ev.target.value)} placeholder="9876543210" style={inpS}/>
+          </Field>
+
+          {/* courses */}
+          <Field label={`Courses (₹${UNIT_PRICE} each)`} required
+            hint={picked.length ? `${picked.length} course(s) selected` : 'Pick one or more'}>
+            {cLoading ? (
+              <div style={{ fontSize:12, color:'#94a3b8' }}>Loading courses…</div>
+            ) : !courses.length ? (
+              <div style={{ fontSize:12, color:'#b45309' }}>No courses found in the store</div>
+            ) : (
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))', gap:8 }}>
+                {courses.map(c => {
+                  const on = picked.includes(c.slug);
+                  return (
+                    <label key={c.slug}
+                      style={{ display:'flex', alignItems:'center', gap:9, padding:'10px 12px', borderRadius:9,
+                        cursor:'pointer', fontSize:12, fontWeight:600,
+                        border: `1.5px solid ${on ? '#4f46e5' : '#e2e8f0'}`,
+                        background: on ? '#f5f3ff' : '#fff', color: on ? '#4338ca' : '#334155' }}>
+                      <input type="checkbox" checked={on} onChange={() => toggleCourse(c.slug)}
+                        style={{ accentColor:'#4f46e5', width:15, height:15, cursor:'pointer' }}/>
+                      <span style={{ lineHeight:1.3 }}>
+                        {c.name}
+                        <span style={{ display:'block', fontSize:10.5, color:'#94a3b8', fontWeight:500 }}>{c.slug}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </Field>
+
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
+            <Field label="Amount (₹)" required hint={amtTouched ? 'Edited by hand' : 'Auto: ₹99 × courses'}>
+              <input type="number" min="1" step="1" value={amount}
+                onChange={ev => { setAmount(ev.target.value); setAmtTouched(true); }} style={inpS}/>
+            </Field>
+            <Field label="Status" required>
+              <select value={status} onChange={ev => setStatus(ev.target.value)} style={inpS}>
+                <option value="success">Success</option>
+                <option value="initiated">Add to Cart (Initiated)</option>
+                <option value="failed">Failed</option>
+              </select>
+            </Field>
+            <Field label="Provider" required>
+              <select value={prov} onChange={ev => changeProvider(ev.target.value)} style={inpS}>
+                <option value="cashfree">Cashfree</option>
+                <option value="razorpay">Razorpay</option>
+              </select>
+            </Field>
+          </div>
+
+          {/* generated references */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            <Field label="Order ID" required hint="Auto-generated">
+              <div style={{ display:'flex', gap:6 }}>
+                <input value={orderId} onChange={ev => setOrderId(ev.target.value)} style={inpS}/>
+                <RegenBtn onClick={() => setOrderId(genOrderId())}/>
+              </div>
+            </Field>
+            <Field label="Payment ID" required hint="Auto-generated">
+              <div style={{ display:'flex', gap:6 }}>
+                <input value={payId} onChange={ev => setPayId(ev.target.value)} style={inpS}/>
+                <RegenBtn onClick={() => setPayId(genPaymentId(prov))}/>
+              </div>
+            </Field>
+          </div>
+
+          <Field label="Purchase Date & Time" required
+            hint="Written to both created_at and updated_at — not the current time">
+            <input type="datetime-local" value={when} onChange={ev => setWhen(ev.target.value)} style={inpS}/>
+          </Field>
+
+          {err && (
+            <div style={{ background:'#fef2f2', border:'1.5px solid #fecaca', color:'#b91c1c',
+              borderRadius:9, padding:'9px 12px', fontSize:12, fontWeight:600 }}>{err}</div>
+          )}
+        </div>
+
+        {/* footer */}
+        <div style={{ padding:'14px 20px', borderTop:'1px solid #f1f5f9', display:'flex',
+          justifyContent:'flex-end', gap:10, background:'#fafafa' }}>
+          <button onClick={onClose} disabled={saving}
+            style={{ padding:'9px 18px', borderRadius:8, border:'1.5px solid #e2e8f0', background:'#fff',
+              fontSize:12.5, fontWeight:700, color:'#475569', fontFamily:'inherit',
+              cursor: saving ? 'not-allowed' : 'pointer' }}>Cancel</button>
+          <button onClick={submit} disabled={saving}
+            style={{ padding:'9px 22px', borderRadius:8, border:'none', fontSize:12.5, fontWeight:700,
+              fontFamily:'inherit', color:'#fff', cursor: saving ? 'not-allowed' : 'pointer',
+              background: saving ? '#cbd5e1' : 'linear-gradient(135deg,#16a34a,#15803d)' }}>
+            {saving ? 'Saving…' : 'Add Order'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const inpS = {
+  width:'100%', padding:'9px 11px', border:'1.5px solid #e2e8f0', borderRadius:8, fontSize:12.5,
+  fontFamily:'inherit', color:'#1e293b', outline:'none', background:'#fff',
+};
+
+function Field({ label, required, hint, hintColor, children }) {
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+      <label style={{ fontSize:11, fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:'.4px' }}>
+        {label}{required && <span style={{ color:'#dc2626', marginLeft:3 }}>*</span>}
+      </label>
+      {children}
+      {hint && <span style={{ fontSize:10.5, color: hintColor || '#94a3b8', fontWeight:600 }}>{hint}</span>}
+    </div>
+  );
+}
+
+function RegenBtn({ onClick }) {
+  return (
+    <button onClick={onClick} title="Generate a new one"
+      style={{ padding:'0 12px', border:'1.5px solid #e2e8f0', borderRadius:8, background:'#fff',
+        cursor:'pointer', fontSize:13, color:'#4f46e5', fontFamily:'inherit' }}>↻</button>
   );
 }
 

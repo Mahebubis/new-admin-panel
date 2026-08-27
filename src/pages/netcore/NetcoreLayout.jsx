@@ -18,6 +18,10 @@ const SECTIONS = {
     { to: '/netcore/campaigns',      label: 'Campaigns',          icon: 'mail' },
     { to: '/netcore/whatsapp/inbox', label: 'WhatsApp live chat', icon: 'chat' },
     { to: '/netcore/journeys',       label: 'Journeys',           icon: 'journey' },
+    /* The engine queue. Under Engage rather than Settings because it is operational —
+       you open it when something has not gone out, which is a sending question rather
+       than a configuration one. */
+    { to: '/netcore/journeys/outbox', label: 'Outbox',             icon: 'outbox' },
   ] },
   content:   { title: 'Content',    items: [
     { to: '/netcore/templates',          label: 'Email templates',    icon: 'mailTemplate' },
@@ -77,6 +81,9 @@ const SUB_ICONS = {
   moon:         <><path d="M20.5 14.2A8.6 8.6 0 0 1 9.8 3.5a8.6 8.6 0 1 0 10.7 10.7z" {...S} /></>,
   // A branch: a journey is one entry splitting into paths, which is the whole idea of it.
   journey:      <><circle cx="6" cy="5.5" r="2.4" {...S} /><circle cx="6" cy="18.5" r="2.4" {...S} /><circle cx="18" cy="12" r="2.4" {...S} /><path d="M6 7.9v8.2" {...S} /><path d="M8.4 5.9h4.2a3 3 0 0 1 3 3v.9" {...S} /></>,
+  // An outbox tray: an envelope in a tray, because that is exactly what this is — messages
+  // sitting in a queue waiting to leave, not a clock and not a warning.
+  outbox:       <><path d="M3.4 13.2h4.1l1.5 2.6h6l1.5-2.6h4.1" {...S} /><path d="M3.4 13.2 6.2 5.4A2 2 0 0 1 8.1 4h7.8a2 2 0 0 1 1.9 1.4l2.8 7.8v4.4a2 2 0 0 1-2 2H5.4a2 2 0 0 1-2-2z" {...S} /></>,
 };
 
 const SubIcon = ({ name }) => {

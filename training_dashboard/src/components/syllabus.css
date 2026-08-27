@@ -125,3 +125,26 @@
 @media (max-width: 1024px) {
   .syl { height: auto; position: static; border-left: none; border-top: 1px solid var(--border); }
 }
+
+
+/* ── coming soon ─────────────────────────────────────────────────────────
+   A module or lesson the admin has marked as still being built. It STAYS in
+   the rail — that is the whole point, it tells a learner what is on the way —
+   so it has to read as "not yet", not as "broken". Muted, padlocked, and
+   still clickable: the row opens the stage panel that carries the date. */
+.syl-soon-tag {
+  display: inline-flex; align-items: center; gap: 4px; vertical-align: middle;
+  margin-left: 8px; padding: 2px 7px; border-radius: 999px;
+  font-size: 10.5px; font-weight: 700; font-style: normal;
+  letter-spacing: 0.02em; text-transform: uppercase;
+  background: var(--bg-soft); color: var(--text-2);
+}
+
+.syl-lesson.soon .syl-lesson-title { color: var(--text-2); font-weight: 500; }
+.syl-lesson.soon .syl-lesson-ico   { color: var(--text-2); }
+.syl-lesson.soon .syl-lesson-meta  { font-style: italic; }
+/* Dimmed, but not to the point of being unreadable — a learner is meant to
+   read what is coming, they just cannot open it. */
+.syl-lesson.soon { opacity: 0.72; }
+.syl-lesson.soon:hover { opacity: 1; }
+.syl-soon-pill { background: var(--bg-soft); color: var(--text-2); }

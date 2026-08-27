@@ -66,3 +66,47 @@ export function unwrapIframe(value) {
   const m = String(value).match(/<iframe[^>]*\ssrc=["']([^"']+)["']/i);
   return m ? m[1] : value;
 }
+
+/**
+ * Turn whatever a Bunny Stream page hands you into the embed URL.
+ *
+ * The address in the browser while watching a video in Bunny's own dashboard
+ *   https://dash.bunny.net/stream/732904/library/overview?vid=932531b4-…
+ * is a page in THEIR control panel, not a player — dropped into an <iframe>
+ * it renders a login screen. The playable form of the same video is
+ *   https://iframe.mediadelivery.net/embed/732904/932531b4-…
+ * built from the two ids the dashboard link already contains: the library id
+ * after /stream/, and the video guid in ?vid=.
+ *
+ * Also accepts the embed code, the embed/play link and the video.bunnycdn.com
+ * play link, so every address Bunny can put on a clipboard lands on the one
+ * canonical URL (no query string — the player adds its own options).
+ *
+ * Returns '' when the value is not a Bunny address at all; the caller keeps
+ * what was typed rather than guessing.
+ */
+const BUNNY_GUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+export function bunnyEmbedUrl(value) {
+  const u = unwrapIframe(String(value)).trim();
+  if (!u) return '';
+
+  const embed = (lib, guid) => `https://iframe.mediadelivery.net/embed/${lib}/${guid.toLowerCase()}`;
+
+  let m = u.match(/iframe\.mediadelivery\.net\/(?:embed|play)\/(\d+)\/([0-9a-f-]{36})/i);
+  if (m) return embed(m[1], m[2]);
+
+  m = u.match(/(?:video|vz-[0-9a-z-]+)\.b-?cdn\.net\/(?:play\/)?(\d+)\/([0-9a-f-]{36})/i)
+   || u.match(/bunnycdn\.com\/play\/(\d+)\/([0-9a-f-]{36})/i);
+  if (m) return embed(m[1], m[2]);
+
+  /* The dashboard link. The guid rides in ?vid= on the library overview, and
+     sits in the path on the per-video page — accept either. */
+  m = u.match(/(?:dash\.bunny\.net|bunny\.net\/stream)\/(?:stream\/)?(\d+)/i);
+  if (m) {
+    const g = u.match(new RegExp('[?&]vid=(' + BUNNY_GUID.source + ')', 'i')) || u.match(BUNNY_GUID);
+    if (g) return embed(m[1], g[1] || g[0]);
+  }
+
+  return '';
+}

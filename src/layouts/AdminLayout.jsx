@@ -1207,6 +1207,12 @@ const sidebarMenu = [
       { text: 'LMS System', link: '/lms', icon: 'fas fa-chalkboard-teacher', perm: 'lms_system' },
     ]
   },
+
+  {
+    key: 'monitoring', group: 'Monitoring', icon: 'fas fa-heart-pulse', items: [
+      { text: 'Monitoring', link: '/monitoring', icon: 'fas fa-wave-square', perm: 'monitoring' },
+    ]
+  },
 ];
 
 // Routes that need maximum table width — collapse sidebar on entry.

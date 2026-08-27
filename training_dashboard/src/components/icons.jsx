@@ -56,6 +56,9 @@ export const Star     = (p) => <Icon {...p}><path d="m12 3.5 2.7 5.6 6.1.9-4.4 4
 export const Help     = (p) => <Icon {...p}><path d="M18.4 5.6a9 9 0 1 1-12.8 0 9 9 0 0 1 12.8 0Z" /><path d="M9.8 9.4a2.3 2.3 0 1 1 3.2 2.1c-.6.3-1 .9-1 1.6" /><circle cx="12" cy="16.8" r=".9" fill="currentColor" stroke="none" /></Icon>;
 export const User     = (p) => <Icon {...p}><circle cx="12" cy="8" r="4" /><path d="M4 20.5a8 8 0 0 1 16 0" /></Icon>;
 export const Book     = (p) => <Icon {...p}><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v14H6.5A2.5 2.5 0 0 0 4 19.5Z" /><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" /></Icon>;
+/* Coming-soon rows: the padlock on the row, the hourglass on the stage. */
+export const Lock     = (p) => <Icon {...p}><rect x="4.5" y="10.5" width="15" height="10" rx="2" /><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" /></Icon>;
+export const Hourglass = (p) => <Icon {...p}><path d="M7 3h10M7 21h10" /><path d="M8 3v3.5c0 2 4 3.6 4 5.5s-4 3.5-4 5.5V21M16 3v3.5c0 2-4 3.6-4 5.5s4 3.5 4 5.5V21" /></Icon>;
 
 /** The "nothing here" figure the learner site shows on every empty screen. */
 export const EmptyFigure = ({ size = 170 }) => (
@@ -105,3 +108,12 @@ export const VolumeX  = (p) => <Icon {...p}><path d="M4 9.5h3.2L12 5.5v13L7.2 14
 export const Compress = (p) => <Icon {...p}><path d="M9 3v6H3M15 21v-6h6M21 9h-6V3M3 15h6v6" /></Icon>;
 /* The dot that marks a lesson the learner has already been inside. */
 export const History  = (p) => <Icon {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v5.2l3.2 1.9" /></Icon>;
+
+/* ── documents, uploads and the support desk ─────────────────────────────── */
+export const Download     = (p) => <Icon {...p}><path d="M12 3v12M7.5 10.5 12 15l4.5-4.5" /><path d="M4 20h16" /></Icon>;
+export const ExternalLink = (p) => <Icon {...p}><path d="M14 4h6v6" /><path d="m20 4-9 9" /><path d="M18 14v5a1.8 1.8 0 0 1-1.8 1.8H5.8A1.8 1.8 0 0 1 4 19V7.8A1.8 1.8 0 0 1 5.8 6H11" /></Icon>;
+export const Upload       = (p) => <Icon {...p}><path d="M12 16V4M7.5 8.5 12 4l4.5 4.5" /><path d="M4 20h16" /></Icon>;
+export const Send         = (p) => <Icon {...p}><path d="M21 3 10.5 13.5" /><path d="M21 3 14.5 21l-4-7.5L3 9.5Z" /></Icon>;
+export const Ticket       = (p) => <Icon {...p}><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h13A1.5 1.5 0 0 1 20 8.5v1.8a2 2 0 0 0 0 3.4v1.8A1.5 1.5 0 0 1 18.5 17h-13A1.5 1.5 0 0 1 4 15.5v-1.8a2 2 0 0 0 0-3.4Z" /><path d="M13 7v10" /></Icon>;
+export const Trash        = (p) => <Icon {...p}><path d="M4 7h16M9 7V5.2A1.2 1.2 0 0 1 10.2 4h3.6A1.2 1.2 0 0 1 15 5.2V7" /><path d="M6.5 7 7.4 19a1.8 1.8 0 0 0 1.8 1.7h5.6a1.8 1.8 0 0 0 1.8-1.7L17.5 7" /></Icon>;
+export const Support      = (p) => <Icon {...p}><path d="M20.5 12.5a8.5 8.5 0 1 0-3.2 6.6L21 20l-1-3.4a8.4 8.4 0 0 0 .5-4.1Z" /><path d="M9.8 9.6a2.3 2.3 0 1 1 3.2 2.1c-.6.3-1 .9-1 1.6" /><circle cx="12" cy="16.4" r=".85" fill="currentColor" stroke="none" /></Icon>;

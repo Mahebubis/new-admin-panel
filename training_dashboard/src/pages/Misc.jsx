@@ -172,20 +172,9 @@ function Field({ label, value, last }) {
 }
 
 /* ── helpdesk / about ──────────────────────────────────────────────────── */
-export function Helpdesk() {
-  return (
-    <section className="wrap wrap-narrow" style={{ paddingTop: 46, paddingBottom: 60 }}>
-      <h1 className="h1" style={{ fontSize: 30 }}>Helpdesk</h1>
-      <p className="muted" style={{ marginTop: 12, fontSize: 15, lineHeight: 1.75 }}>
-        Something not playing, or a course missing from your library? Write to{' '}
-        <a href="mailto:alerts@internshipstudio.com" style={{ color: 'var(--brand)', textDecoration: 'underline' }}>
-          alerts@internshipstudio.com
-        </a>{' '}
-        with the email you bought with, and we'll sort it out.
-      </p>
-    </section>
-  );
-}
+/* Helpdesk used to live here as a page that did nothing but print an email
+   address. It is a real ticket desk now — see pages/Support.jsx — and
+   /helpdesk redirects to it. */
 
 export function About() {
   return (

@@ -19,10 +19,10 @@ import {
   PlayCircle, FileText, HelpCircle, Radio, ClipboardList, EyeOff, Paperclip,
   Trash2, ArrowDownToLine, ArrowUpToLine, ArrowDown, ArrowUp, Pencil, Link2,
   BookOpen, Clock, Layers, ArrowRightLeft, GripVertical, AlertTriangle,
-  Info, CheckCircle2, XCircle,
+  Info, CheckCircle2, XCircle, PowerOff, Hourglass,
 } from 'lucide-react';
-import { LMS, duration } from './lmsApi';
-import { Loader, Empty, Pill, Drawer, Modal, Confirm } from './LmsStyles';
+import { LMS, duration, rememberLesson, recallLesson } from './lmsApi';
+import { Loader, Empty, Pill, Drawer, Modal, Confirm, Toggle } from './LmsStyles';
 import { useOutsideClose } from './lmsTheme';
 
 const LESSON_TYPES = [
@@ -37,11 +37,16 @@ const LESSON_TYPES = [
 const typeIcon = (t) => (LESSON_TYPES.find(x => x.key === t)?.icon) || PlayCircle;
 
 /* ── ⋯ menu on a lesson row ──────────────────────────────────── */
-function LessonMenu({ lesson, sections, onMove, onAddNext, onBottom, onTrash, onCopyUrl }) {
+function LessonMenu({
+  lesson, sections, onMove, onAddNext, onBottom, onTrash, onCopyUrl,
+  onRename, onFlipComingSoon,
+}) {
   const [open, setOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const ref = useRef(null);
   useOutsideClose(ref, () => { setOpen(false); setMoveOpen(false); }, open);
+
+  const comingSoon = !!Number(lesson.is_coming_soon);
 
   return (
     <div style={{ position: 'relative' }} ref={ref}>
@@ -50,6 +55,13 @@ function LessonMenu({ lesson, sections, onMove, onAddNext, onBottom, onTrash, on
       </button>
       {open && (
         <div className="lms-menu">
+          <button onClick={() => { setOpen(false); onRename(lesson); }}>
+            <Pencil size={15} /> Rename lesson
+          </button>
+          <button onClick={() => { setOpen(false); onFlipComingSoon(lesson); }}>
+            <Hourglass size={15} /> {comingSoon ? 'Clear coming soon' : 'Mark coming soon'}
+          </button>
+          <div className="lms-menu-sep" />
           <button onClick={() => setMoveOpen(m => !m)}>
             <ArrowRightLeft size={15} /> Move To Another Section
           </button>
@@ -84,10 +96,13 @@ function LessonMenu({ lesson, sections, onMove, onAddNext, onBottom, onTrash, on
 }
 
 /* ── ⋯ menu on a section row ─────────────────────────────────── */
-function SectionMenu({ section, onEdit, onDelete }) {
+function SectionMenu({ section, onEdit, onDelete, onFlipComingSoon }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useOutsideClose(ref, () => setOpen(false), open);
+
+  const comingSoon = !!Number(section.is_coming_soon);
+
   return (
     <div style={{ position: 'relative' }} ref={ref}>
       <button className="lms-icon-btn" onClick={e => { e.stopPropagation(); setOpen(o => !o); }} aria-label="Section actions">
@@ -96,6 +111,9 @@ function SectionMenu({ section, onEdit, onDelete }) {
       {open && (
         <div className="lms-menu" onClick={e => e.stopPropagation()}>
           <button onClick={() => { setOpen(false); onEdit(section); }}><Pencil size={15} /> Rename section</button>
+          <button onClick={() => { setOpen(false); onFlipComingSoon(section); }}>
+            <Hourglass size={15} /> {comingSoon ? 'Clear coming soon' : 'Mark coming soon'}
+          </button>
           <div className="lms-menu-sep" />
           <button className="danger" onClick={() => { setOpen(false); onDelete(section); }}>
             <Trash2 size={15} /> Delete section
@@ -156,11 +174,20 @@ export default function LmsCourseBuilder() {
   };
   const [sections, setSections] = useState([]);
   const [openIds, setOpenIds] = useState([]);
+  /* The lesson this admin last opened from here — its module is expanded on
+     the way back in and its row is marked, so returning from the editor lands
+     on the row you left instead of the top of module 1. */
+  const [currentLesson, setCurrentLesson] = useState(0);
+  const currentRef = useRef(null);
+  const firstLoad = useRef(true);
+  const scrollPending = useRef(false);
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
 
   const [sectionDraft, setSectionDraft] = useState(null);   // { id?, title, description, drip_days }
   const [lessonDraft, setLessonDraft] = useState(null);     // { section_id, title, lesson_type, after? }
+  const [renameDraft, setRenameDraft] = useState(null);     // { id, title } — inline lesson rename
+  const [sweep, setSweep] = useState(null);                 // course-wide on/off confirm
   const [confirm, setConfirm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -171,9 +198,29 @@ export default function LmsCourseBuilder() {
     try {
       const d = await LMS.listSections(courseId);
       setCourse(d.course);
-      setSections(d.sections || []);
-      /* keep the first module open on a fresh load, like Learnyst does */
-      setOpenIds(prev => (prev.length ? prev : (d.sections?.[0] ? [d.sections[0].id] : [])));
+      const secs = d.sections || [];
+      setSections(secs);
+
+      if (firstLoad.current) {
+        firstLoad.current = false;
+        /* Coming back from a lesson? Open the module that lesson lives in and
+           mark it. The lesson is looked up in the freshly loaded outline
+           rather than trusting the stored section id, so a lesson that was
+           moved to another module — or deleted — falls back cleanly. */
+        const last = recallLesson(courseId);
+        const host = last && secs.find(sec => (sec.lessons || [])
+          .some(l => Number(l.id) === Number(last.lessonId)));
+        if (host) {
+          setOpenIds([host.id]);
+          setCurrentLesson(Number(last.lessonId));
+          scrollPending.current = true;
+        } else {
+          /* keep the first module open on a fresh load, like Learnyst does */
+          setOpenIds(secs[0] ? [secs[0].id] : []);
+        }
+      } else {
+        setOpenIds(prev => (prev.length ? prev : (secs[0] ? [secs[0].id] : [])));
+      }
     } catch (e) {
       toast.error(e.message);
     } finally {
@@ -181,7 +228,25 @@ export default function LmsCourseBuilder() {
     }
   }, [courseId]);
 
+  useEffect(() => {
+    firstLoad.current = true;
+    setCurrentLesson(0);
+  }, [courseId]);
+
   useEffect(() => { setLoading(true); load(); }, [load]);
+
+  /* Expanding the module is only half of it — on a long outline the row can
+     still be a screen below the fold. Scrolled after paint (the row does not
+     exist until the module renders open) and only for the row restored from
+     storage, never on an ordinary re-render. */
+  useEffect(() => {
+    if (!currentLesson || !scrollPending.current) return undefined;
+    const t = setTimeout(() => {
+      scrollPending.current = false;
+      currentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+    return () => clearTimeout(t);
+  }, [currentLesson, sections]);
 
   const stats = useMemo(() => {
     let lessons = 0, quizzes = 0, hidden = 0, secs = 0;
@@ -306,6 +371,90 @@ export default function LmsCourseBuilder() {
   };
 
   /* ── lesson CRUD ── */
+  /* ── the two switches ──────────────────────────────────────────────────
+     Written straight into local state and only then sent, because a full
+     load() to move one pill re-fetches every lesson of every module and the
+     outline visibly jumps. The optimistic value is rolled back on failure. */
+  const patchSection = (id, p) =>
+    setSections(prev => prev.map(sec => (sec.id === id ? { ...sec, ...p } : sec)));
+
+  const patchLesson = (id, p) =>
+    setSections(prev => prev.map(sec => ({
+      ...sec,
+      lessons: (sec.lessons || []).map(l => (l.id === id ? { ...l, ...p } : l)),
+    })));
+
+  const flipSection = async (sec, field) => {
+    const was  = Number(sec[field] ?? 0);
+    const next = was ? 0 : 1;
+    patchSection(sec.id, { [field]: next });
+    try {
+      await LMS.toggleSectionComingSoon(sec.id, next);
+      toast.success(next ? 'Module marked coming soon' : 'Coming-soon cleared');
+    } catch (e) {
+      toast.error(e.message);
+      patchSection(sec.id, { [field]: was });
+    }
+  };
+
+  const flipLesson = async (lesson, field) => {
+    const was  = Number(lesson[field] ?? 0);
+    const next = was ? 0 : 1;
+    patchLesson(lesson.id, { [field]: next });
+    try {
+      await LMS.toggleLessonComingSoon(lesson.id, next);
+      toast.success(next ? 'Lesson marked coming soon' : 'Coming-soon cleared');
+    } catch (e) {
+      toast.error(e.message);
+      patchLesson(lesson.id, { [field]: was });
+    }
+  };
+
+  /* Course-wide, so this one DOES reload — it rewrites every row. */
+  const runSweep = async () => {
+    if (!sweep) return;
+    try {
+      await LMS.setAllComingSoon(Number(courseId), sweep.value);
+      toast.success(sweep.done);
+      setSweep(null);
+      load();
+    } catch (e) { toast.error(e.message); }
+  };
+
+  /* ── the routing switch ────────────────────────────────────────────────
+     One per course, and the only place it exists. It was per-module and
+     per-lesson for a day: that was a level too far down, because
+     user_dashboard routes a buyer at a course, so three hundred toggles were
+     expressing one decision. */
+  const [switching, setSwitching] = useState(false);
+  const toggleCourseEnabled = async () => {
+    const was  = Number(course.is_enabled ?? 1);
+    const next = was ? 0 : 1;
+    setSwitching(true);
+    setCourse(c => ({ ...c, is_enabled: next }));
+    try {
+      await LMS.toggleCourseEnabled(Number(courseId), next);
+      toast.success(next ? 'Course switched on' : 'Course switched off');
+    } catch (e) {
+      toast.error(e.message);
+      setCourse(c => ({ ...c, is_enabled: was }));
+    } finally { setSwitching(false); }
+  };
+
+  const renameLesson = async () => {
+    const title = (renameDraft?.title || '').trim();
+    if (!title) return toast.error('Lesson title is required');
+    setSaving(true);
+    try {
+      await LMS.renameLesson(renameDraft.id, title);
+      patchLesson(renameDraft.id, { title });
+      toast.success('Lesson renamed');
+      setRenameDraft(null);
+    } catch (e) {
+      toast.error(e.message);
+    } finally { setSaving(false); }
+  };
+
   const createLesson = async () => {
     if (!lessonDraft?.title?.trim()) return toast.error('Lesson title is required');
     setSaving(true);
@@ -318,6 +467,7 @@ export default function LmsCourseBuilder() {
       });
       toast.success('Lesson added');
       setLessonDraft(null);
+      rememberLesson(courseId, d.id, lessonDraft.section_id);
       navigate(`/lms/courses/${courseId}/lessons/${d.id}`);
     } catch (e) {
       toast.error(e.message);
@@ -443,11 +593,28 @@ export default function LmsCourseBuilder() {
               {course.status === 'published' ? 'Published' : 'Unpublished'}
             </Pill>
             <Pill tone="grey">{course.encryption === 'encrypted' ? 'Encrypted' : 'Unencrypted'}</Pill>
+            {!Number(course.is_enabled ?? 1) && <Pill tone="red"><PowerOff size={11} /> Switched off</Pill>}
           </div>
           <h1 className="lms-h1">{course.title}</h1>
         </div>
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          {/* The user_dashboard routing switch. Sits on the header rather than
+              in the More menu because it is a state, not an action — its
+              position has to say which way it is set without being opened. */}
+          <div className="lms-course-switch">
+            <div>
+              <div className="lms-course-switch-label">
+                {Number(course.is_enabled ?? 1) ? 'Switched on' : 'Switched off'}
+              </div>
+              <div className="lms-course-switch-hint">for user_dashboard</div>
+            </div>
+            <Toggle
+              on={!!Number(course.is_enabled ?? 1)}
+              disabled={switching}
+              onChange={toggleCourseEnabled}
+            />
+          </div>
           <div style={{ position: 'relative' }} ref={moreRef}>
             <button className="lms-btn lms-btn-ghost" onClick={() => setMoreOpen(o => !o)}>
               More <ChevronDown size={15} />
@@ -462,6 +629,27 @@ export default function LmsCourseBuilder() {
                 </button>
                 <button onClick={() => setOpenIds([])}>
                   <Layers size={15} /> Collapse all
+                </button>
+                <div className="lms-menu-sep" />
+                {/* Every module AND every lesson at once. Confirmed rather
+                    than fired on the click: it rewrites the whole course. */}
+                <button onClick={() => setSweep({
+                  kind: 'coming_soon', value: true,
+                  title: 'Mark the whole course coming soon?',
+                  message: 'Every module and lesson is badged "Coming soon" in the training portal and none of them will open. Clear it the same way.',
+                  label: 'Mark coming soon',
+                  done: 'Marked coming soon',
+                })}>
+                  <Hourglass size={15} /> Mark everything coming soon
+                </button>
+                <button onClick={() => setSweep({
+                  kind: 'coming_soon', value: false,
+                  title: 'Clear coming soon everywhere?',
+                  message: 'The "Coming soon" badge is removed from every module and lesson in this course, and they open normally again.',
+                  label: 'Clear coming soon',
+                  done: 'Coming-soon cleared',
+                })}>
+                  <CheckCircle2 size={15} /> Clear coming soon everywhere
                 </button>
                 <div className="lms-menu-sep" />
                 <button onClick={() => navigate(`/lms/responses?course_id=${courseId}`)}>
@@ -563,6 +751,7 @@ export default function LmsCourseBuilder() {
                 {isOpen ? <ChevronUp size={17} color="var(--lms-text-2)" /> : <ChevronDown size={17} color="var(--lms-text-2)" />}
                 <span className="lms-section-num">{idx + 1}</span>
                 <span className="lms-section-title">{s.title}</span>
+                {!!Number(s.is_coming_soon) && <Pill tone="blue"><Hourglass size={11} /> Coming soon</Pill>}
                 <span className="lms-section-meta">
                   {lessonCount} Lesson{lessonCount === 1 ? '' : 's'} • {quizCount} Quiz{quizCount === 1 ? '' : 'zes'}
                 </span>
@@ -581,8 +770,11 @@ export default function LmsCourseBuilder() {
                   )}
                   <SectionMenu
                     section={s}
+                    onFlipComingSoon={(sec) => flipSection(sec, 'is_coming_soon')}
                     onEdit={(sec) => setSectionDraft({
                       id: sec.id, title: sec.title, description: sec.description || '', drip_days: sec.drip_days || 0,
+                      is_coming_soon: Number(sec.is_coming_soon ?? 0),
+                      coming_soon_note: sec.coming_soon_note || '',
                     })}
                     onDelete={(sec) => setConfirm({
                       title: 'Delete this section?',
@@ -603,9 +795,15 @@ export default function LmsCourseBuilder() {
                 <div className="lms-lesson-list">
                   {lessons.map((l, li) => {
                     const Icon = typeIcon(l.lesson_type);
+                    const isCurrent = currentLesson === Number(l.id);
                     return (
                       <div
-                        className={`lms-lesson-row${over?.kind === 'lesson' && over.id === l.id ? ' drop-target' : ''}`}
+                        ref={isCurrent ? currentRef : null}
+                        className={
+                          'lms-lesson-row'
+                          + (over?.kind === 'lesson' && over.id === l.id ? ' drop-target' : '')
+                          + (isCurrent ? ' is-current' : '')
+                        }
                         key={l.id}
                         draggable={grip === `lesson:${l.id}`}
                         onDragStart={(e) => {
@@ -638,7 +836,14 @@ export default function LmsCourseBuilder() {
                         <span className="lms-lesson-ico"><Icon size={17} /></span>
                         <span
                           className="lms-lesson-title"
-                          onClick={() => navigate(`/lms/courses/${courseId}/lessons/${l.id}`)}
+                          onClick={() => {
+                            /* Recorded before navigating, not after coming
+                               back, so the browser Back button restores the
+                               same row as the in-page back link. */
+                            rememberLesson(courseId, l.id, s.id);
+                            setCurrentLesson(Number(l.id));
+                            navigate(`/lms/courses/${courseId}/lessons/${l.id}`);
+                          }}
                         >
                           {l.title}
                         </span>
@@ -648,6 +853,7 @@ export default function LmsCourseBuilder() {
                         {l.lesson_type === 'quiz' && !l.quiz_id && (
                           <Pill tone="amber">No quiz attached</Pill>
                         )}
+                        {!!Number(l.is_coming_soon) && <Pill tone="blue"><Hourglass size={11} /> Coming soon</Pill>}
                         {!!l.is_hidden && <Pill tone="grey"><EyeOff size={11} /> Hidden</Pill>}
                         {l.status === 'published' && <Pill tone="green">Published</Pill>}
                         {l.field_count > 0 && (
@@ -663,6 +869,8 @@ export default function LmsCourseBuilder() {
                         <LessonMenu
                           lesson={l}
                           sections={sections}
+                          onRename={(ls) => setRenameDraft({ id: ls.id, title: ls.title })}
+                          onFlipComingSoon={(ls) => flipLesson(ls, 'is_coming_soon')}
                           onMove={moveLessonToSection}
                           onAddNext={(ls) => setLessonDraft({ section_id: ls.section_id, title: '', lesson_type: 'video' })}
                           onBottom={moveLessonToBottom}
@@ -754,9 +962,93 @@ export default function LmsCourseBuilder() {
                 0 unlocks the section immediately. Any other value keeps it locked for that many days after enrollment.
               </p>
             </div>
+
+            {/* Only when editing: a module being created is on and not coming
+                soon, and two switches in the create form is noise. */}
+            {sectionDraft.id && (
+              <>
+                <div className="lms-divider" />
+
+                <div className="lms-toggle-row">
+                  <div>
+                    <div style={{ fontSize: 13.5, fontWeight: 500 }}>Coming soon</div>
+                    <p className="lms-help" style={{ margin: '3px 0 0' }}>
+                      The module stays in the learner's syllabus with a &ldquo;Coming soon&rdquo;
+                      badge, and nothing inside it opens.
+                    </p>
+                  </div>
+                  <Toggle
+                    on={!!Number(sectionDraft.is_coming_soon)}
+                    onChange={v => setSectionDraft(d => ({ ...d, is_coming_soon: v ? 1 : 0 }))}
+                  />
+                </div>
+
+                {!!Number(sectionDraft.is_coming_soon) && (
+                  <div className="lms-field">
+                    <label className="lms-label">Coming-soon note</label>
+                    <input
+                      className="lms-input"
+                      maxLength={120}
+                      placeholder="e.g. Unlocks 15 September"
+                      value={sectionDraft.coming_soon_note || ''}
+                      onChange={e => setSectionDraft(d => ({ ...d, coming_soon_note: e.target.value }))}
+                    />
+                    <p className="lms-help">
+                      Shown under the badge in the training portal. Leave it empty for a plain
+                      &ldquo;Coming soon&rdquo;.
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
           </>
         )}
       </Drawer>
+
+      {/* ── rename a lesson ───────────────────────────────────── */}
+      {/* Its own modal rather than opening the whole lesson editor: renaming
+          is the one edit that is always a five-second job, and a round trip
+          through the editor to change three words is what made people leave
+          "Untitled lesson" rows lying around. */}
+      <Modal
+        open={!!renameDraft}
+        title="Rename lesson"
+        width={460}
+        onClose={() => setRenameDraft(null)}
+        footer={
+          <>
+            <button className="lms-btn lms-btn-ghost" onClick={() => setRenameDraft(null)}>Cancel</button>
+            <button className="lms-btn lms-btn-dark" onClick={renameLesson} disabled={saving}>
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </>
+        }
+      >
+        {renameDraft && (
+          <div className="lms-field" style={{ marginBottom: 0 }}>
+            <label className="lms-label">Lesson title<span className="req">*</span></label>
+            <input
+              className="lms-input"
+              autoFocus
+              maxLength={255}
+              value={renameDraft.title}
+              onChange={e => setRenameDraft(d => ({ ...d, title: e.target.value }))}
+              onKeyDown={e => e.key === 'Enter' && renameLesson()}
+            />
+          </div>
+        )}
+      </Modal>
+
+      {/* ── course-wide on / off / coming soon ────────────────── */}
+      <Confirm
+        open={!!sweep}
+        title={sweep?.title}
+        message={sweep?.message}
+        confirmLabel={sweep?.label}
+        danger={false}
+        onCancel={() => setSweep(null)}
+        onConfirm={runSweep}
+      />
 
       {/* ── add lesson ────────────────────────────────────────── */}
       <Modal

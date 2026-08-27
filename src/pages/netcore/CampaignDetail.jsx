@@ -8,6 +8,7 @@ import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import CampaignPreviewPanels from './CampaignPreviewPanels';
 import DetailedReportModal from './DetailedReportModal';
+import CampaignPeoplePanels from './CampaignPeoplePanels';
 
 /*
  * One campaign, two tabs: Performance and Preview.
@@ -432,6 +433,17 @@ export default function CampaignDetail() {
                 )}
               </div>
             </div>
+
+            {/* The numbers above, opened up into the people behind them: what happened to every
+                recipient (with the provider's reason on anything that failed), who clicked, and
+                who converted. Below the charts because the charts answer "how did it do" and
+                these answer "who" — which is the follow-up, not the opening question. */}
+            <CampaignPeoplePanels
+              channel={isWa ? 'whatsapp' : 'email'}
+              campaignId={c.id}
+              goalEvent={c.goal_event_name}
+              senderNumber={isWa ? c.business_number : null}
+            />
           </>
         ) : (
           <CampaignPreviewPanels

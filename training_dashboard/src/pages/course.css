@@ -78,6 +78,87 @@
 }
 .stage-menu button:hover { background: rgba(255, 255, 255, 0.1); }
 
+/* ── the end-of-lesson card ───────────────────────────────────────────────
+   Drops in from the top of the stage the instant a video runs out. It sits
+   OVER the picture rather than pushing it down, because the frozen last frame
+   behind it is what makes the moment read as "that finished" — and because a
+   stage that changes height would shove the whole page around.
+
+   The scrim is deliberately partial: the learner can still see where they are.
+   Two choices and no third — carry on with this lesson ticked off, or dismiss
+   and stay exactly where you are with nothing recorded. */
+@keyframes stageDoneIn {
+  from { opacity: 0; transform: translateY(-22px) scale(0.97); }
+  60%  { opacity: 1; transform: translateY(4px)   scale(1); }
+  to   { opacity: 1; transform: translateY(0)     scale(1); }
+}
+@keyframes stageDoneScrim { from { opacity: 0; } to { opacity: 1; } }
+
+.stage-done {
+  position: absolute; inset: 0; z-index: 8;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 18px 16px;
+  background: linear-gradient(180deg, rgba(9, 13, 22, 0.82) 0%, rgba(9, 13, 22, 0.42) 55%, rgba(9, 13, 22, 0.2) 100%);
+  animation: stageDoneScrim var(--base) var(--ease);
+}
+
+.stage-done-card {
+  display: flex; align-items: center; gap: 14px;
+  width: 100%; max-width: 620px; padding: 14px 16px;
+  background: #1b2334; border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--r); box-shadow: var(--shadow-lg);
+  animation: stageDoneIn 420ms var(--ease) both;
+}
+
+.stage-done-ico {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%;
+  background: rgba(46, 178, 118, 0.16); color: var(--ok);
+}
+
+.stage-done-text { flex: 1; min-width: 0; }
+.stage-done-title { font-size: 15px; font-weight: 600; color: #fff; }
+.stage-done-sub {
+  margin-top: 2px; font-size: 12.5px; color: rgba(255, 255, 255, 0.66);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.stage-done-btns { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+.stage-done-cancel {
+  padding: 9px 14px; border-radius: var(--r-sm);
+  font-size: 13px; font-weight: 500; color: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.stage-done-cancel:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+
+.stage-done-go {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 9px 16px; border-radius: var(--r-sm);
+  background: var(--brand); color: #fff;
+  font-size: 13px; font-weight: 600; white-space: nowrap;
+  transition: filter var(--fast) var(--ease), transform var(--fast) var(--ease);
+}
+.stage-done-go:hover { filter: brightness(1.08); }
+.stage-done-go:active { transform: scale(0.97); }
+
+/* A phone has no room for a single row: the card stacks and the primary
+   action goes full width, which is also the easier thumb target. */
+@media (max-width: 700px) {
+  .stage-done { align-items: flex-start; padding: 12px; }
+  .stage-done-card { flex-wrap: wrap; gap: 12px; padding: 13px 14px; }
+  .stage-done-ico { width: 34px; height: 34px; }
+  .stage-done-sub { white-space: normal; }
+  .stage-done-btns { width: 100%; }
+  .stage-done-go { flex: 1; justify-content: center; }
+}
+
+/* Someone who asked for less motion still gets the card, just not the fall. */
+@media (prefers-reduced-motion: reduce) {
+  .stage-done-card { animation: none; }
+}
+
 /* ── article lessons on the same stage ─────────────────────────────────── */
 .article-stage {
   min-height: 420px; padding: 26px 30px 40px;
@@ -238,4 +319,47 @@
   .course-fav span { display: none; }
   .panel-pad { padding: 20px 16px 40px; }
   .course-tabs { padding: 0 16px; gap: 22px; }
+}
+
+
+/* ── the coming-soon stage ───────────────────────────────────────────────
+   Fills the space the player would occupy rather than sitting over it: there
+   is no video underneath to see, and a scrim over an empty black box just
+   looks like a load that failed. */
+.stage-soon {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; min-height: 340px; padding: 40px 24px; text-align: center;
+  background: var(--player-bg);
+}
+
+.stage-soon-ico {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 74px; height: 74px; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.07); color: rgba(255, 255, 255, 0.72);
+}
+
+.stage-soon-title {
+  margin: 4px 0 0; font-size: 21px; font-weight: 700; letter-spacing: -0.01em; color: #fff;
+}
+
+.stage-soon-note {
+  margin: 0; max-width: 460px;
+  font-size: 13.5px; line-height: 1.6; color: rgba(255, 255, 255, 0.66);
+}
+
+.stage-soon-go {
+  margin-top: 8px; max-width: 100%;
+  padding: 10px 18px; border-radius: var(--r-sm);
+  background: var(--brand); color: #fff;
+  font-size: 13px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: filter var(--fast) var(--ease), transform var(--fast) var(--ease);
+}
+.stage-soon-go:hover { filter: brightness(1.08); }
+.stage-soon-go:active { transform: scale(0.97); }
+
+@media (max-width: 700px) {
+  .stage-soon { min-height: 240px; padding: 32px 18px; }
+  .stage-soon-ico { width: 60px; height: 60px; }
+  .stage-soon-title { font-size: 18px; }
 }

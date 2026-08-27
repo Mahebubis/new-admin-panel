@@ -62,7 +62,7 @@
 //    until the source actually reports itself ready, and a failed source gets a
 //    real message with a retry rather than silence.
 // ===========================================================================
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Back5, Compress, Expand, Fwd5, Pause, Play, Volume, VolumeX } from './icons';
 import './video.css';
 
@@ -111,6 +111,7 @@ export default function VideoPlayer({
   onProgress,         // ({seconds, duration, watched}) — already throttled here
   onEnded,
   title,
+  autoPlay = false,   // start on its own once the source is playable
 }) {
   const kind = video?.kind || 'none';
   const native = kind === 'file' || kind === 'hls';
@@ -136,6 +137,12 @@ export default function VideoPlayer({
   const [waiting, setWaiting] = useState(false);
   const [nudge, setNudge] = useState('');      // the "+5s" / "−5s" flash
   const [resumed, setResumed] = useState(0);   // "Resumed from 6:02", briefly
+  const [blocked, setBlocked] = useState(false); // autoplay refused by the browser
+
+  /* Autoplay is attempted exactly once per source. Without the latch, every
+     `canplay` — and HLS fires several — would call play() again and fight a
+     learner who had deliberately paused. */
+  const autoTried = useRef(false);
 
   /* The watch bookkeeping. `accum` is unsent watched seconds, `tick` the
      previous playhead reading, `pos`/`dur` the last known position and length
@@ -161,18 +168,116 @@ export default function VideoPlayer({
     setRateOpen(false);
     setUiOn(true);
     setResumed(0);
+    setBlocked(false);
   }
 
   /* The bookkeeping refs belong to the source, not to the render, so they are
      cleared in an effect — refs must not be written during render. */
   useEffect(() => {
     seeded.current = false;
+    autoTried.current = false;
+    endedFired.current = false;
     accum.current = 0;
     tick.current = null;
     pos.current = 0;
     dur.current = 0;
     sentPos.current = -1;
   }, [sourceKey]);
+
+  /**
+   * Start playing on our own, when asked to.
+   *
+   * Browsers only allow an unmuted play() once the page has had a real user
+   * gesture. Picking a lesson from the syllabus IS that gesture, so every
+   * lesson after the first starts by itself. The very first video of a fresh
+   * page load — arriving straight from a link — can still be refused, and the
+   * honest answer to that is the big play button plus a line saying why,
+   * NOT muting the lecture and pretending it started.
+   */
+  const tryAutoPlay = useCallback(() => {
+    if (!autoPlay || autoTried.current) return;
+    const el = videoRef.current;
+    if (!el || !el.paused) return;
+    autoTried.current = true;
+    const p = el.play();
+    if (p?.catch) p.catch(() => setBlocked(true));
+  }, [autoPlay]);
+
+  /* ── driving an embedded player ───────────────────────────────────────────
+     Most lessons on this portal are NOT a plain MP4 — they are a Bunny/Vimeo/
+     YouTube iframe. Everything below used to be gated on `native`, so on those
+     lessons there was no autoplay, no skip buttons and no end-of-lesson card:
+     the embed's own player was the only thing on screen.
+
+     Two dialects, one door. Vimeo and Bunny both speak player.js
+     ({method, value}); YouTube has its own shape ({event:'command', func,
+     args}) and answers postMessage directly once enablejsapi=1 is on the URL,
+     with no loader script needed.
+
+     A bare `iframe` kind is deliberately excluded: that is someone else's
+     player on an unknown protocol, and offering buttons that silently do
+     nothing is worse than not offering them. */
+  const drivable = kind === 'vimeo' || kind === 'bunny' || kind === 'youtube';
+
+  const postToFrame = useCallback((cmd, value) => {
+    const win = frameRef.current?.contentWindow;
+    if (!win) return;
+
+    const send = (payload) => {
+      try { win.postMessage(JSON.stringify(payload), '*'); } catch { /* not ready yet */ }
+    };
+
+    if (kind === 'vimeo' || kind === 'bunny') {
+      const bare = value === undefined ? { method: cmd } : { method: cmd, value };
+      /* Vimeo takes the bare shape. Bunny runs Embedly's player.js, whose
+         Receiver checks `data.context === 'player.js'` and DROPS everything
+         else — which is why a bare command reached Vimeo and vanished on
+         Bunny. Both shapes go out every time; each receiver ignores the one
+         it does not recognise, so there is nothing to detect and no cost. */
+      send(bare);
+      send({ context: 'player.js', version: '0.0.11', ...bare });
+      return;
+    }
+
+    if (kind === 'youtube') {
+      const fn = { play: 'playVideo', pause: 'pauseVideo', setCurrentTime: 'seekTo' }[cmd];
+      if (!fn) return;
+      send({ event: 'command', func: fn, args: fn === 'seekTo' ? [value, true] : [] });
+    }
+  }, [kind]);
+
+  /**
+   * The iframe URL, with the parameters that make the embed cooperate.
+   *
+   * autoplay rides on the URL as well as being asked for over postMessage:
+   * an embed that has not finished booting cannot answer a `play` command, and
+   * the URL parameter has no such race. Both paths are harmless together —
+   * the second play() on an already-playing video is a no-op.
+   */
+  const frameSrc = useMemo(() => {
+    const base = video?.embed || video?.src || '';
+    if (!base) return '';
+    try {
+      const u = new URL(base, window.location.href);
+      if (kind === 'bunny') {
+        /* catalog.php builds this with autoplay=false. Clicking a lesson in
+           the syllabus is exactly the gesture that earns a true. */
+        u.searchParams.set('autoplay', autoPlay ? 'true' : 'false');
+      } else if (kind === 'vimeo') {
+        if (autoPlay) u.searchParams.set('autoplay', '1');
+      } else if (kind === 'youtube') {
+        /* Without enablejsapi the iframe answers no command at all, which is
+           why a YouTube lesson had no skip buttons and reported no position. */
+        u.searchParams.set('enablejsapi', '1');
+        u.searchParams.set('origin', window.location.origin);
+        if (autoPlay) u.searchParams.set('autoplay', '1');
+      }
+      return u.toString();
+    } catch {
+      /* A URL the constructor cannot parse still deserves to be shown. */
+      return base;
+    }
+  }, [kind, video?.embed, video?.src, autoPlay]);
 
   /** Hand the accumulated watching to the caller. `force` also sends a report
       that carries no new watched time — used when the lesson is closing and
@@ -190,6 +295,42 @@ export default function VideoPlayer({
     const duration = Number.isFinite(dur.current) ? Math.floor(dur.current) : 0;
     onProgress?.({ seconds, duration: duration > 0 ? duration : 0, watched: add });
   }, [onProgress]);
+
+  /**
+   * "That finished" — said exactly once per source.
+   *
+   * The end-of-lesson card is a one-shot: firing it twice would ask the same
+   * question over the top of itself, and an embed that reports both `ended`
+   * and a final timeupdate does exactly that.
+   */
+  const endedFired = useRef(false);
+  const fireEnded = useCallback(() => {
+    if (endedFired.current) return;
+    endedFired.current = true;
+    flush(true);
+    onEnded?.();
+  }, [flush, onEnded]);
+
+  /**
+   * Reaching the end IS the end.
+   *
+   * Some embeds never send `ended` at all — a Bunny build with a post-roll
+   * card, a stall on the last second, a tab that lost focus over the final
+   * frame. The playhead is allowed to settle it, which is what stops a learner
+   * finishing a lecture and being offered nothing.
+   */
+  const maybeEnded = useCallback((secs, length) => {
+    if (!Number.isFinite(length) || length <= 0) return;
+    if (!Number.isFinite(secs)) return;
+
+    /* Genuinely back inside the video — a re-watch after Cancel, or a scrub
+       away from the end. The one-shot re-arms, so finishing a second time asks
+       a second time instead of silently offering nothing. */
+    if (secs < length - 5) { endedFired.current = false; return; }
+
+    if (secs < length - 1.25) return;
+    fireEnded();
+  }, [fireEnded]);
 
   /** One playhead reading, wherever it came from. */
   const advance = useCallback((seconds, duration) => {
@@ -289,70 +430,185 @@ export default function VideoPlayer({
     };
   }, [native, kind, video?.src]);
 
-  /* ── the player.js bridge Vimeo and Bunny both speak ─────────────────── */
+  /* ── the player.js bridge Vimeo and Bunny both speak ──────────────────────
+     Two dialects of one idea, and the gap between them is what kept the
+     end-of-lesson card off every Bunny lesson:
+
+       Vimeo   {method, value}                        — bare
+       Bunny   {context:'player.js', version, method} — Embedly's player.js
+
+     A bare `addEventListener: 'ended'` therefore registered NOTHING on Bunny:
+     the lecture finished and the page was never told. Commands now go out in
+     both shapes (see postToFrame).
+
+     The replies differ the same way — player.js sends {event, value} where
+     Vimeo sends {event, data} — and reading only `data` meant a registered
+     timeupdate still yielded no seconds and no duration, which took the
+     playhead fallback down with it. `body()` accepts either. */
   useEffect(() => {
     if (kind !== 'vimeo' && kind !== 'bunny') return;
 
     const frame = frameRef.current;
     if (!frame) return;
 
-    const post = (payload) => {
+    const send = (payload) => {
       try { frame.contentWindow?.postMessage(JSON.stringify(payload), '*'); } catch { /* not ready yet */ }
     };
 
+    /* player.js answers a getter on the `listener` id it was handed, so the
+       duration comes back as an event named this rather than 'getDuration'. */
+    const DURATION_ID = 'istudio-duration';
+
     const subscribe = () => {
-      post({ method: 'addEventListener', value: 'ready' });
-      post({ method: 'addEventListener', value: 'timeupdate' });
-      post({ method: 'addEventListener', value: 'ended' });
-      post({ method: 'addEventListener', value: 'play' });
-      post({ method: 'addEventListener', value: 'pause' });
-      /* Neither embed volunteers the length, and without it there is no
-         percentage and no auto-complete. */
-      post({ method: 'getDuration' });
+      ['ready', 'timeupdate', 'ended', 'play', 'pause', 'seeked'].forEach((evt) => {
+        send({ method: 'addEventListener', value: evt });
+        send({ context: 'player.js', version: '0.0.11', method: 'addEventListener', value: evt, listener: evt });
+      });
+      send({ method: 'getDuration' });
+      send({ context: 'player.js', version: '0.0.11', method: 'getDuration', listener: DURATION_ID });
+    };
+
+    /* The event's payload, whichever envelope carried it. */
+    const body = (d) => {
+      const v = d.value !== undefined ? d.value : d.data;
+      return (v && typeof v === 'object') ? v : d;
+    };
+
+    const noteDuration = (v) => {
+      const n = Number(v);
+      if (Number.isFinite(n) && n > 0) { dur.current = n; setLen(n); }
     };
 
     const onMessage = (e) => {
       /* Only the two embed hosts are trusted; anything else on the page that
          posts a message is ignored outright. */
-      if (!/(^https:\/\/player\.vimeo\.com)|(^https:\/\/iframe\.mediadelivery\.net)/.test(e.origin)) return;
+      if (!/^https:\/\/(player\.vimeo\.com|iframe\.mediadelivery\.net)$/.test(e.origin)) return;
 
       let data = e.data;
       if (typeof data === 'string') { try { data = JSON.parse(data); } catch { return; } }
       if (!data || typeof data !== 'object') return;
 
       const evt = data.event || data.method;
+      const b = body(data);
 
-      if (evt === 'getDuration') {
-        const d = Number(data.value ?? data.data);
-        if (Number.isFinite(d) && d > 0) dur.current = d;
+      if (evt === DURATION_ID || evt === 'getDuration') {
+        noteDuration(data.value ?? data.data ?? b?.duration);
         return;
       }
+
       if (evt === 'ready') {
         setState('ready');
         subscribe();
         if (!seeded.current && startAt > 5) {
           seeded.current = true;
-          post({ method: 'setCurrentTime', value: startAt });
+          postToFrame('setCurrentTime', startAt);
+        }
+        /* The URL parameter usually has this covered; this is the path for an
+           embed that booted before the parameter could take effect. */
+        if (autoPlay) postToFrame('play');
+        return;
+      }
+
+      if (evt === 'play')  { setState('ready'); setPlaying(true); setWaiting(false); return; }
+      if (evt === 'pause') { setPlaying(false); flush(true); return; }
+
+      if (evt === 'timeupdate' || evt === 'seeked') {
+        /* On an embed this message is the ONLY source of the playhead — the
+           readout, the skip buttons, Resume and the end-of-lesson card all
+           depend on it arriving and being read correctly. */
+        if (Number.isFinite(Number(b.duration)) && Number(b.duration) > 0) noteDuration(b.duration);
+
+        const secs = Number(b.seconds ?? b.currentTime);
+        if (Number.isFinite(secs)) {
+          setCur(secs);
+          advance(secs, dur.current);
+          maybeEnded(secs, dur.current);
         }
         return;
       }
-      if (evt === 'play') setState('ready');
-      if (evt === 'pause') { flush(true); return; }
-      if (evt === 'timeupdate') {
-        const secs = data.data?.seconds ?? data.data?.currentTime ?? data.seconds;
-        const length = data.data?.duration ?? data.duration;
-        if (typeof secs === 'number') advance(secs, Number(length));
-        return;
-      }
-      if (evt === 'ended' || evt === 'finish') { flush(true); onEnded?.(); }
+
+      if (evt === 'ended' || evt === 'finish') { setPlaying(false); fireEnded(); }
     };
 
     window.addEventListener('message', onMessage);
-    /* Some builds are listening before they announce themselves, so nudge once
-       on load as well as waiting for the ready event. */
-    const t = setTimeout(subscribe, 800);
-    return () => { window.removeEventListener('message', onMessage); clearTimeout(t); };
-  }, [kind, video?.embed, startAt, advance, flush, onEnded]);
+    /* Some builds are listening before they announce themselves, so nudge
+       twice on load as well as waiting for the ready event. */
+    const a = setTimeout(subscribe, 600);
+    const b2 = setTimeout(subscribe, 2000);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      clearTimeout(a);
+      clearTimeout(b2);
+    };
+  }, [kind, frameSrc, startAt, autoPlay, advance, flush, fireEnded, maybeEnded, postToFrame]);
+
+  /* ── YouTube ──────────────────────────────────────────────────────────────
+     No loader script and no third-party bundle: an iframe carrying
+     enablejsapi=1 answers a `listening` handshake with a stream of
+     `infoDelivery` messages that carry currentTime, duration and playerState.
+
+     That is everything the rest of this component needs — the skip buttons,
+     the position Resume seeks back to, and knowing the lecture finished. A
+     YouTube lesson previously reported none of it. */
+  useEffect(() => {
+    if (kind !== 'youtube') return;
+    const frame = frameRef.current;
+    if (!frame) return;
+
+    const listen = () => {
+      try {
+        frame.contentWindow?.postMessage(
+          JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*',
+        );
+      } catch { /* not ready yet */ }
+    };
+
+    const onMessage = (e) => {
+      if (!/^https:\/\/(www\.)?youtube(-nocookie)?\.com$/.test(e.origin)) return;
+
+      let data = e.data;
+      if (typeof data === 'string') { try { data = JSON.parse(data); } catch { return; } }
+      const info = data?.info;
+      if (!info || typeof info !== 'object') return;
+
+      const length = Number(info.duration);
+      if (Number.isFinite(length) && length > 0) {
+        dur.current = length;
+        setLen(length);
+      }
+
+      const secs = Number(info.currentTime);
+      if (Number.isFinite(secs)) {
+        setCur(secs);
+        advance(secs, length);
+        maybeEnded(secs, length || dur.current);
+
+        /* Resume, once the length is known — seeking past the end of a video
+           whose duration has not arrived yet just restarts it. */
+        if (!seeded.current && startAt > 5 && Number.isFinite(length) && startAt < length - 15) {
+          seeded.current = true;
+          postToFrame('setCurrentTime', startAt);
+        }
+      }
+
+      /* -1 unstarted · 0 ended · 1 playing · 2 paused · 3 buffering */
+      if (info.playerState === 1) { setState('ready'); setPlaying(true); setWaiting(false); }
+      else if (info.playerState === 2) { setPlaying(false); flush(true); }
+      else if (info.playerState === 3) setWaiting(true);
+      else if (info.playerState === 0) { setPlaying(false); fireEnded(); }
+    };
+
+    window.addEventListener('message', onMessage);
+    /* The handshake needs a frame that exists and a player that has booted.
+       Two nudges covers a slow first paint without polling forever. */
+    const a = setTimeout(listen, 400);
+    const b = setTimeout(listen, 1800);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      clearTimeout(a);
+      clearTimeout(b);
+    };
+  }, [kind, frameSrc, startAt, advance, flush, fireEnded, maybeEnded, postToFrame]);
 
   /* ── fullscreen, and the phone turning with it ───────────────────────── */
   useEffect(() => {
@@ -405,25 +661,51 @@ export default function VideoPlayer({
 
   /* ── the controls themselves ─────────────────────────────────────────── */
   const togglePlay = useCallback(() => {
+    /* On an embed there is no element to ask, so `playing` — the last thing
+       the embed told us — is the only state there is. */
+    if (!native && drivable) {
+      postToFrame(playing ? 'pause' : 'play');
+      setPlaying((p) => !p);
+      bumpUi();
+      return;
+    }
     const el = videoRef.current;
     if (!el) return;
     if (el.paused) el.play().catch(() => {/* autoplay policy */});
     else el.pause();
     bumpUi();
-  }, [bumpUi]);
+  }, [bumpUi, native, drivable, playing, postToFrame]);
 
   const flashAt = useRef(null);
   const seekBy = useCallback((delta) => {
+    /* The "+5s" flash, wherever the seek came from. */
+    const flash = () => {
+      setNudge(delta > 0 ? `+${delta}s` : `−${Math.abs(delta)}s`);
+      clearTimeout(flashAt.current);
+      flashAt.current = setTimeout(() => setNudge(''), 600);
+      bumpUi();
+    };
+
+    if (!native && drivable) {
+      /* pos.current is the last playhead the embed reported. Writing tick as
+         well is what stops the jump being banked as five watched seconds. */
+      const end = dur.current > 0 ? dur.current - 0.5 : Infinity;
+      const to = Math.max(0, Math.min(end, (pos.current || 0) + delta));
+      postToFrame('setCurrentTime', to);
+      pos.current = to;
+      tick.current = to;
+      setCur(to);
+      flash();
+      return;
+    }
+
     const el = videoRef.current;
     if (!el) return;
     const end = Number.isFinite(el.duration) && el.duration > 0 ? el.duration - 0.25 : Infinity;
     el.currentTime = Math.max(0, Math.min(end, el.currentTime + delta));
     setCur(el.currentTime);
-    setNudge(delta > 0 ? `+${delta}s` : `−${Math.abs(delta)}s`);
-    clearTimeout(flashAt.current);
-    flashAt.current = setTimeout(() => setNudge(''), 600);
-    bumpUi();
-  }, [bumpUi]);
+    flash();
+  }, [bumpUi, native, drivable, postToFrame]);
 
   useEffect(() => () => clearTimeout(flashAt.current), []);
 
@@ -516,17 +798,53 @@ export default function VideoPlayer({
       {title && <div className="vp-title">{title}</div>}
 
       {IFRAME_KINDS.has(kind) ? (
-        <iframe
-          ref={frameRef}
-          className="vp-frame"
-          src={video.embed || video.src}
-          title={title || 'Lesson video'}
-          loading="eager"
-          allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
-          allowFullScreen
-          onLoad={() => setState('ready')}
-          onError={() => setState('error')}
-        />
+        <>
+          <iframe
+            ref={frameRef}
+            className="vp-frame"
+            src={frameSrc}
+            title={title || 'Lesson video'}
+            loading="eager"
+            allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+            allowFullScreen
+            onLoad={() => setState('ready')}
+            onError={() => setState('error')}
+          />
+
+          {/* ── our skip controls, over someone else's player ───────────────
+              The embed owns the bottom strip of its own frame, so ours sits
+              ABOVE that bar rather than fighting it for the same pixels.
+              Only for embeds that answer postMessage — see `drivable`. */}
+          {drivable && (
+            <div className="vp-embed-ctl">
+              <button
+                type="button"
+                className="vp-embed-btn"
+                onClick={() => seekBy(-SKIP)}
+                aria-label="Back 5 seconds"
+                title="Back 5 seconds"
+              >
+                <Back5 size={19} />
+              </button>
+
+              {len > 0 && (
+                <span className="vp-embed-time">{clock(cur)} <em>/</em> {clock(len)}</span>
+              )}
+
+              <button
+                type="button"
+                className="vp-embed-btn"
+                onClick={() => seekBy(SKIP)}
+                aria-label="Forward 5 seconds"
+                title="Forward 5 seconds"
+              >
+                <Fwd5 size={19} />
+              </button>
+            </div>
+          )}
+
+          {nudge && <div className="vp-nudge" aria-hidden="true">{nudge}</div>}
+        </>
       ) : (
         <video
           ref={videoRef}
@@ -566,10 +884,10 @@ export default function VideoPlayer({
               setTimeout(() => setResumed(0), 4200);
             }
           }}
-          onCanPlay={() => { setState('ready'); setWaiting(false); }}
+          onCanPlay={() => { setState('ready'); setWaiting(false); tryAutoPlay(); }}
           onWaiting={() => setWaiting(true)}
           onPlaying={() => { setWaiting(false); setPlaying(true); }}
-          onPlay={() => { setPlaying(true); bumpUi(); }}
+          onPlay={() => { setPlaying(true); setBlocked(false); bumpUi(); }}
           onDurationChange={(e) => {
             const d = e.currentTarget.duration;
             if (Number.isFinite(d) && d > 0) { dur.current = d; setLen(d); }
@@ -606,9 +924,14 @@ export default function VideoPlayer({
       {native && state === 'ready' && (
         <>
           {!playing && (
-            <button type="button" className="vp-big" onClick={togglePlay} aria-label="Play">
-              <Play size={34} fill="currentColor" stroke="none" />
-            </button>
+            <>
+              <button type="button" className="vp-big" onClick={togglePlay} aria-label="Play">
+                <Play size={34} fill="currentColor" stroke="none" />
+              </button>
+              {blocked && (
+                <div className="vp-blocked">Tap play to start — your browser blocked autoplay</div>
+              )}
+            </>
           )}
 
           {nudge && <div className="vp-nudge" aria-hidden="true">{nudge}</div>}

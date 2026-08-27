@@ -191,10 +191,19 @@ export default function DndSettings() {
         config: JSON.stringify(rows),
       }), FORM);
       if (res.data?.success) {
-        const n = res.data.data?.enforced_journeys || 0;
+        const d2 = res.data.data || {};
+        const n = d2.enforced_journeys || 0;
         toast.success(enforce && n
           ? `Saved — now enforced on ${n} live journey${n === 1 ? '' : 's'}`
           : 'Quiet hours saved');
+        /*
+          The consequence, reported separately from the save. "Saved" only says a row was
+          written; "released 240 held messages" says what changed for actual students — and
+          it is the thing people were looking for when they said turning DND off did nothing.
+        */
+        const rel = d2.released || 0, ret = d2.retimed || 0;
+        if (rel) toast.success(`${rel} held message${rel === 1 ? '' : 's'} released — going out on the next worker tick`);
+        else if (ret) toast(`${ret} held message${ret === 1 ? '' : 's'} re-timed to the new window`);
         setDirty(false);
         load();
       } else toast.error(res.data?.error || 'Could not save');
@@ -219,7 +228,7 @@ export default function DndSettings() {
             <div>
               <h2>Account quiet hours</h2>
               <p>
-                Every new journey starts from this schedule. Pick the days it applies on, then set the
+                This schedule applies to <b>every journey</b> that has not explicitly opted out. Pick the days it applies on, then set the
                 window on each — <b>the window is the time messages are held</b>, so 21:00 to 09:30 blocks
                 the night. Days you leave unselected have no restriction at all.
               </p>
@@ -263,10 +272,10 @@ export default function DndSettings() {
             <div>
               <h2>Enforce on every journey</h2>
               <p>
-                Apply this schedule to all journeys, overriding whatever each one has set. Leave it off
-                and the schedule is only a default that a journey can turn off for itself — which is
-                what you want for genuinely time-critical journeys like exam-window reminders and
-                results-live alerts, where a held message defeats the purpose.
+                Also apply it to journeys that have opted out. Leave this off
+                and the schedule still governs every journey except the ones individually marked to
+                ignore quiet hours — the escape hatch for genuinely time-critical journeys like
+                exam-window reminders and results-live alerts, where a held message defeats the purpose.
               </p>
             </div>
             <button className="dnd-sw" role="switch" aria-checked={enforce} aria-label="Enforce on every journey"

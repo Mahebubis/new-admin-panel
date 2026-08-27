@@ -72,6 +72,11 @@ export const LMS = {
   duplicateCourse: (id) => api('resource=courses&action=duplicate', { id }),
   deleteCourse: (id) => api('resource=courses&action=delete', { id }),
   reorderCourses: (order) => api('resource=courses&action=reorder', { order }),
+  /* The user_dashboard routing switch. One per course — the learner portal
+     never reads it. `value` is optional: omit it to flip, pass it to force. */
+  toggleCourseEnabled: (id, value) => api('resource=courses&action=toggle_enabled', { id, value }),
+  setAllComingSoon: (id, coming_soon, coming_soon_note = '') =>
+    api('resource=courses&action=set_all_coming_soon', { id, coming_soon: coming_soon ? 1 : 0, coming_soon_note }),
   uploadThumbnail: (fd) => apiForm('resource=courses&action=thumbnail', fd),
 
   /* sections (modules) */
@@ -80,6 +85,8 @@ export const LMS = {
   updateSection: (d) => api('resource=sections&action=update', d),
   deleteSection: (id) => api('resource=sections&action=delete', { id }),
   reorderSections: (order) => api('resource=sections&action=reorder', { order }),
+  /* `value` is optional — omit it to flip, pass it to force a state. */
+  toggleSectionComingSoon: (id, value) => api('resource=sections&action=toggle_coming_soon', { id, value }),
 
   /* lessons */
   getLesson: (id) => api(`resource=lessons&action=get&id=${id}`),
@@ -89,6 +96,8 @@ export const LMS = {
   reorderLessons: (order) => api('resource=lessons&action=reorder', { order }),
   moveLesson: (id, section_id) => api('resource=lessons&action=move', { id, section_id }),
   toggleLessonHidden: (id) => api('resource=lessons&action=toggle_hidden', { id }),
+  renameLesson: (id, title) => api('resource=lessons&action=rename', { id, title }),
+  toggleLessonComingSoon: (id, value) => api('resource=lessons&action=toggle_coming_soon', { id, value }),
   uploadVideo: (fd) => apiForm('resource=lessons&action=upload_video', fd),
 
   /* lesson attachments */
@@ -124,6 +133,12 @@ export const LMS = {
   deleteQuestion: (id) => api('resource=questions&action=delete', { id }),
   reorderQuestions: (order) => api('resource=questions&action=reorder', { order }),
   bulkCreateQuestions: (d) => api('resource=questions&action=bulk_create', d),
+  /* Spreadsheet import, two steps and no server-side session between them:
+     parse hands the questions back to the browser, run writes the ones the
+     admin kept. See the note on the PHP action for why there is no token. */
+  importParseQuestions: (fd) => apiForm('resource=questions&action=import_parse', fd),
+  importRunQuestions: (quiz_id, questions) =>
+    api('resource=questions&action=import_run', { quiz_id, questions }),
 
   /* attempts */
   listAttempts: (o) => api(`resource=attempts&action=list&${qp(o)}`),
@@ -149,12 +164,55 @@ export const LMS = {
   progressReport: (courseId) => api(`resource=reports&action=progress&course_id=${courseId}`),
   quizReport: (quizId) => api(`resource=reports&action=quiz&quiz_id=${quizId}`),
   courseFunnel: () => api('resource=reports&action=course_funnel'),
+  /* Who actually OPENED training.internshipstudio.com, and where their time
+     went. `days` of 0 means all time. Enrollment is not access — this is the
+     only report that can tell the two apart. */
+  portalAccess: (days = 0) => api(`resource=reports&action=portal_access&days=${days}`),
+
+  /* support desk — the other end of the learner portal's /support screen.
+     `author` on a reply is the signed-in admin's name: this file's PHP has no
+     admin session of its own, so the panel is what knows who is answering. */
+  listTickets: (o) => api(`resource=support&action=list&${qp(o)}`),
+  getTicket: (id) => api(`resource=support&action=get&id=${id}`),
+  replyTicket: (d) => api('resource=support&action=reply', d),
+  setTicketStatus: (id, status) => api('resource=support&action=status', { id, status }),
+  deleteTicket: (id) => api('resource=support&action=delete', { id }),
 
   /* settings + editor */
   getSettings: () => api('resource=settings&action=get'),
   saveSettings: (settings) => api('resource=settings&action=save', { settings }),
   setStorePassword: (password) => api('resource=settings&action=set_store_password', { password }),
   uploadEditorImage: (fd) => apiForm('resource=editor&action=upload_image', fd),
+};
+
+/* ── "put me back where I was" ──────────────────────────────────────────
+   The builder rebuilds itself from scratch on every mount, so opening a
+   lesson and coming back landed on module 1 with nothing to say which lesson
+   had just been edited — on a course with a dozen modules that means hunting
+   for your place again after every single edit.
+
+   Both screens write the lesson last opened here; the builder reads it once
+   on mount, expands that module and marks the row. sessionStorage rather than
+   a query param because the browser Back button and the in-page back link
+   have to restore the same thing, and per-course because two courses open in
+   two tabs must not overwrite each other's place. */
+const lastLessonKey = (courseId) => `lms:last-lesson:${courseId}`;
+
+export const rememberLesson = (courseId, lessonId, sectionId) => {
+  if (!courseId || !lessonId) return;
+  try {
+    sessionStorage.setItem(lastLessonKey(courseId), JSON.stringify({
+      lessonId: Number(lessonId), sectionId: Number(sectionId) || 0,
+    }));
+  } catch { /* private mode / storage disabled — the builder opens at its default */ }
+};
+
+export const recallLesson = (courseId) => {
+  try {
+    const raw = sessionStorage.getItem(lastLessonKey(courseId));
+    const v = raw ? JSON.parse(raw) : null;
+    return v && v.lessonId ? v : null;
+  } catch { return null; }
 };
 
 /* ── formatting helpers shared by every LMS screen ── */

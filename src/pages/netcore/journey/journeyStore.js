@@ -230,3 +230,46 @@ export async function setCap(id, enabled) {
 export async function fireBusinessEvent(eventName, payload = {}) {
   return await write({ action: 'business_event' }, { event_name: eventName, payload });
 }
+
+/**
+ * Evaluate one condition step against one real student.
+ *
+ * Read-only on the server: nothing is written, nobody enters the journey, no message
+ * goes out. `subject` is an email address or a numeric user id — the builder does not
+ * make people choose which, because they know who they mean and not which column it
+ * lives in.
+ *
+ * Returns { branch, detail, rules[], student, step } — the per-rule breakdown is the
+ * whole point; a bare True/False is exactly the answer that was already unavailable.
+ */
+export async function testCondition(id, nodeId, subject) {
+  const s = String(subject || '').trim();
+  const body = /^\d+$/.test(s) ? { node_id: nodeId, user_id: s } : { node_id: nodeId, email: s };
+  return await write({ action: 'condition_test', id }, body);
+}
+
+/* ── Outbox ────────────────────────────────────────────────────────────────
+   Everything the engine still owes: overdue steps a stopped worker never picked
+   up, messages held by quiet hours, sends backing off after a transient failure,
+   ordinary delays, and sends that gave up. See api/journeys/lib/JourneyOutbox.php.
+──────────────────────────────────────────────────────────────────────────── */
+
+export async function loadOutbox({ kind = 'all', journeyId = 0, q = '', page = 1, perPage = 50 } = {}) {
+  return await read(
+    { action: 'outbox', kind, journey_id: journeyId || 0, q, page, per_page: perPage },
+    { rows: [], total: 0, page: 1, pages: 1, summary: {}, journeys: [], kind },
+  );
+}
+
+/** Pull the selected rows forward to now and kick the worker. `ids` empty + `all` set
+ *  releases the whole current bucket, capped server-side. */
+export async function releaseOutbox(ids, { all = false, kind = 'overdue', journeyId = 0 } = {}) {
+  return await write({ action: 'outbox_release' },
+    all ? { all: 1, kind, journey_id: journeyId || 0 } : { ids: JSON.stringify(ids) });
+}
+
+/** Skip these steps. The students continue down the step's normal onward path —
+ *  cancelling a message is not the same as removing the person from the journey. */
+export async function cancelOutbox(ids, note = '') {
+  return await write({ action: 'outbox_cancel' }, { ids: JSON.stringify(ids), note });
+}

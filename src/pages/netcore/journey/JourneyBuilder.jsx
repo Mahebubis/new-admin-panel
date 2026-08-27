@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   getJourney, createJourney, saveGraph, addVersion, listVersions,
-  setStatus as setJourneyStatus, loadOptions, sendTest,
+  setStatus as setJourneyStatus, loadOptions, sendTest, testCondition,
   previewTemplate, uploadAttachment, deleteAttachment,
 } from './journeyStore';
 
@@ -402,7 +402,7 @@ const CSS = `
 function initBuilder(root, bootOpts = {}) {
   const gid = id => root.querySelector('#' + id);
   const { initial = null, onPersist = null, onVersion = null, loadVersions = null,
-          onStatus = null, sendTest = null, options = null, api = {},
+          onStatus = null, sendTest = null, testCondition = null, options = null, api = {},
           loadPreview = null, uploadAttachment = null, deleteAttachment = null,
           liveVersion = null, deployedGraph = null } = bootOpts;
   let currentJourneyId = bootOpts.journeyId || null;
@@ -487,6 +487,31 @@ function initBuilder(root, bootOpts = {}) {
   const ATTRS = pick(OPT.attributes, ['MOBILE', 'EMAIL', 'FIRST_NAME', 'LAST_NAME', 'CITY', 'COLLEGE',
     'GRAD_YEAR', 'EXAM_SCORE', 'EXAM_ATTEMPTED', 'BATCH_CODE', 'TRAINING_STATUS']);
   /*
+    ── Customer Attributes: the ones somebody created under Audience → Attributes ──
+    Deliberately NOT the same list as ATTRS. ATTRS is every name a RULE can read, which
+    legitimately includes every column on `users` — ACTIVE, APPLYFOREXAM, AVAILABLEBALANCE
+    and eighty more schema details that happen to be readable.
+
+    Two fields must never offer those:
+
+      Update attribute            writes THROUGH a Customer Attribute's mapping, so a raw
+                                  column name is one the engine has no way to write.
+      Contact updated → attribute reads the contact-update ledger, which is only ever written
+                                  per Customer Attribute name. A raw column is changed by
+                                  fifty places in the application, none of which record
+                                  anything, so a trigger on one could only ever stay silent.
+
+    Both therefore show the register and NOTHING else — no fallback to the wide list, because
+    a fallback here is what produced the eighty-column dropdown in the first place. When the
+    register is genuinely empty the field is empty and a note on the step says where to create
+    one, which is a better answer than a long list of names that cannot work.
+  */
+  const CUSTOMER_ATTRS = Array.isArray(OPT.customerAttributes) ? OPT.customerAttributes : [];
+  const WRITABLE_ATTRS = CUSTOMER_ATTRS.filter(a => a.writable);
+  const ATTR_WRITE_OPTS = WRITABLE_ATTRS.map(a => a.name);
+  const ATTR_TRIGGER_OPTS = CUSTOMER_ATTRS.map(a => a.name);
+  const ATTR_STORE = Object.fromEntries(CUSTOMER_ATTRS.map(a => [a.name, a]));
+  /*
     Values a WhatsApp template variable can take. TRACKED_LINK is not a profile attribute:
     it resolves at send time to THIS student's own link — the template's destination plus
     phone, medium and the message's rid on the query string. That is the only way a tap can
@@ -527,10 +552,26 @@ function initBuilder(root, bootOpts = {}) {
   const routeValue = (label, list, auto) => (label === auto ? 'auto' : (list.find(k => routeName(k) === label) || 'auto'));
   const SEND_DOMAINS = pick(OPT.sendingDomains, ['alert.internshipstudio.com']);
   const OTHER_JOURNEYS = pick(names(OPT.journeys), ['(no other journeys)']);
-  const REPEAT = ['Every time this event happens', 'First time this event happens', 'Every day', 'Every week',
+  /*
+    Frequency wording is deliberately event-neutral ("First time this happens", not "First time
+    this event happens"): the same dropdown now serves an app event, an engagement event AND a
+    contact activity, and "the first time this event happens" is not a sentence anyone would
+    write about "Contact is added to List". Journeys saved under the older wording keep working
+    — journey_try_create_entry() in JourneyEngine.php accepts both spellings.
+  */
+  const REPEAT = ['First time this happens', 'Every time this happens', 'Every day', 'Every week',
     'Every month', 'Once every specific duration', 'Skip user if already in the journey'];
   const CHECK_FREQ = ['Every hour', 'Every day', 'Every week', 'Every 2 weeks', 'Every month', 'Every 2 months', 'Once every specific duration'];
   const ACT_TYPES = ['App / web activity', 'Email activity', 'WhatsApp activity', 'SMS activity', 'App push activity', 'Web push activity'];
+  /*
+    Contact activity is a TRIGGER-ONLY activity type, which is why it is a separate list rather
+    than another entry in ACT_TYPES. "Was this contact added to a list?" is a membership question
+    a Check-attribute or Is-in-list node already answers better mid-journey; as an entry
+    condition — "start the moment they land in this list" — it is the one nothing else covers.
+  */
+  const TRIGGER_ACT_TYPES = ['App / web activity', 'Contact activity', 'Email activity',
+    'WhatsApp activity', 'SMS activity', 'App push activity', 'Web push activity'];
+  const CONTACT_ACTIVITIES = ['Contact is added to contact master', 'Contact is added to List', 'Contact is updated'];
   /*
     The statuses each channel can actually report, which is not the same as the statuses the
     reference product lists. Only what this panel records is offered, because a dropdown entry
@@ -553,7 +594,11 @@ function initBuilder(root, bootOpts = {}) {
   };
   /** Channels with no transport on this server: selectable, but the node says so plainly. */
   const DEAD_ACT_TYPES = ['SMS activity', 'App push activity', 'Web push activity'];
-  const isEngagement = c => c.type && c.type !== 'App / web activity';
+  const isContactAct = c => c.type === 'Contact activity';
+  /* Contact activity is explicitly NOT engagement: it has no campaign scope, no status and no
+     look-back, and letting it fall into this predicate would show it every one of those fields
+     and then refuse to publish because a required Status was never picked. */
+  const isEngagement = c => c.type && c.type !== 'App / web activity' && c.type !== 'Contact activity';
 
   /*
     Communication scoping — "opened THE email" rather than "opened AN email".
@@ -667,10 +712,46 @@ function initBuilder(root, bootOpts = {}) {
     trg_activity: {
       g: 'trigger', ic: I.bolt, name: 'Activity', kind: 'Trigger',
       desc: 'Start the journey the moment a student does something.', out: ['Yes'],
-      f: [{ k: 'type', t: 'select', l: 'Activity type', o: ACT_TYPES, req: 1, d: 'App / web activity' },
+      f: [{ k: 'type', t: 'select', l: 'Activity type', o: TRIGGER_ACT_TYPES, req: 1, d: 'App / web activity' },
       { k: 'event', t: 'select', l: 'Event', o: EVENTS, req: 1, ph: 'Select an event', when: c => c.type === 'App / web activity' },
-      { k: 'status', t: 'select', l: 'Status', o: c => STATUSES[c.type] || [], req: 1, ph: 'Select a status', when: c => c.type !== 'App / web activity' },
-      ...ENGAGEMENT_SCOPE_FIELDS,
+      { k: 'status', t: 'select', l: 'Status', o: c => STATUSES[c.type] || [], req: 1, ph: 'Select a status', when: isEngagement },
+
+      /* ── Contact activity ────────────────────────────────────────────────────────
+         Three things can happen to a contact, and each needs a different follow-up
+         question — which is why these are separate fields rather than one long list of
+         nine combinations. Every one of them is scoped into the trigger's watermark on
+         the server, so two journeys watching two different lists never steal each
+         other's rows. */
+      { k: 'contactActivity', t: 'select', l: 'Contact activity', o: CONTACT_ACTIVITIES, req: 1,
+        ph: 'Select an activity', when: isContactAct },
+
+      { k: 'contactList', t: 'select', l: 'Contact list', o: ['Any List', 'Specific List'], req: 1, d: 'Any List',
+        when: c => isContactAct(c) && c.contactActivity === 'Contact is added to List',
+        hint: 'Any List excludes the blocklist — being blocked is not something to start a journey on. Name it explicitly if you really want it.' },
+      { k: 'contactListRef', t: 'select', l: 'Specific list', o: LISTS, req: 1, ph: 'Select a list',
+        when: c => isContactAct(c) && c.contactActivity === 'Contact is added to List' && c.contactList === 'Specific List',
+        hint: 'The lists from Audience &rarr; Lists. The blocklist is not offered — it is a suppression '
+          + 'list, and starting a journey for everyone who unsubscribed is never the intent.' },
+      { k: 'contactAttrScope', t: 'select', l: 'Contact attribute', o: ['Any Attribute', 'Specific attribute'],
+        req: 1, d: 'Any Attribute',
+        when: c => isContactAct(c) && c.contactActivity === 'Contact is updated' },
+      { k: 'contactAttr', t: 'select', l: 'Specific attribute', o: ATTR_TRIGGER_OPTS, req: 1, ph: 'Select an attribute',
+        when: c => isContactAct(c) && c.contactActivity === 'Contact is updated' && c.contactAttrScope === 'Specific attribute',
+        hint: 'The attributes from Audience → Attributes. Fires on a real change to one of them — a CSV '
+          + 'import that wrote it, or another journey&rsquo;s Update-attribute step.' },
+      { k: '__noattrs2', t: 'note',
+        when: c => isContactAct(c) && c.contactActivity === 'Contact is updated'
+          && c.contactAttrScope === 'Specific attribute' && !CUSTOMER_ATTRS.length,
+        text: 'There are no Customer Attributes on this account yet. Create one under Audience → Attributes, '
+          + 'or leave this on Any Attribute to fire whenever the contact record changes.' },
+      { k: 'contactValue', t: 'text', l: 'Contact value', ph: 'Leave blank to fire on any new value',
+        when: c => isContactAct(c) && c.contactActivity === 'Contact is updated' && c.contactAttrScope === 'Specific attribute',
+        hint: 'Narrows it further: fire only when the attribute changes TO this exact value.' },
+      { k: '__contactany', t: 'note',
+        when: c => isContactAct(c) && c.contactActivity === 'Contact is updated' && c.contactAttrScope === 'Any Attribute',
+        text: 'Any Attribute fires whenever the contact record changes at all — a re-import, an edited phone number, a new city. '
+          + 'Pick a specific attribute if you only want one field to start this journey.' },
+
       /*
         The look-back. Without it this trigger only ever sees engagement that happens AFTER the
         journey is published — which breaks the obvious way to use it, because the natural order
@@ -686,12 +767,23 @@ function initBuilder(root, bootOpts = {}) {
         o: BACKFILL_OPTS, d: 'Only from now on', when: isEngagement,
         hint: 'Runs once, the first time the journey ticks after you publish. The repeat-frequency rule below still applies, so nobody is enrolled twice.' },
       { k: 'params', t: 'rules', l: 'Match on event parameters', max: 5, keys: 'payload', hint: 'Optional. Up to 5 parameters from the event payload.',
-        when: c => !isEngagement(c) },
-      { k: 'repeat', t: 'select', l: 'Repeat frequency', o: REPEAT, req: 1, d: 'First time this event happens' },
+        when: c => c.type === 'App / web activity' },
+      { k: 'repeat', t: 'select', l: 'Frequency', o: REPEAT, req: 1, d: 'First time this happens' },
       { k: 'ramount', t: 'number', l: 'Every', d: '5', when: c => c.repeat === 'Once every specific duration' },
       { k: 'runit', t: 'select', l: 'Unit', o: ['days', 'weeks', 'months'], d: 'days', when: c => c.repeat === 'Once every specific duration' },
       { k: 'skip', t: 'check', l: 'Skip the student if they are already inside this journey', hint: 'A student counts as inside the journey while they are sitting at a wait or a delay.' }],
-      s: c => (c.type === 'App / web activity' ? c.event : (c.type && c.status ? c.type.split(' ')[0] + ' · ' + c.status : '')) || 'Pick an event',
+      s: c => {
+        if (isContactAct(c)) {
+          if (!c.contactActivity) return 'Pick a contact activity';
+          if (c.contactActivity === 'Contact is added to contact master') return 'Contact added';
+          if (c.contactActivity === 'Contact is added to List') {
+            return c.contactList === 'Specific List' ? `Added to ${c.contactListRef || '…'}` : 'Added to any list';
+          }
+          if (c.contactAttrScope !== 'Specific attribute') return 'Contact updated';
+          return `${c.contactAttr || '…'} updated${c.contactValue ? ` to ${c.contactValue}` : ''}`;
+        }
+        return (c.type === 'App / web activity' ? c.event : (c.type && c.status ? c.type.split(' ')[0] + ' · ' + c.status : '')) || 'Pick an event';
+      },
     },
     trg_segment: {
       g: 'trigger', ic: I.users, name: 'Segment', kind: 'Trigger',
@@ -770,8 +862,18 @@ function initBuilder(root, bootOpts = {}) {
     act_attr: {
       g: 'action', ic: I.tag, name: 'Update attribute', kind: 'Action', desc: 'Write a value back onto the student profile.',
       out: ['Done'],
-      f: [{ k: 'attr', t: 'select', l: 'Attribute', o: ATTRS, req: 1, ph: 'Select an attribute' },
-      { k: 'value', t: 'text', l: 'New value', req: 1, ph: 'e.g. active' }],
+      f: [{ k: 'attr', t: 'select', l: 'Attribute', o: ATTR_WRITE_OPTS, req: 1, ph: 'Select an attribute',
+        /* Where the value will actually land. A mapped attribute writes through to a real
+           column in a real table, and knowing WHICH one before publishing is the difference
+           between "the step did nothing" and "the step wrote to the wrong place". */
+        hint: c => (ATTR_STORE[c.attr]
+          ? `Written to <b>${ATTR_STORE[c.attr].storedIn}</b>.`
+          : 'The attributes you created under Audience → Attributes.') },
+      { k: 'value', t: 'text', l: 'New value', req: 1, ph: 'e.g. active' },
+      { k: '__noattrs', t: 'note', when: () => !WRITABLE_ATTRS.length,
+        text: 'There are no Customer Attributes on this account yet, so there is nothing this step '
+          + 'can write. Create one under Audience -> Attributes first — a journey writes through an '
+          + 'attribute&rsquo;s mapping, not directly into a database column.' }],
       s: c => c.attr ? `${c.attr} = ${c.value || '…'}` : 'Pick an attribute',
     },
     act_remove: {
@@ -1663,10 +1765,14 @@ function initBuilder(root, bootOpts = {}) {
 
   function fieldHtml(f, cfg) {
     const v = cfg[f.k], lab = `<label>${f.l}${f.req ? '<span class="req">*</span>' : ''}</label>`;
-    const hint = f.hint ? `<div class="hint">${f.hint}</div>` : '';
+    /* hint and note text may be a function of the current cfg, so a field can explain what the
+       CHOSEN value means — "stored in istudio_cit.users.fname" is worth far more than a static
+       sentence about attributes in general. */
+    const hintText = typeof f.hint === 'function' ? f.hint(cfg) : f.hint;
+    const hint = hintText ? `<div class="hint">${hintText}</div>` : '';
     switch (f.t) {
       case 'note':
-        return `<div class="note">${svg(I.info, 14)}<div>${f.text}</div></div>`;
+        return `<div class="note">${svg(I.info, 14)}<div>${typeof f.text === 'function' ? f.text(cfg) : f.text}</div></div>`;
       case 'select': {
         // A template field gets a Preview button beside its label — checking what
         // actually goes out should not require sending a test to yourself first.
@@ -1771,12 +1877,18 @@ function initBuilder(root, bootOpts = {}) {
     bindConfig(n);
     drFoot.innerHTML = `<button class="btn primary" onclick="closeDrawer()">Save step</button>
       ${t.test ? '<button class="btn" id="dTest">Send test</button>' : ''}
+      ${t.g === 'cond' ? '<button class="btn" id="dCond">Test this condition</button>' : ''}
       <div style="flex:1"></div><button class="btn danger" id="dDel">Delete step</button>`;
     gid('dDel').onclick = () => { snapshot(); delNode(id); sel = null; closeDrawer(); render(); toast('Step deleted.'); };
     const tb = gid('dTest');
     if (tb) tb.onclick = () => {
       if (badCfg(n)) { toast('Finish setting the step up before sending a test.', 1); return; }
       openSendTest(n);
+    };
+    const cb2 = gid('dCond');
+    if (cb2) cb2.onclick = () => {
+      if (badCfg(n)) { toast('Finish setting the step up before testing it.', 1); return; }
+      openCondTest(n);
     };
     drawer.classList.add('on'); scrim.classList.add('on'); render();
   }
@@ -2139,6 +2251,102 @@ function initBuilder(root, bootOpts = {}) {
     if (kind === 'email') return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
     if (kind === 'phone') return /^\+?[0-9][0-9\s-]{6,15}$/.test(v);
     return v.length > 0;
+  }
+
+  /* ── Test a condition ──────────────────────────────────────────────────────
+     A message step could always be tested by sending it to yourself. A condition
+     could not be tested at all: the only way to learn which way somebody branches
+     was to publish the journey and read the trace afterwards, and a wrong answer
+     gave you nothing to work from.
+
+     This asks the server to evaluate the node against one real student — no writes,
+     nobody enters the journey, nothing is sent — and shows the branch they take
+     alongside the evidence: every rule, what it wanted, what the profile actually
+     holds, and which of them decided the outcome. "False" is rarely the useful part;
+     "COLLEGE is empty on this profile" is.
+  ──────────────────────────────────────────────────────────────────────────── */
+  let lastCondSubject = '';
+
+  function openCondTest(n) {
+    const t = T[n.key], g = GROUPS[t.g];
+    head(t.ic, g.c, g.bg, `Test · ${t.name}`,
+      'Evaluate this step against one real student. Nothing is written and nobody enters the journey.');
+    drBody.innerHTML = `
+      <div class="field"><label>Student<span class="req">*</span></label>
+        <input class="ctl" id="cSubject" value="${esc(lastCondSubject)}" placeholder="Email address, or a numeric user id">
+        <div class="hint">The condition reads this student&rsquo;s live profile, exactly as the engine would.</div></div>
+      <div id="cResult"></div>
+      <div class="note">${svg(I.info, 14)}<div>Read-only. A split test shows the variant they would get without assigning it to them.</div></div>`;
+    drFoot.innerHTML = `<button class="btn primary" id="cRun">Evaluate</button><button class="btn" id="cBack">Back</button>`;
+    gid('cBack').onclick = () => openConfig(n.id);
+    gid('cRun').onclick = () => runCondTest(n);
+    const inp = gid('cSubject');
+    inp.onkeydown = e => { if (e.key === 'Enter') runCondTest(n); };
+    inp.focus();
+    drawer.classList.add('on'); scrim.classList.add('on');
+  }
+
+  async function runCondTest(n) {
+    const v = gid('cSubject').value.trim();
+    if (!v) { toast('Enter an email address or a user id.', 1); return; }
+    lastCondSubject = v;
+
+    const btn = gid('cRun');
+    btn.disabled = true; btn.textContent = 'Evaluating…';
+    const out = gid('cResult');
+    out.innerHTML = '';
+    try {
+      // Saved first, for the same reason a test send is: the server reads the node from
+      // the STORED graph, so an unsaved edit would be evaluated against the old config.
+      if (!(await persist())) { toast('Could not save the step, so it was not evaluated.', 1); return; }
+      const res = testCondition ? await testCondition(n.id, v) : null;
+      if (!res) { toast('Could not evaluate this step.', 1); return; }
+      out.innerHTML = condResultHtml(n, res);
+    } catch (e) {
+      out.innerHTML = `<div class="note warn">${svg(I.warn, 14)}<div>${esc(e?.message || 'Could not evaluate this step.')}</div></div>`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Evaluate'; }
+    }
+  }
+
+  function condResultHtml(n, res) {
+    const truthy = TRUEISH.includes(res.branch);
+    const chipBg = truthy ? '#e4f6f3' : (FALSEISH.includes(res.branch) ? '#fff0e7' : '#eef0ff');
+    const chipFg = truthy ? '#0d9488' : (FALSEISH.includes(res.branch) ? '#c2410c' : '#4c5bd4');
+
+    const who = res.student || {};
+    const rules = (res.rules || []).map(r => {
+      const actual = r.actual === null || r.actual === ''
+        ? `<i style="color:#98a2b3">${r.known ? 'empty' : 'not on this profile'}</i>`
+        : esc(String(r.actual));
+      return `<tr>
+        <td style="padding:6px 8px;border-top:1px solid #f2f4f7"><b>${esc(r.attribute)}</b></td>
+        <td style="padding:6px 8px;border-top:1px solid #f2f4f7;color:#667085">${esc(r.operator)}</td>
+        <td style="padding:6px 8px;border-top:1px solid #f2f4f7">${esc(r.expected || '—')}</td>
+        <td style="padding:6px 8px;border-top:1px solid #f2f4f7">${actual}</td>
+        <td style="padding:6px 8px;border-top:1px solid #f2f4f7;text-align:right;color:${r.passed ? '#0d9488' : '#c2410c'};font-weight:650">
+          ${r.passed ? 'passes' : 'fails'}</td>
+      </tr>`;
+    }).join('');
+
+    return `<div class="sect">Result</div>
+      <div class="card" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="background:${chipBg};color:${chipFg};padding:5px 12px;border-radius:999px;font-weight:750;font-size:13px">
+          ${esc(res.branch || '—')}</span>
+        <span style="font-size:12.5px;color:#667085">
+          ${esc(who.name || who.email || ('user ' + who.user_id))} takes the <b>${esc(res.branch || '—')}</b> path.</span>
+      </div>
+      ${res.detail ? `<div class="hint" style="margin-top:8px">${esc(res.detail)}</div>` : ''}
+      ${rules ? `<div class="sect">Why</div>
+        <div class="card" style="padding:0;overflow:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+            <thead><tr style="color:#667085;font-size:11.5px;text-transform:uppercase;letter-spacing:.03em">
+              <th style="padding:8px;text-align:left">Attribute</th><th style="padding:8px;text-align:left">Test</th>
+              <th style="padding:8px;text-align:left">Expected</th><th style="padding:8px;text-align:left">On the profile</th>
+              <th style="padding:8px;text-align:right"></th></tr></thead>
+            <tbody>${rules}</tbody>
+          </table>
+        </div>` : ''}`;
   }
   function openSendTest(n) {
     const t = T[n.key], g = GROUPS[t.g], fld = testField(n);
@@ -2821,6 +3029,8 @@ export default function JourneyBuilder() {
         },
         loadVersions: () => versions,
         sendTest: (nodeId, to) => (liveId ? sendTest(liveId, nodeId, to) : Promise.resolve(null)),
+        /* Read-only evaluation of one condition step against one student — see testCondition() */
+        testCondition: (nodeId, subject) => (liveId ? testCondition(liveId, nodeId, subject) : Promise.resolve(null)),
         loadPreview: (kind, ref, subject) => previewTemplate(liveId, kind, ref, subject),
         uploadAttachment: (file, usedBytes) => (liveId ? uploadAttachment(liveId, file, usedBytes) : Promise.resolve(null)),
         deleteAttachment: (key) => deleteAttachment(key),

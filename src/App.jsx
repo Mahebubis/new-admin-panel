@@ -212,6 +212,7 @@ import JourneyList from './pages/netcore/journey/JourneyList';
 import JourneyBuilder from './pages/netcore/journey/JourneyBuilder';
 import JourneyReport from './pages/netcore/journey/JourneyReport';
 import DndSettings from './pages/netcore/journey/DndSettings';
+import JourneyOutbox from './pages/netcore/journey/JourneyOutbox';
 import ImportContactsWizard from './pages/netcore/ImportContactsWizard';
 import ContactLogs from './pages/netcore/ContactLogs';
 import { NetcoreBlocklist, BlocklistLogs, BlocklistImport } from './pages/netcore/NetcoreBlocklist';
@@ -311,7 +312,9 @@ import LmsQuizzes from './pages/lms/LmsQuizzes';
 import LmsQuizBuilder from './pages/lms/LmsQuizBuilder';
 import LmsResponses from './pages/lms/LmsResponses';
 import LmsReports from './pages/lms/LmsReports';
+import LmsSupport from './pages/lms/LmsSupport';
 import LmsSettings from './pages/lms/LmsSettings';
+import Monitoring from './pages/Monitoring/Monitoring';
 
 // Helper to keep the route table readable
 const G = (perm, Element) => (
@@ -409,6 +412,9 @@ export default function App() {
           <Route path="journeys/:id/report" element={<JourneyReport />} />
           {/* Account-level quiet hours. Static, so it outranks journeys/:id/report. */}
           <Route path="journeys/dnd" element={<DndSettings />} />
+          {/* The engine's queue — overdue steps, quiet-hours holds, retries and failures.
+              Static like journeys/dnd, so it outranks journeys/:id/report. */}
+          <Route path="journeys/outbox" element={<JourneyOutbox />} />
           {/* Static paths, so they outrank the full-screen /netcore/whatsapp/:id route above
               (React Router v6 ranks by specificity, not declaration order). */}
           {/* Retired — the merged Campaigns list covers both channels. Kept as a redirect so
@@ -533,10 +539,14 @@ export default function App() {
           <Route path="quizzes/:quizId" element={<LmsGate perm="lms_quizzes"><LmsQuizBuilder /></LmsGate>} />
           <Route path="responses" element={<LmsGate perm="lms_forms"><LmsResponses /></LmsGate>} />
           <Route path="reports" element={<LmsGate perm="lms_reports"><LmsReports /></LmsGate>} />
+          <Route path="support" element={<LmsGate perm="lms_support"><LmsSupport /></LmsGate>} />
           <Route path="settings" element={<LmsGate perm="lms_settings"><LmsSettings /></LmsGate>} />
         </Route>
 
         <Route path="notes" element={G('notes', <Notes />)} />
+
+        {/* Monitoring — synthetic checks, run history & incidents */}
+        <Route path="monitoring" element={G('monitoring', <Monitoring />)} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

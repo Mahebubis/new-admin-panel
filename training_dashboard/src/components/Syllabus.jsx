@@ -15,7 +15,7 @@
 // ===========================================================================
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Attachment, CheckCircle, ChevronDown, ChevronUp, History, LessonIcon, Search } from './icons';
+import { Attachment, CheckCircle, ChevronDown, ChevronUp, History, LessonIcon, Lock, Search } from './icons';
 import './syllabus.css';
 
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -147,12 +147,24 @@ export default function Syllabus({ course, sections, progress, activeId, nextId,
               <button className="syl-sec-head" onClick={() => toggle(section.id)} aria-expanded={isOpen}>
                 <span className="syl-sec-no">{pad2(i + 1)}</span>
                 <span className="syl-sec-text">
-                  <span className="syl-sec-title">{section.title}</span>
+                  <span className="syl-sec-title">
+                    {section.title}
+                    {/* A module still being built stays in the list on
+                        purpose — a learner should be able to see what is
+                        coming, not wonder whether the course is finished. */}
+                    {section.coming_soon && <em className="syl-soon-tag"><Lock size={11} /> Coming soon</em>}
+                  </span>
                   <span className="syl-sec-meta">
-                    {section.lesson_count} Lesson{section.lesson_count === 1 ? '' : 's'}
-                    {section.quiz_count > 0 && ` • ${section.quiz_count} Test${section.quiz_count === 1 ? '' : 's'}`}
-                    {section.attachment_count > 0 && ` • ${section.attachment_count} Attachment${section.attachment_count === 1 ? '' : 's'}`}
-                    {done > 0 && ` • ${done} done`}
+                    {section.coming_soon && section.coming_soon_note
+                      ? section.coming_soon_note
+                      : <>
+                        {section.lesson_count} Lesson{section.lesson_count === 1 ? '' : 's'}
+                        {section.quiz_count > 0 && ` • ${section.quiz_count} Test${section.quiz_count === 1 ? '' : 's'}`}
+                        {section.attachment_count > 0 && ` • ${section.attachment_count} Attachment${section.attachment_count === 1 ? '' : 's'}`}
+                        {done > 0 && ` • ${done} done`}
+                        {!section.coming_soon && section.coming_soon_count > 0
+                          && ` • ${section.coming_soon_count} coming soon`}
+                      </>}
                   </span>
                 </span>
                 {isOpen ? <ChevronUp size={19} /> : <ChevronDown size={19} />}
@@ -164,12 +176,13 @@ export default function Syllabus({ course, sections, progress, activeId, nextId,
                     const isActive = l.id === activeId;
                     const isNext = l.id === nextId;
                     const done = l.status === 'completed';
+                    const soon = !!l.coming_soon;
                     /* Been inside this one before. The playhead is the honest
                        measure — someone who scrubbed back to re-watch a step
                        is still mid-lesson — but an older row may only have the
                        furthest point, so the larger of the two stands in. */
                     const at = Math.max(Number(l.resume_secs) || 0, Number(l.watched_secs) || 0);
-                    const seen = !done && at > 5;
+                    const seen = !done && !soon && at > 5;
                     const seenPct = seen && l.duration > 0
                       ? Math.max(3, Math.min(100, Math.round((at * 100) / l.duration)))
                       : 0;
@@ -182,20 +195,28 @@ export default function Syllabus({ course, sections, progress, activeId, nextId,
                           isActive ? 'active' : '',
                           done ? 'done' : '',
                           seen ? 'seen' : '',
+                          soon ? 'soon' : '',
                         ].filter(Boolean).join(' ')}
+                        /* Still clickable: it opens the stage's coming-soon
+                           panel, which is where the "what and when" lives. A
+                           dead row would just read as a broken link. */
                         onClick={() => onPick(l.id)}
                         aria-current={isActive ? 'true' : undefined}
                       >
                         <span className="syl-lesson-ico">
-                          {done
-                            ? <CheckCircle size={18} />
-                            : <LessonIcon type={l.type} size={18} />}
+                          {soon
+                            ? <Lock size={17} />
+                            : done
+                              ? <CheckCircle size={18} />
+                              : <LessonIcon type={l.type} size={18} />}
                         </span>
 
                         <span className="syl-lesson-body">
                           <span className="syl-lesson-title">{l.title}</span>
                           <span className="syl-lesson-meta">
-                            {typeLabel(l.type)}
+                            {soon
+                              ? (l.coming_soon_note || 'Coming soon')
+                              : typeLabel(l.type)}
                             {/* Part-watched and not finished: the rail is the
                                 only place a learner can see, at a glance,
                                 which video they are in the middle of — the
@@ -215,9 +236,11 @@ export default function Syllabus({ course, sections, progress, activeId, nextId,
                           </span>
                         </span>
 
-                        {isNext
-                          ? <span className="syl-upnext">Up next</span>
-                          : (seen && !isActive) && <span className="syl-upnext syl-seen-tag">Continue</span>}
+                        {soon
+                          ? <span className="syl-upnext syl-soon-pill">Soon</span>
+                          : isNext
+                            ? <span className="syl-upnext">Up next</span>
+                            : (seen && !isActive) && <span className="syl-upnext syl-seen-tag">Continue</span>}
 
                         {/* The line along the bottom of the row: how far into
                             this lesson they got, without a number to read. */}

@@ -91,6 +91,39 @@ export default function WaStepContent({ draft, setField, onValidChange, applyTem
   };
   const setSuffix = (value) => setField('variables', { ...vars, button_url_suffix: value });
 
+  /*
+    ── The tracked link, and which slot it belongs in ──────────────────────────
+    XX_WA_ATTR_XX is what the send worker expands, per recipient, into
+        …/login?campaign_id=…&medium=whatsapp&phone=919…&wa_rid=<this message's id>
+    phone + wa_rid are the identity, read by the landing page with no session — which is the
+    only way a WhatsApp tap can name somebody who never signs in.
+  */
+  const TRACKED_LINK_VALUE = 'https://dashboard.internshipstudio.com/login?XX_WA_ATTR_XX';
+  const carriesTrackedLink = v => typeof v === 'string' && v.includes('XX_WA_ATTR_XX');
+  const trackedLinkInUse =
+    (vars.body || []).some(carriesTrackedLink)
+    || (vars.header || []).some(carriesTrackedLink)
+    || carriesTrackedLink(vars.button_url_suffix || '');
+
+  /*
+    Which body placeholder the link goes in. The body text is the evidence: the placeholder that
+    actually follows a URL, or the words "here"/"link"/"open", is the one the copy meant as the
+    link — guessing the last one is right often enough to be dangerous and wrong often enough to
+    be confusing. Falls back to the last placeholder, which is where a link almost always sits.
+  */
+  const trackedLinkSlot = useMemo(() => {
+    const body = String(draft.body_text || '');
+    for (let i = bodyVarCount; i >= 1; i--) {
+      const at = body.indexOf(`{{${i}}}`);
+      if (at < 0) continue;
+      const before = body.slice(Math.max(0, at - 40), at).toLowerCase();
+      if (/https?:\/\/\S*$|\b(here|link|open|click|visit)\b\W*$/.test(before)) return i - 1;
+    }
+    return Math.max(0, bodyVarCount - 1);
+  }, [draft.body_text, bodyVarCount]);
+
+  const useTrackedLink = () => setVar('body', trackedLinkSlot, TRACKED_LINK_VALUE);
+
   const valid = draft.message_type === 'template'
     ? !!(draft.template_name && Array.from({ length: bodyVarCount }).every((_, i) => String(vars.body?.[i] || '').trim() !== '')
         && Array.from({ length: headerVarCount }).every((_, i) => String(vars.header?.[i] || '').trim() !== ''))
@@ -248,6 +281,55 @@ export default function WaStepContent({ draft, setField, onValidChange, applyTem
                   Give every placeholder a value. Type a fixed value, or insert an attribute to personalize it per contact.
                 </div>
 
+                {/* ── Will a click from this campaign be able to name anybody? ──────────────
+                    Shown here, on the step where it can be FIXED, rather than left to be
+                    discovered as a report full of "Anonymous visitor" after the send.
+
+                    A template's approved BUTTON url is frozen and identical in every copy of the
+                    message, so a tap on it identifies nobody — ever, for anyone. The only place a
+                    per-recipient link can live is a body variable, which is free text and needs
+                    no re-approval. One button does it, so nobody has to know which of the two
+                    tracked-link entries in the attribute picker is the right one. */}
+                {bodyVarCount > 0 && !trackedLinkInUse && (
+                  <div style={{
+                    marginBottom: 18, padding: '11px 13px', borderRadius: 9,
+                    background: '#fffaeb', border: '1px solid #fedf89', color: '#93370d',
+                    fontSize: 12, lineHeight: 1.6,
+                  }}>
+                    <b>Clicks from this campaign will be anonymous.</b> The template&rsquo;s button link is
+                    identical in every message, so a tap on it cannot say who tapped. Put a tracked link in a
+                    body variable and each recipient gets their own — carrying their phone and this
+                    message&rsquo;s id, so the click is credited to them even if they never sign in.
+                    <div style={{ marginTop: 8 }}>
+                      <button type="button" onClick={useTrackedLink}
+                        style={{
+                          padding: '6px 12px', borderRadius: 7, border: '1px solid #b54708',
+                          background: '#b54708', color: '#fff', fontSize: 12, fontWeight: 700,
+                          fontFamily: 'inherit', cursor: 'pointer',
+                        }}>
+                        Use a tracked link for {`{{${trackedLinkSlot + 1}}}`}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* The template simply has nowhere to put one. Said plainly, because the fix is a
+                    new template rather than anything on this screen — and being told to "set a body
+                    variable" that does not exist is worse than being told nothing. */}
+                {bodyVarCount === 0 && dynamicButtonIdx < 0 && (
+                  <div style={{
+                    marginBottom: 18, padding: '11px 13px', borderRadius: 9,
+                    background: '#fef2f2', border: '1px solid #fecaca', color: '#b42318',
+                    fontSize: 12, lineHeight: 1.6,
+                  }}>
+                    <b>This template cannot produce identified clicks.</b> It has no body variable to put a
+                    per-recipient link in, and its button URL is fixed at approval. Every click will be
+                    recorded as an anonymous visitor. To track who clicked, create a template whose body
+                    contains a placeholder for the link — e.g. <i>&ldquo;Open it here: {'{{1}}'}&rdquo;</i> — and submit
+                    that for approval.
+                  </div>
+                )}
+
                 {headerVarCount > 0 && (
                   <div style={{ marginBottom: 18 }}>
                     <div style={{ fontSize: 11.5, fontWeight: 800, color: '#1e3a8a', letterSpacing: '.4px', marginBottom: 10 }}>HEADER</div>
@@ -281,6 +363,7 @@ export default function WaStepContent({ draft, setField, onValidChange, applyTem
                           hint={contextFor(draft.body_text, i + 1)}
                           customTags={customAttrTags}
                           showExamTags
+                          showTrackedLink
                         />
                       </div>
                     ))}
@@ -331,6 +414,7 @@ export default function WaStepContent({ draft, setField, onValidChange, applyTem
                           placeholder="e.g. XX_USER_EMAIL_XX"
                           hint="Appended to the button's approved base URL for each contact."
                           customTags={customAttrTags}
+                          showTrackedLink
                         />
                         {/* A URL button whose approved link contains {{1}} expects a value at send
                             time. Left empty, WhatsApp can drop the whole message — and it does so

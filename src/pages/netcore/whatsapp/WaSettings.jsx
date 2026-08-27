@@ -137,13 +137,29 @@ export default function WaSettings() {
     finally { setWebhookBusy(false); }
   };
 
-  const subscribeWebhook = async () => {
+  /**
+   * Subscribe the app to a WABA's webhooks. With no wabaId it subscribes EVERY business
+   * account — which is what the main button does, because the reason anyone presses it is
+   * that one of them is unsubscribed and they should not have to work out which.
+   */
+  const subscribeWebhook = async (arg = '') => {
+    /*
+      Coerced rather than trusted. This is called both from a per-account row (a real WABA id)
+      and from a bare button, and a bare onClick={fn} hands in a click event — which then goes
+      out as "[object Object]" and Meta rejects the whole request. The call site is fixed, but
+      one guard here means no future call site can reintroduce it: a WABA id is digits, and
+      anything that is not is treated as "all accounts", which is this function's safe default.
+    */
+    const wabaId = typeof arg === 'string' && /^\d+$/.test(arg) ? arg : '';
     setWebhookBusy(true);
-    const t = toast.loading('Subscribing the app to this WABA…');
+    const t = toast.loading(wabaId ? 'Subscribing that business account…' : 'Subscribing every business account…');
     try {
-      const res = await api.post(WA_SET_API, new URLSearchParams({ action: 'webhook_subscribe' }), FORM);
+      const body = new URLSearchParams({ action: 'webhook_subscribe' });
+      if (wabaId) body.set('waba_id', wabaId);
+      const res = await api.post(WA_SET_API, body, FORM);
       if (res.data.success) {
-        toast.success('Subscribed — delivery events will now arrive', { id: t });
+        const n = res.data.data?.subscribed_count ?? 1;
+        toast.success(`Subscribed ${n} business account${n === 1 ? '' : 's'} — delivery events will now arrive`, { id: t });
         checkWebhookSub();
       } else toast.error(explainError(res.data.message), { id: t, duration: 12000 });
     } catch (e) { toast.error(explainError(e?.response?.data?.message), { id: t, duration: 12000 }); }
@@ -717,19 +733,22 @@ export default function WaSettings() {
           </div>
 
           {/* Setting the Callback URL is only half of it — the app must also be subscribed to
-              this specific WABA, or Meta verifies the URL and then sends nothing at all. That
-              step has no visible signal anywhere in the app dashboard, so it's surfaced here. */}
+              each WABA, or Meta verifies the URL and then sends nothing at all. That step has no
+              visible signal anywhere in the app dashboard, so it is surfaced here.
+
+              Listed PER BUSINESS ACCOUNT, because the subscription is per account and adding a
+              second one subscribes nothing. A single combined answer was actively misleading on
+              a two-account setup: it reported the default number's account and stayed green
+              while the new account received no events at all. */}
           <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #f1f5f9' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a' }}>Apps subscribed to this WABA</div>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a' }}>Webhook subscription per business account</div>
                 <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, lineHeight: 1.5 }}>
                   {webhookSub === null
                     ? 'Not checked yet.'
-                    : webhookSub.subscribed
-                      ? <>Currently: <b>{webhookSub.apps.map(a => a.name || a.id).join(', ')}</b>. Several apps
-                        can be subscribed at once — yours must be one of them, or events go only to the others.</>
-                      : 'None. Meta will accept the callback URL and then send nothing — the usual reason Delivered stays at 0.'}
+                    : 'A subscription belongs to one WhatsApp Business Account. An unsubscribed account still sends '
+                      + 'normally — Meta simply never reports what happened, so Delivered and Read stay at 0 forever.'}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
@@ -737,11 +756,48 @@ export default function WaSettings() {
                 {/* Offered even when something is already subscribed: a WABA can carry several
                     subscribed apps, and a BSP's app being on the list says nothing about whether
                     OURS is. Subscribing is additive and doesn't displace anyone. */}
-                <button className="wa-btn wa-btn-contained wa-btn-sm" onClick={subscribeWebhook} disabled={webhookBusy}>
-                  Subscribe this app
+                {/* Wrapped, NOT passed by reference: onClick={subscribeWebhook} hands React's
+                    click event in as the first argument, so wabaId became the SyntheticEvent and
+                    went to the server as the string "[object Object]" — which Meta answered with
+                    "Object with ID '[object Object]' does not exist". A default parameter does
+                    not save you from an argument that is actually supplied. */}
+                <button className="wa-btn wa-btn-contained wa-btn-sm" onClick={() => subscribeWebhook()} disabled={webhookBusy}>
+                  Subscribe all accounts
                 </button>
               </div>
             </div>
+
+            {Array.isArray(webhookSub?.accounts) && webhookSub.accounts.map(a => (
+              <div key={a.waba_id} style={{
+                display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, padding: '8px 10px',
+                borderRadius: 8, fontSize: 11.5,
+                background: a.subscribed ? '#f0fdf4' : '#fef2f2',
+                border: `1px solid ${a.subscribed ? '#bbf7d0' : '#fecaca'}`,
+              }}>
+                <span style={{ fontWeight: 700, color: '#0f172a', minWidth: 0, flex: 1,
+                               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {a.waba_name || a.waba_id}
+                  {a.numbers ? <span style={{ fontWeight: 400, color: '#64748b' }}> · {a.numbers}</span> : null}
+                </span>
+                <span style={{ color: a.subscribed ? '#15803d' : '#b42318', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                  {a.subscribed
+                    ? (a.apps || []).map(x => x.name || x.id).join(', ') || 'Subscribed'
+                    : (a.error ? 'Could not check' : 'Not subscribed')}
+                </span>
+                {!a.subscribed && (
+                  <button className="wa-btn wa-btn-text wa-btn-sm" disabled={webhookBusy}
+                          onClick={() => subscribeWebhook(a.waba_id)}
+                          style={{ color: '#b42318', padding: '1px 6px' }}>
+                    Subscribe
+                  </button>
+                )}
+              </div>
+            ))}
+            {webhookSub?.accounts?.some(a => a.error) && (
+              <div style={{ fontSize: 11, color: '#b42318', marginTop: 6, lineHeight: 1.5 }}>
+                {webhookSub.accounts.find(a => a.error).error}
+              </div>
+            )}
           </div>
         </div>
           </div>

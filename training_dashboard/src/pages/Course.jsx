@@ -12,9 +12,16 @@
 //
 //  Progress
 //    Position is sent at most once every 10 seconds (the player reports far
-//    more often than that) and a lesson auto-completes when it ends. "Mark As
-//    Complete" in the kebab does the same thing by hand, because the iframe
-//    providers cannot always tell us a video finished.
+//    more often than that). When a video runs out, a card drops into the stage
+//    offering "Mark as completed & play next" — completion is the learner's
+//    call, not a side effect of a tab left playing to itself. "Mark As
+//    Complete" in the kebab does the same thing by hand, which is also the only
+//    route for the iframe providers that cannot tell us a video finished.
+//
+//  Autoplay
+//    Any lesson opened by a CLICK starts on its own; the first lesson of a
+//    page load may not, because a browser will not play unmuted audio before
+//    the page has had a user gesture. See VideoPlayer's `autoPlay`.
 // ===========================================================================
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -22,9 +29,10 @@ import { api } from '../lib/api';
 import { markActive, trackPage } from '../lib/tracking';
 import VideoPlayer from '../components/VideoPlayer';
 import QuizStage from '../components/QuizStage';
+import DocStage from '../components/DocStage';
 import Syllabus from '../components/Syllabus';
 import { EmptyState, PageLoader } from '../components/Layout';
-import { Bookmark, Check, ChevronLeft, Kebab, SkipNext } from '../components/icons';
+import { Bookmark, Check, CheckCircle, ChevronLeft, Hourglass, Kebab, SkipNext } from '../components/icons';
 import './course.css';
 
 const TABS = [
@@ -52,6 +60,15 @@ export default function Course() {
   const [savingNote, setSavingNote] = useState(false);
   const [fav, setFav] = useState(false);
   const [toast, setToast] = useState('');
+  /* The card that drops in when a video finishes. Held here rather than in the
+     player because the two choices it offers — complete, and move on — are
+     course-level facts the player knows nothing about. */
+  const [finished, setFinished] = useState(false);
+  /* Autoplay is earned: the first lesson of a page load is whatever the link
+     asked for and the browser may refuse to start it unprompted, but every
+     lesson opened by CLICKING (the syllabus, Up next, "play next") follows a
+     real user gesture and starts on its own. */
+  const [autoPlay, setAutoPlay] = useState(false);
 
   const stageRef = useRef(null);
 
@@ -82,10 +99,15 @@ export default function Course() {
                   single most-reported annoyance with this screen
                3. the first unfinished lesson, for a course never opened */
           const wanted = Number(params.get('lesson')) || 0;
+          /* Coming-soon lessons are in d.lessons — the rail renders them —
+             but they are not somewhere to open a course ON. An explicit
+             ?lesson= still wins: someone following a link to a locked lesson
+             should get the "coming soon" panel, not be silently redirected. */
+          const open = d.lessons?.filter((l) => !l.coming_soon) || [];
           const pick = d.lessons?.find((l) => l.id === wanted)
-            || d.lessons?.find((l) => l.id === (d.resume?.lesson_id || 0))
-            || d.lessons?.find((l) => l.status !== 'completed')
-            || d.lessons?.[0];
+            || open.find((l) => l.id === (d.resume?.lesson_id || 0))
+            || open.find((l) => l.status !== 'completed')
+            || open[0];
           setActiveId(pick?.id || 0);
         }
       })
@@ -101,7 +123,29 @@ export default function Course() {
   const lessons = useMemo(() => data?.lessons || [], [data?.lessons]);
   const active = useMemo(() => lessons.find((l) => l.id === activeId) || null, [lessons, activeId]);
   const activeIndex = useMemo(() => lessons.findIndex((l) => l.id === activeId), [lessons, activeId]);
-  const next = activeIndex >= 0 ? lessons[activeIndex + 1] : null;
+  /* The next lesson they can actually watch — "Up next" pointing at a locked
+     row, and "Mark complete & play next" walking into one, both dead-end. */
+  const next = useMemo(
+    () => (activeIndex >= 0 ? lessons.slice(activeIndex + 1).find((l) => !l.coming_soon) || null : null),
+    [lessons, activeIndex]
+  );
+
+  /**
+   * Does this lesson belong on the document stage rather than in the player?
+   *
+   * The obvious cases are the types that are documents by definition. The one
+   * worth spelling out is the last clause: a lesson typed `video` whose video
+   * was never attached, but which HAS files. That combination used to render a
+   * black player captioned "no video attached" while eight PDFs sat out of
+   * sight below the fold — the exact complaint DocStage exists to answer, so
+   * the type field is not allowed to be the only thing that decides.
+   */
+  const docStage = useMemo(() => {
+    if (!active) return false;
+    if (['article', 'pdf', 'form'].includes(active.type)) return true;
+    const playable = active.video && active.video.kind && active.video.kind !== 'none';
+    return !playable && ((active.attachments?.length || 0) > 0 || !!active.content);
+  }, [active]);
 
   /* ── notes for the Bookmarks tab ─────────────────────────────────────── */
   useEffect(() => {
@@ -201,17 +245,37 @@ export default function Course() {
     }
   }, [active, flash]);
 
+  /** Open a lesson the learner asked for by clicking. */
+  const openLesson = useCallback((lessonId) => {
+    if (!lessonId) return;
+    setFinished(false);
+    setAutoPlay(true);          // a click is the gesture autoplay needs
+    setActiveId(lessonId);
+  }, []);
+
   const goNext = useCallback(() => {
     if (!next) { flash('This is the last lesson in the course'); return; }
-    setActiveId(next.id);
+    openLesson(next.id);
     stageRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [next, flash]);
+  }, [next, flash, openLesson]);
 
-  const onEnded = useCallback(() => {
-    /* Finishing the video is the clearest possible signal of completion, so it
-       is recorded without asking — the learner can still undo it. */
-    if (active?.status !== 'completed') setComplete(true);
-  }, [active, setComplete]);
+  /* The video ran out. Nothing is recorded yet — the card asks. Auto-completing
+     silently was wrong in both directions: it ticked lessons off for someone
+     who had walked away from a playing tab, and it gave a learner who really
+     had finished no obvious way onward except hunting the syllabus. */
+  const onEnded = useCallback(() => setFinished(true), []);
+
+  /** "Mark as completed & play next" — both halves, in that order. */
+  const completeAndNext = useCallback(async () => {
+    setFinished(false);
+    if (active?.status !== 'completed') await setComplete(true);
+    if (next) {
+      openLesson(next.id);
+      stageRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      flash('That was the last lesson — course complete!');
+    }
+  }, [active, next, setComplete, openLesson, flash]);
 
   const toggleFav = async () => {
     if (!course?.id) return;
@@ -287,10 +351,30 @@ export default function Course() {
               type that was not article or pdf, so a quiz lesson showed an
               empty player reading "This lesson has no video attached yet."
               Each type now gets the surface it actually needs. */}
-          {active?.type === 'quiz' ? (
+          {/* Locked before anything else: a coming-soon lesson has whatever
+              type it will eventually be, and falling through to the quiz or
+              video branch would show an empty player for content that does
+              not exist yet. */}
+          {active?.coming_soon ? (
+            <div className="stage-soon">
+              <span className="stage-soon-ico"><Hourglass size={34} /></span>
+              <h2 className="stage-soon-title">Coming soon</h2>
+              <p className="stage-soon-note">
+                {active.coming_soon_note
+                  || 'This lesson is still being put together. It will open here as soon as it is ready.'}
+              </p>
+              {next && (
+                <button type="button" className="stage-soon-go" onClick={goNext}>
+                  Continue with &ldquo;{next.title}&rdquo;
+                </button>
+              )}
+            </div>
+          ) : active?.type === 'quiz' ? (
             <QuizStage lesson={active} onPassed={() => setComplete(true)} />
-          ) : active?.type === 'article' || active?.type === 'pdf' || active?.type === 'form' ? (
-            <ArticleStage lesson={active} />
+          ) : docStage ? (
+            /* PDFs, images and every attachment render right here now, in the
+               space the video would occupy — see DocStage.jsx. */
+            <DocStage lesson={active} />
           ) : (
             <VideoPlayer
               video={active?.video}
@@ -299,9 +383,38 @@ export default function Course() {
               /* The playhead, not the furthest point reached: someone who
                  scrubbed back to re-watch a step wants that step again. */
               startAt={active?.resume_secs || active?.watched_secs || 0}
+              autoPlay={autoPlay}
               onProgress={onProgress}
               onEnded={onEnded}
             />
+          )}
+
+          {/* ── the end-of-lesson card ──────────────────────────────────
+              Drops in from the top of the stage the moment the video runs
+              out. Two ways forward and no third: carry on to the next
+              lesson with this one ticked off, or dismiss and stay exactly
+              where you are with nothing recorded. */}
+          {finished && (
+            <div className="stage-done" role="dialog" aria-label="Lesson finished">
+              <div className="stage-done-card">
+                <span className="stage-done-ico"><CheckCircle size={22} /></span>
+                <div className="stage-done-text">
+                  <div className="stage-done-title">Finished this lesson</div>
+                  <div className="stage-done-sub">
+                    {next ? <>Up next — {next.title}</> : 'This was the last lesson in the course.'}
+                  </div>
+                </div>
+                <div className="stage-done-btns">
+                  <button type="button" className="stage-done-cancel" onClick={() => setFinished(false)}>
+                    Cancel
+                  </button>
+                  <button type="button" className="stage-done-go" onClick={completeAndNext}>
+                    <Check size={16} />
+                    {next ? 'Mark as completed & play next' : 'Mark as completed'}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
 
           {/* Bookmark and the kebab only. Fullscreen used to live here too,
@@ -382,7 +495,7 @@ export default function Course() {
         progress={data?.progress}
         activeId={activeId}
         nextId={next?.id || 0}
-        onPick={(lessonId) => setActiveId(lessonId)}
+        onPick={openLesson}
       />
 
       {toast && <div className="course-toast" role="status">{toast}</div>}
@@ -520,27 +633,6 @@ function NotesTab({ notes, draft, setDraft, onAdd, onRemove, saving }) {
           ))}
         </ul>
       )}
-    </div>
-  );
-}
-
-/* ── article / PDF lessons share the stage with video ──────────────────── */
-function ArticleStage({ lesson }) {
-  if (lesson.type === 'pdf' && lesson.video?.src) {
-    return (
-      <div className="vp">
-        <iframe className="vp-frame" src={lesson.video.src} title={lesson.title} />
-      </div>
-    );
-  }
-  const fallback = lesson.type === 'form'
-    ? '<p>This lesson collects an assignment. The form is not available in the portal yet.</p>'
-    : '<p>This lesson has no content yet.</p>';
-
-  return (
-    <div className="article-stage">
-      <div className="article-title">{lesson.title}</div>
-      <div className="rich" dangerouslySetInnerHTML={{ __html: lesson.content || fallback }} />
     </div>
   );
 }

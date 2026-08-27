@@ -123,7 +123,20 @@ function subtitleFor(node) {
   switch (node.key) {
     case 'act_wa': case 'act_email': return c.template || '';
     case 'act_push':      return c.title || '';
-    case 'trg_activity':  return c.type && c.type !== 'App / web activity' ? `${c.type} · ${c.status || ''}` : (c.event || '');
+    case 'trg_activity': {
+      if (c.type === 'Contact activity') {
+        if (c.contactActivity === 'Contact is added to contact master') return 'Contact added';
+        if (c.contactActivity === 'Contact is added to List') {
+          return c.contactList === 'Specific List' ? `Added to ${c.contactListRef || '…'}` : 'Added to any list';
+        }
+        if (c.contactActivity === 'Contact is updated') {
+          return c.contactAttrScope === 'Specific attribute'
+            ? `${c.contactAttr || '…'} updated` : 'Contact updated';
+        }
+        return 'Contact activity';
+      }
+      return c.type && c.type !== 'App / web activity' ? `${c.type} · ${c.status || ''}` : (c.event || '');
+    }
     case 'trg_segment':   return c.segment || '';
     case 'trg_list':      return c.list || '';
     case 'trg_business':  return c.event || '';

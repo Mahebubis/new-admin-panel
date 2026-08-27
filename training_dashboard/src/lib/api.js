@@ -22,7 +22,12 @@ class ApiError extends Error {
 
 async function request(path, { method = 'GET', body, signal, keepalive } = {}) {
   const opts = { method, credentials: 'include', cache: 'no-store', signal, keepalive };
-  if (body !== undefined) {
+  if (body instanceof FormData) {
+    /* Multipart — the support desk's optional attachment. The Content-Type
+       header is deliberately NOT set: the browser has to write it itself
+       because only it knows the boundary string it generated. */
+    opts.body = body;
+  } else if (body !== undefined) {
     opts.headers = { 'Content-Type': 'application/json' };
     opts.body = JSON.stringify(body);
   }
@@ -122,6 +127,17 @@ export const api = {
       ? { lesson_id, seconds: report }
       : { lesson_id, seconds: report?.seconds || 0, duration: report?.duration || 0, watched: report?.watched || 0 }),
   markComplete: (lesson_id, done)    => post('progress.php?action=complete', { lesson_id, done }),
+
+  /* the support desk — tickets the learner raises, answered by an admin in the
+     LMS panel. create/reply take a FormData when a file is attached (the
+     endpoint reads multipart and JSON alike), so they are not routed through
+     `get`'s de-duplicator: two sends are two intents. */
+  supportTopics:  ()        => get('support.php?action=topics'),
+  supportList:    ()        => get('support.php?action=list'),
+  supportTicket:  (id)      => request(`support.php?action=get&id=${Number(id) || 0}`),
+  supportCreate:  (payload) => post('support.php?action=create', payload),
+  supportReply:   (payload) => post('support.php?action=reply', payload),
+  supportClose:   (ticket_id) => post('support.php?action=close', { ticket_id }),
 
   /* analytics — one batched call, see lib/tracking.js */
   trackFlush: (payload) => post('track.php?action=flush', payload, { keepalive: true }),

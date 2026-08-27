@@ -20,8 +20,9 @@ import {
   Image as ImageIcon, Film, FileSpreadsheet, Presentation, GripVertical, Pencil,
   ArrowUp, ArrowDown, Download, ExternalLink, X, AlertTriangle,
 } from 'lucide-react';
-import { LMS, duration, fileSize } from './lmsApi';
+import { LMS, duration, fileSize, rememberLesson } from './lmsApi';
 import { VideoPicker } from './LmsMedia';
+import LmsQuizPicker from './LmsQuizPicker';
 import { Loader, Empty, Pill, Drawer, Modal, Confirm, Toggle } from './LmsStyles';
 
 /* ── the form-field catalogue (mirrors the Assignment Panel builder) ── */
@@ -180,6 +181,11 @@ export default function LmsLessonEditor() {
       ]);
       setLesson(d.lesson);
       setSiblings(d.siblings || []);
+      /* Also stamped here, not only on the builder's row click: the < >
+         arrows and a pasted lesson URL both change which lesson you are on
+         without the builder ever seeing it, and going back from those has to
+         land on the lesson actually open. */
+      rememberLesson(d.lesson.course_id || courseId, d.lesson.id, d.lesson.section_id);
       setAttachments(a.attachments || []);
       setFields(f.fields || []);
       setDirty(false);
@@ -188,7 +194,7 @@ export default function LmsLessonEditor() {
     } finally {
       setLoading(false);
     }
-  }, [lessonId]);
+  }, [lessonId, courseId]);
 
   useEffect(() => { setLoading(true); load(); }, [load]);
 
@@ -199,6 +205,12 @@ export default function LmsLessonEditor() {
         title: q.title,
         status: q.status,
         question_count: Number(q.question_count || 0),
+        /* The internship the quiz was created under. Resolved server-side
+           so the badge and the filter cannot drift apart; the two fallbacks
+           are for a panel running against a backend that has not picked up
+           the new column yet, and reproduce the same rule. Empty means the
+           quiz was created standalone, with no course behind it. */
+        domain: q.domain || q.course_internship || q.course_title || '',
       }))))
       .catch(() => { /* the picker just stays empty */ });
   }, []);
@@ -225,6 +237,8 @@ export default function LmsLessonEditor() {
         drip_days: lesson.drip_days || 0,
         is_free_preview: lesson.is_free_preview ? 1 : 0,
         is_hidden: lesson.is_hidden ? 1 : 0,
+        is_coming_soon: lesson.is_coming_soon ? 1 : 0,
+        coming_soon_note: lesson.coming_soon_note || '',
         status: lesson.status,
         ...extra,
       });
@@ -391,6 +405,7 @@ export default function LmsLessonEditor() {
           <div style={{ flex: 1, minWidth: 260 }}>
             <div className="lms-chip-row" style={{ marginBottom: 10 }}>
               <Pill tone={lesson.is_free_preview ? 'green' : 'grey'}>{lesson.is_free_preview ? 'Free preview' : 'Paid'}</Pill>
+              {!!Number(lesson.is_coming_soon) && <Pill tone="blue">Coming soon</Pill>}
               <Pill tone="blue">{LESSON_TYPE_LABEL[lesson.lesson_type] || lesson.lesson_type}</Pill>
               <Pill tone={lesson.status === 'published' ? 'green' : 'amber'}>
                 {lesson.status === 'published' ? 'Published' : 'Draft'}
@@ -509,27 +524,16 @@ export default function LmsLessonEditor() {
                     </div>
                   )}
 
-                  <div className="lms-field">
-                    <label className="lms-label">Quiz<span className="req">*</span></label>
-                    <select
-                      className="lms-select"
-                      value={lesson.quiz_id || 0}
-                      onChange={e => patch({ quiz_id: Number(e.target.value) })}
-                    >
-                      <option value={0}>Select a quiz…</option>
-                      {quizzes.map(q => (
-                        <option key={q.id} value={q.id}>
-                          {q.title}
-                          {q.status !== 'published' ? ' — draft' : ''}
-                          {' · '}{q.question_count} question{q.question_count === 1 ? '' : 's'}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="lms-help">
-                      Only <b>published</b> quizzes with questions reach a learner. Build them in
-                      the <Link to="/lms/quizzes" style={{ color: 'var(--lms-green-dark)', fontWeight: 500 }}>Quizzes</Link> tab.
-                    </p>
-                  </div>
+                  <LmsQuizPicker
+                    quizzes={quizzes}
+                    value={lesson.quiz_id || 0}
+                    onChange={(id) => patch({ quiz_id: id })}
+                    preferredDomain={lesson.internship_name || lesson.course_title || ''}
+                  />
+                  <p className="lms-help" style={{ marginTop: -8 }}>
+                    Only <b>published</b> quizzes with questions reach a learner. Build them in
+                    the <Link to="/lms/quizzes" style={{ color: 'var(--lms-green-dark)', fontWeight: 500 }}>Quizzes</Link> tab.
+                  </p>
 
                   {(() => {
                     const q = quizzes.find(x => x.id === Number(lesson.quiz_id));
@@ -799,6 +803,36 @@ export default function LmsLessonEditor() {
               </div>
               <Toggle on={!!lesson.is_hidden} onChange={v => patch({ is_hidden: v })} />
             </div>
+
+            {/* Sits next to "Hide from outline" and is easy to confuse with
+                it: hiding removes the lesson from the learner's outline
+                outright, coming soon keeps it there and locks it. */}
+            <div className="lms-toggle-row">
+              <div>
+                <div style={{ fontSize: 13.5, fontWeight: 500 }}>Coming soon</div>
+                <div style={{ fontSize: 12, color: 'var(--lms-text-2)' }}>
+                  Stays in the syllabus with a badge, but will not open.
+                </div>
+              </div>
+              <Toggle
+                on={!!Number(lesson.is_coming_soon)}
+                onChange={v => patch({ is_coming_soon: v ? 1 : 0 })}
+              />
+            </div>
+
+            {!!Number(lesson.is_coming_soon) && (
+              <div className="lms-field" style={{ marginTop: 14 }}>
+                <label className="lms-label">Coming-soon note</label>
+                <input
+                  className="lms-input"
+                  maxLength={120}
+                  placeholder="e.g. Recording drops 15 September"
+                  value={lesson.coming_soon_note || ''}
+                  onChange={e => patch({ coming_soon_note: e.target.value })}
+                />
+                <p className="lms-help">Shown under the badge. Optional.</p>
+              </div>
+            )}
 
             <div className="lms-row-2" style={{ marginTop: 20 }}>
               <div className="lms-field">

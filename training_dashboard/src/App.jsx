@@ -24,8 +24,9 @@ import Home from './pages/Home';
 import Enrollments from './pages/Enrollments';
 import Course from './pages/Course';
 import CourseAnalytics from './pages/CourseAnalytics';
+import Support from './pages/Support';
 import {
-  About, Account, Explore, Favourites, ForgotPassword, Helpdesk,
+  About, Account, Explore, Favourites, ForgotPassword,
   Newsfeed, NotFound, Notifications,
 } from './pages/Misc';
 
@@ -124,7 +125,10 @@ export default function App() {
         <Route path="/newsfeed"                     element={<Newsfeed />} />
         <Route path="/favourites"                   element={<Favourites />} />
         <Route path="/account"                      element={<Account />} />
-        <Route path="/helpdesk"                     element={<Helpdesk />} />
+        <Route path="/support"                      element={<Support />} />
+        {/* The old read-only "write to alerts@…" page. Anything bookmarked or
+            linked lands on the real desk instead of a 404. */}
+        <Route path="/helpdesk"                     element={<Navigate to="/support" replace />} />
         <Route path="/about"                        element={<About />} />
         <Route path="*"                             element={<NotFound />} />
       </Route>

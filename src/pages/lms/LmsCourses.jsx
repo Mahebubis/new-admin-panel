@@ -11,7 +11,7 @@ import toast from 'react-hot-toast';
 import {
   Plus, Search, MoreVertical, BookOpen, Clock, Lock, Unlock, Trash2,
   Copy, Settings2, Eye, EyeOff, RotateCcw, ImagePlus, Layers, Users, Grid3x3,
-  Info, Check, X,
+  Info, Check, X, Power, PowerOff,
 } from 'lucide-react';
 import { LMS, money, duration } from './lmsApi';
 import { ThumbnailPicker } from './LmsMedia';
@@ -98,7 +98,7 @@ function CourseFlags({ course, settings }) {
 }
 
 /* ── per-card ⋯ menu ─────────────────────────────────────────── */
-function CardMenu({ course, onPublish, onDuplicate, onTrash, onRestore, onDelete, onSettings }) {
+function CardMenu({ course, onPublish, onDuplicate, onTrash, onRestore, onDelete, onSettings, onSwitch }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useOutsideClose(ref, () => setOpen(false), open);
@@ -122,6 +122,14 @@ function CardMenu({ course, onPublish, onDuplicate, onTrash, onRestore, onDelete
               <button onClick={() => onSettings(course)}><Settings2 size={15} /> Course settings</button>
               <button onClick={() => onPublish(course)}>
                 {course.status === 'published' ? <><EyeOff size={15} /> Unpublish</> : <><Eye size={15} /> Publish</>}
+              </button>
+              {/* Separate from Publish and easy to conflate with it: publish
+                  decides whether the learner portal lists the course at all,
+                  this decides whether user_dashboard routes a buyer into it. */}
+              <button onClick={() => onSwitch(course)}>
+                {Number(course.is_enabled ?? 1)
+                  ? <><PowerOff size={15} /> Switch off</>
+                  : <><Power size={15} /> Switch on for user_dashboard</>}
               </button>
               <button onClick={() => onDuplicate(course)}><Copy size={15} /> Duplicate</button>
               <div className="lms-menu-sep" />
@@ -295,6 +303,23 @@ export default function LmsCourses() {
     } catch (e) { toast.error(e.message); }
   };
 
+  /* The user_dashboard routing switch. Patched into the grid rather than
+     reloaded — a full list refetch to move one pill loses the scroll position
+     on a long grid. */
+  const switchCourse = async (course) => {
+    const was  = Number(course.is_enabled ?? 1);
+    const next = was ? 0 : 1;
+    const patch = (v) => setCourses(list => list.map(c => (c.id === course.id ? { ...c, is_enabled: v } : c)));
+    patch(next);
+    try {
+      await LMS.toggleCourseEnabled(course.id, next);
+      toast.success(next ? 'Course switched on' : 'Course switched off for user_dashboard');
+    } catch (e) {
+      toast.error(e.message);
+      patch(was);
+    }
+  };
+
   /**
    * Push one image to S3 for `course` and report the resulting URL back.
    * <ThumbnailPicker> has already confirmed the upload with the admin, so
@@ -425,6 +450,9 @@ export default function LmsCourses() {
                     <Pill tone="grey">
                       {c.encryption === 'encrypted' ? <><Lock size={11} /> Encrypted</> : <><Unlock size={11} /> Unencrypted</>}
                     </Pill>
+                    {c.status !== 'trashed' && !Number(c.is_enabled ?? 1) && (
+                      <Pill tone="red"><PowerOff size={11} /> Switched off</Pill>
+                    )}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center' }}>
                     <CourseFlags course={c} settings={settings} />
@@ -451,6 +479,7 @@ export default function LmsCourses() {
                         } catch (e) { toast.error(e.message); }
                       }}
                       onPublish={onPublish}
+                      onSwitch={switchCourse}
                       onDuplicate={act(LMS.duplicateCourse, 'Course duplicated')}
                       onRestore={act(LMS.restoreCourse, 'Course restored')}
                       onTrash={(co) => setConfirm({
