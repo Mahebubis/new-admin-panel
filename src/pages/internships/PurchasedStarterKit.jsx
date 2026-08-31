@@ -103,14 +103,23 @@ export default function PurchasedStarterKit() {
   });
   const [statsLoading, setStatsLoading] = useState(true);
 
-  /* custom range needs both dates before it fires */
-  const rangeReady = range !== 'custom' || (start && end);
+  /* search — `q` is the input draft, `committedQ` is what was actually searched */
+  const [q,          setQ]          = useState('');
+  const [committedQ, setCommittedQ] = useState('');
+  const searching = committedQ !== '';
 
+  /* custom range needs both dates before it fires — unless a search is running,
+     which spans every date anyway */
+  const rangeReady = searching || range !== 'custom' || (start && end);
+
+  /* A search covers ALL dates: looking someone up by email/mobile while the
+     page sits on "Today" would otherwise return nothing for an older order. */
   const rangeParams = useCallback(() => {
+    if (searching) return { range: 'all', provider, q: committedQ };
     const p = { range, provider };
     if (range === 'custom') { p.start = start; p.end = end; }
     return p;
-  }, [range, start, end, provider]);
+  }, [searching, committedQ, range, start, end, provider]);
 
   /* ── stats ── */
   const fetchStats = useCallback(async () => {
@@ -147,6 +156,9 @@ export default function PurchasedStarterKit() {
   const changeRange    = (r) => { setRange(r); setPage(1); };
   const changePerPage  = (n) => { setPerPage(n); setPage(1); };
   const changeProvider = (p) => { setProvider(p); setPage(1); };
+
+  const runSearch   = () => { setCommittedQ(q.trim()); setPage(1); };
+  const clearSearch = () => { setQ(''); setCommittedQ(''); setPage(1); };
 
   const copy = (text) => { if (!text) return; navigator.clipboard.writeText(text); toast.success('Copied!'); };
 
@@ -220,7 +232,7 @@ export default function PurchasedStarterKit() {
       window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(orders),  'Orders');
       window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(courses), 'Course-wise');
 
-      const rangeTag = range === 'custom' ? `${start}_to_${end}` : range;
+      const rangeTag = searching ? 'search' : range === 'custom' ? `${start}_to_${end}` : range;
       window.XLSX.writeFile(wb, `starter_kit_${status}_${provider}_${rangeTag}.xlsx`);
       toast.success(`Exported ${orders.length} order(s) / ${courses.length} course(s)`);
     } catch { toast.error('Excel export failed'); }
@@ -257,8 +269,10 @@ export default function PurchasedStarterKit() {
             <span style={{ fontSize:11, fontWeight:700, color:'#64748b', textTransform:'uppercase',
               letterSpacing:'.4px', marginRight:4 }}>Date Range</span>
             {RANGES.map(r => (
-              <button key={r.key} onClick={() => changeRange(r.key)}
-                style={{ padding:'6px 14px', borderRadius:8, fontSize:12, fontWeight:700, cursor:'pointer',
+              <button key={r.key} onClick={() => changeRange(r.key)} disabled={searching}
+                title={searching ? 'Clear the search to filter by date again' : undefined}
+                style={{ padding:'6px 14px', borderRadius:8, fontSize:12, fontWeight:700,
+                  cursor: searching ? 'not-allowed' : 'pointer', opacity: searching ? .45 : 1,
                   border: range===r.key ? 'none' : '1.5px solid #e2e8f0', fontFamily:'inherit',
                   background: range===r.key ? 'linear-gradient(135deg,#4f46e5,#7c3aed)' : '#fff',
                   color: range===r.key ? '#fff' : '#475569' }}>
@@ -281,6 +295,44 @@ export default function PurchasedStarterKit() {
                   <span style={{ fontSize:11, color:'#dc2626', fontWeight:600 }}>Pick both dates</span>
                 )}
               </div>
+            )}
+          </div>
+
+          {/* ── search by email / mobile — spans every date, so an old order is
+                found even while the page sits on "Today" ── */}
+          <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center', marginTop:12,
+            paddingTop:12, borderTop:'1px solid #f1f5f9' }}>
+            <span style={{ fontSize:11, fontWeight:700, color:'#64748b', textTransform:'uppercase',
+              letterSpacing:'.4px', marginRight:4 }}>Search</span>
+
+            <div style={{ display:'flex', border:'1.5px solid #e2e8f0', borderRadius:8,
+              overflow:'hidden', background:'#fff', width:340, maxWidth:'100%' }}>
+              <input value={q}
+                onChange={e => setQ(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') runSearch(); }}
+                placeholder="Email or mobile number…"
+                style={{ border:'none', padding:'7px 12px', fontSize:12.5, flex:1,
+                  outline:'none', color:'#1e293b', fontFamily:'inherit' }}/>
+              {q && (
+                <button onClick={clearSearch} title="Clear"
+                  style={{ background:'#f8fafc', color:'#94a3b8', border:'none', padding:'0 10px',
+                    cursor:'pointer', fontSize:15, fontFamily:'inherit' }}>×</button>
+              )}
+              <button onClick={runSearch}
+                style={{ background:'linear-gradient(135deg,#4f46e5,#7c3aed)', color:'#fff', border:'none',
+                  padding:'0 16px', cursor:'pointer', fontSize:12, fontWeight:700, fontFamily:'inherit' }}>
+                Search
+              </button>
+            </div>
+
+            {searching && (
+              <span style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'5px 11px',
+                borderRadius:99, background:'#ede9fe', color:'#6d28d9', fontSize:11.5, fontWeight:700 }}>
+                Searching all dates for “{committedQ}”
+                <button onClick={clearSearch}
+                  style={{ background:'none', border:'none', cursor:'pointer', color:'#6d28d9',
+                    fontSize:14, padding:0, lineHeight:1, fontFamily:'inherit' }}>×</button>
+              </span>
             )}
           </div>
 
@@ -387,7 +439,12 @@ export default function PurchasedStarterKit() {
                   </td></tr>
                 ) : rows.length === 0 ? (
                   <tr><td colSpan={COLUMNS.length} style={{ textAlign:'center', color:'#94a3b8', padding:36, fontSize:13 }}>
-                    No records found for this filter
+                    {searching ? (
+                      <>
+                        No <strong>{STATUS_TABS.find(t => t.key === status)?.label}</strong> order for “{committedQ}”.
+                        <div style={{ fontSize:12, marginTop:4 }}>Check the other tabs above — the counts show where it landed.</div>
+                      </>
+                    ) : 'No records found for this filter'}
                   </td></tr>
                 ) : rows.map((r, i) => (
                   <tr key={r.id} className="sk-tr">

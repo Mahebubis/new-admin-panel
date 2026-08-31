@@ -11,18 +11,22 @@ import toast from 'react-hot-toast';
 import {
   Plus, Search, MoreVertical, BookOpen, Clock, Lock, Unlock, Trash2,
   Copy, Settings2, Eye, EyeOff, RotateCcw, ImagePlus, Layers, Users, Grid3x3,
-  Info, Check, X, Power, PowerOff,
+  Info, Check, X, Power, PowerOff, Hourglass, AlertTriangle,
 } from 'lucide-react';
 import { LMS, money, duration } from './lmsApi';
 import { ThumbnailPicker } from './LmsMedia';
-import { Loader, Empty, Pill, Drawer, Confirm } from './LmsStyles';
+import { Loader, Empty, Pill, Drawer, Confirm, Toggle } from './LmsStyles';
 import LmsCombobox from './LmsCombobox';
 import { useOutsideClose } from './lmsTheme';
 
+/* 'coming_soon' is not one of lms_courses.status's values — it cuts across
+   them. It gets its own tab because a coming-soon course is nearly always
+   PUBLISHED, so looking for one under Draft is the wrong place to look. */
 const STATUS_FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'published', label: 'Published' },
   { key: 'draft', label: 'Draft' },
+  { key: 'coming_soon', label: 'Coming soon' },
   { key: 'trashed', label: 'Trash' },
 ];
 
@@ -98,7 +102,7 @@ function CourseFlags({ course, settings }) {
 }
 
 /* ── per-card ⋯ menu ─────────────────────────────────────────── */
-function CardMenu({ course, onPublish, onDuplicate, onTrash, onRestore, onDelete, onSettings, onSwitch }) {
+function CardMenu({ course, onPublish, onDuplicate, onTrash, onRestore, onDelete, onSettings, onSwitch, onSoon }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useOutsideClose(ref, () => setOpen(false), open);
@@ -130,6 +134,14 @@ function CardMenu({ course, onPublish, onDuplicate, onTrash, onRestore, onDelete
                 {Number(course.is_enabled ?? 1)
                   ? <><PowerOff size={15} /> Switch off</>
                   : <><Power size={15} /> Switch on for user_dashboard</>}
+              </button>
+              {/* The whole course at once. Modules and lessons have the same
+                  switch of their own; this one cascades over all of them. */}
+              <button onClick={() => onSoon(course)}>
+                <Hourglass size={15} />
+                {Number(course.is_coming_soon)
+                  ? 'Clear coming soon'
+                  : 'Mark whole course coming soon'}
               </button>
               <button onClick={() => onDuplicate(course)}><Copy size={15} /> Duplicate</button>
               <div className="lms-menu-sep" />
@@ -202,7 +214,14 @@ export default function LmsCourses() {
 
     if (settingsId) {
       LMS.getCourse(settingsId)
-        .then(d => setEditing({ ...d.course, is_free: !!Number(d.course.is_free) }))
+        .then(d => setEditing({
+          ...d.course,
+          is_free: !!Number(d.course.is_free),
+          /* What it was when the drawer opened, so "did the admin change
+             this?" can be answered — that is what decides whether the
+             already-enrolled warning is worth showing. */
+          _validity_was: Number(d.course.validity_days || 0),
+        }))
         .catch(e => toast.error(e.message));
     }
     const next = new URLSearchParams(params);
@@ -320,6 +339,23 @@ export default function LmsCourses() {
     }
   };
 
+  /* The whole course marked coming soon. Patched into the grid for the same
+     reason switchCourse is — a full refetch to move one pill loses the scroll
+     position on a long grid. */
+  const soonCourse = async (course) => {
+    const was  = Number(course.is_coming_soon ?? 0);
+    const next = was ? 0 : 1;
+    const patch = (v) => setCourses(list => list.map(c => (c.id === course.id ? { ...c, is_coming_soon: v } : c)));
+    patch(next);
+    try {
+      await LMS.toggleCourseComingSoon(course.id, next);
+      toast.success(next ? 'Whole course marked coming soon' : 'Coming-soon cleared');
+    } catch (e) {
+      toast.error(e.message);
+      patch(was);
+    }
+  };
+
   /**
    * Push one image to S3 for `course` and report the resulting URL back.
    * <ThumbnailPicker> has already confirmed the upload with the admin, so
@@ -347,6 +383,7 @@ export default function LmsCourses() {
     { label: 'Total Courses', value: counts.total ?? 0,     icon: <Grid3x3 size={18} /> },
     { label: 'Published',     value: counts.published ?? 0, icon: <Eye size={18} /> },
     { label: 'Draft',         value: counts.draft ?? 0,     icon: <Layers size={18} /> },
+    { label: 'Coming soon',   value: counts.coming_soon ?? 0, icon: <Hourglass size={18} /> },
     { label: 'Trashed',       value: counts.trashed ?? 0,   icon: <Trash2 size={18} /> },
   ]), [counts]);
 
@@ -453,6 +490,9 @@ export default function LmsCourses() {
                     {c.status !== 'trashed' && !Number(c.is_enabled ?? 1) && (
                       <Pill tone="red"><PowerOff size={11} /> Switched off</Pill>
                     )}
+                    {c.status !== 'trashed' && !!Number(c.is_coming_soon) && (
+                      <Pill tone="blue"><Hourglass size={11} /> Coming soon</Pill>
+                    )}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center' }}>
                     <CourseFlags course={c} settings={settings} />
@@ -463,7 +503,14 @@ export default function LmsCourses() {
                         onClick={async () => {
                           try {
                             const d = await LMS.getCourse(c.id);
-                            setEditing({ ...d.course, is_free: !!Number(d.course.is_free) });
+                            setEditing({
+          ...d.course,
+          is_free: !!Number(d.course.is_free),
+          /* What it was when the drawer opened, so "did the admin change
+             this?" can be answered — that is what decides whether the
+             already-enrolled warning is worth showing. */
+          _validity_was: Number(d.course.validity_days || 0),
+        });
                           } catch (e) { toast.error(e.message); }
                         }}
                       >
@@ -475,11 +522,19 @@ export default function LmsCourses() {
                       onSettings={async (co) => {
                         try {
                           const d = await LMS.getCourse(co.id);
-                          setEditing({ ...d.course, is_free: !!Number(d.course.is_free) });
+                          setEditing({
+          ...d.course,
+          is_free: !!Number(d.course.is_free),
+          /* What it was when the drawer opened, so "did the admin change
+             this?" can be answered — that is what decides whether the
+             already-enrolled warning is worth showing. */
+          _validity_was: Number(d.course.validity_days || 0),
+        });
                         } catch (e) { toast.error(e.message); }
                       }}
                       onPublish={onPublish}
                       onSwitch={switchCourse}
+                      onSoon={soonCourse}
                       onDuplicate={act(LMS.duplicateCourse, 'Course duplicated')}
                       onRestore={act(LMS.restoreCourse, 'Course restored')}
                       onTrash={(co) => setConfirm({
@@ -498,13 +553,44 @@ export default function LmsCourses() {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: 14, fontSize: 11.5, color: 'var(--lms-text-3)' }}>
-                  <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-                    <Layers size={12} /> {c.section_count} sections
-                  </span>
-                  <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-                    <Users size={12} /> {c.enroll_count} enrolled
-                  </span>
+                <div className="lms-course-foot-row">
+                  <div style={{ display: 'flex', gap: 14, fontSize: 11.5, color: 'var(--lms-text-3)' }}>
+                    <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                      <Layers size={12} /> {c.section_count} sections
+                    </span>
+                    <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                      <Users size={12} /> {c.enroll_count} enrolled
+                    </span>
+                  </div>
+
+                  {/* The routing switch, in reach instead of two clicks into
+                      the ⋮ menu. It reports a state, so a slider is the right
+                      control — the menu item said "Switch off" and you had to
+                      open it to find out which way round it was.
+
+                      Not shown on a trashed card: nothing routes into the
+                      trash, so the switch would be a control with no effect. */}
+                  {c.status !== 'trashed' && (
+                    <span
+                      className="lms-card-switch"
+                      title={Number(c.is_enabled ?? 1)
+                        ? 'Switched on — user_dashboard routes buyers into this course'
+                        : 'Switched off — shows as Coming soon to learners'}
+                      /* The footer is not inside the card's <Link> today, but
+                         only the thumbnail and title are — and that is the
+                         kind of thing a later layout change quietly reverses.
+                         Cheap insurance against a toggle that also navigates. */
+                      onClick={e => { e.preventDefault(); e.stopPropagation(); }}
+                    >
+                      <span className={`lms-card-switch-label${Number(c.is_enabled ?? 1) ? ' on' : ''}`}>
+                        {Number(c.is_enabled ?? 1) ? 'On' : 'Off'}
+                      </span>
+                      <Toggle
+                        on={!!Number(c.is_enabled ?? 1)}
+                        onChange={() => switchCourse(c)}
+                      />
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -761,8 +847,17 @@ export default function LmsCourses() {
                 onChange={e => setEditing(s => ({
                   ...s,
                   validity_days: e.target.checked ? 0 : 365,
-                  /* Turning it off should not silently re-date everyone. */
-                  apply_validity: e.target.checked ? s.apply_validity : false,
+                  /* Ticking this carries across to existing learners by
+                     DEFAULT, because clearing an expiry only ever grants
+                     access — it cannot lock anyone out, and "never expires"
+                     that leaves half the learners counting down is not what
+                     the words say. It is still a checkbox, so it can be
+                     turned off for a change meant only for new enrolments.
+
+                     Un-ticking does NOT default to on: going from lifetime to
+                     a fixed window can shorten access somebody already has,
+                     and that has to be asked for. */
+                  apply_validity: e.target.checked ? true : false,
                 }))}
               />
               This course never expires (lifetime access)
@@ -771,16 +866,51 @@ export default function LmsCourses() {
             {/* Validity only stamps NEW enrolments, so without this a course
                 switched to lifetime still has every existing learner counting
                 down to the date they were originally given. */}
-            <label className="lms-check" style={{ marginBottom: 18, paddingLeft: 24 }}>
+            <label className="lms-check" style={{ marginBottom: 8, paddingLeft: 24 }}>
               <input type="checkbox" checked={!!editing.apply_validity}
                 onChange={e => setEditing(s => ({ ...s, apply_validity: e.target.checked }))} />
               Apply to learners already enrolled
               <span className="lms-help" style={{ display: 'block', marginTop: 2 }}>
                 {Number(editing.validity_days) === 0
-                  ? 'Clears the expiry date on every active enrolment in this course.'
-                  : `Re-dates every active enrolment to ${editing.validity_days || 0} days from the day that learner enrolled.`}
+                  ? `Clears the expiry date on ${editing.enrolled_count || 0} active enrolment${Number(editing.enrolled_count) === 1 ? '' : 's'} in this course.`
+                  : `Re-dates ${editing.enrolled_count || 0} active enrolment${Number(editing.enrolled_count) === 1 ? '' : 's'} to ${editing.validity_days || 0} days from the day that learner enrolled.`}
               </span>
             </label>
+
+            {/* Two different moments, one warning.
+
+                stale_expiry is the state the course is ALREADY in: it says
+                lifetime while learners still hold a date, which is what
+                happens when validity was changed on an earlier visit without
+                this box ticked. That contradiction shows up nowhere else in
+                the panel — only in the learner's own portal — so it is
+                surfaced here every time the drawer opens, not just when
+                something changed in this session.
+
+                The second test is the change being made right now, before it
+                has been saved and can become stale in its turn. */}
+            {!editing.apply_validity && (() => {
+              const stale = Number(editing.stale_expiry) || 0;
+              const changed = Number(editing.validity_days) !== Number(editing._validity_was ?? editing.validity_days);
+              const enrolled = Number(editing.enrolled_count) || 0;
+              if (!stale && !(changed && enrolled > 0)) return null;
+
+              const n = stale || enrolled;
+              return (
+                <div className="lms-warn" style={{ marginBottom: 18, marginLeft: 24 }}>
+                  <AlertTriangle size={16} className="lms-warn-ico" />
+                  <div className="lms-warn-body">
+                    <b>
+                      {n} learner{n === 1 ? '' : 's'}{' '}
+                      {stale ? 'still have an expiry date' : 'keep their current expiry date'}
+                    </b>
+                    {Number(editing.validity_days) === 0
+                      ? 'This course is set to never expire, but they will keep seeing that date in the training portal until you tick the box above and save.'
+                      : 'The new window only applies to people who enrol from now on.'}
+                  </div>
+                </div>
+              );
+            })()}
 
             <label className="lms-check" style={{ marginBottom: 18 }}>
               <input type="checkbox" checked={!!editing.is_free}

@@ -32,23 +32,29 @@ function sinceLabel(stamp) {
   return `on ${fmtDate(stamp)}`;
 }
 
+/* Coming soon outranks Purchased. A learner looking at this row wants to know
+   whether there is anything to watch before they want to know how they paid
+   for it — and "Purchased" on a course with nothing in it reads as a fault. */
 const chipFor = (course) => {
   if (course.expired) return { cls: 'chip-expired', text: 'Expired' };
+  if (course.coming_soon) return { cls: 'chip-soon', text: 'Coming soon' };
   if (course.access_type === 'free') return { cls: 'chip-free', text: 'Free' };
   return { cls: 'chip-purchased', text: 'Purchased' };
 };
 
 export default function CourseRow({ course, onOpen }) {
   const chip = chipFor(course);
+  const soon = !!course.coming_soon;
   const expiryLabel = course.expired ? 'Expired On' : 'Expires On';
   /* Something was played here at some point, so this is not a course they are
      about to start — it is one they are in the middle of, and saying so is
      what turns a list of purchases back into a place they were. */
-  const since = course.expired ? '' : sinceLabel(course.last_activity);
+  /* Nothing to be in the middle of. */
+  const since = course.expired || soon ? '' : sinceLabel(course.last_activity);
 
   return (
     <article
-      className={`crow${course.expired ? ' is-expired' : ''}${since ? ' is-seen' : ''}`}
+      className={`crow${course.expired ? ' is-expired' : ''}${soon ? ' is-soon' : ''}${since ? ' is-seen' : ''}`}
       onClick={onOpen}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen?.(); } }}
       role="button"
@@ -77,14 +83,25 @@ export default function CourseRow({ course, onOpen }) {
         </div>
 
         <div className="crow-meta">
-          <span>{course.lesson_count} Lesson{course.lesson_count === 1 ? '' : 's'}</span>
-          {course.quiz_count > 0 && <span>{course.quiz_count} Test{course.quiz_count === 1 ? '' : 's'}</span>}
-          {/* No expiry date means the course was set to lifetime access in the
-              admin panel (validity 0). Saying so is worth more than saying
-              nothing — it is the answer to "how long do I have this for?". */}
-          {course.expiry_date
-            ? <span>{expiryLabel} : {fmtDate(course.expiry_date)}</span>
-            : <span>Lifetime access</span>}
+          {/* A coming-soon course has no counts worth printing — every one of
+              them would be 0 — so the line carries the admin's note instead,
+              which is the only place a real date can come from. */}
+          {soon ? (
+            <span className="crow-soon">
+              {course.coming_soon_note || 'We are still recording this course'}
+            </span>
+          ) : (
+            <>
+              <span>{course.lesson_count} Lesson{course.lesson_count === 1 ? '' : 's'}</span>
+              {course.quiz_count > 0 && <span>{course.quiz_count} Test{course.quiz_count === 1 ? '' : 's'}</span>}
+              {/* No expiry date means the course was set to lifetime access in
+                  the admin panel (validity 0). Saying so is worth more than
+                  saying nothing — it answers "how long do I have this for?". */}
+              {course.expiry_date
+                ? <span>{expiryLabel} : {fmtDate(course.expiry_date)}</span>
+                : <span>Lifetime access</span>}
+            </>
+          )}
         </div>
 
         {course.description && (

@@ -16,6 +16,16 @@
 .crow:active { transform: translateY(0); }
 .crow.is-expired { opacity: 0.92; }
 
+/* A course that is announced but not recorded yet. Dimmed a little so it does
+   not compete with the ones they can actually watch, but not so far that the
+   note under it stops being readable — that note is the whole reason the row
+   is still on the page. */
+.crow.is-soon { opacity: 0.9; }
+.crow.is-soon:hover { opacity: 1; }
+.crow.is-soon .crow-thumb-img,
+.crow.is-soon .crow-thumb-blur { filter: grayscale(0.55); }
+.crow-soon { font-style: italic; color: var(--text-2); }
+
 .crow-thumb {
   position: relative;
   width: 196px; height: 110px; flex-shrink: 0;   /* 16:9 — the shape thumbnails are authored in */

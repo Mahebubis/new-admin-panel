@@ -235,7 +235,7 @@ export default function LmsQuizBuilder() {
     const rows = [
       ['SerialNo', 'SectionName', 'PositiveMarks', 'NegativeMarks', 'Level',
        'Question', 'QuestionType', 'CorrectOption', 'Option1', 'Option2', 'Option3', 'Option4'],
-      ['1', 'Section 1', '1', '0.25', 'EASY',
+      ['1', 'Section 1', '1', '0', 'EASY',
        'What does CPU stand for?', 'MULTI_CHOICE', '2',
        'Central Power Unit', 'Central Processing Unit', 'Computer Personal Unit', 'Control Panel Unit'],
       ['2', 'Section 1', '2', '0', 'MEDIUM',
@@ -793,7 +793,7 @@ export default function LmsQuizBuilder() {
                 ['CorrectOption', 'required · 2, or B, or 1,3 for multi'],
                 ['Option1…OptionN', 'required · at least two'],
                 ['PositiveMarks', 'defaults to 1'],
-                ['NegativeMarks', 'defaults to 0'],
+                ['NegativeMarks', 'ignored · always 0'],
                 ['Level', 'EASY / MEDIUM / HARD'],
                 ['QuestionType', 'optional'],
                 ['Explanation', 'optional'],

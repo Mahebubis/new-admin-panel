@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 import {
   Plus, Search, HelpCircle, MoreVertical, Copy, Trash2, Eye, EyeOff,
   Clock, Target, Users, Percent, Pencil,
+  Upload, FileSpreadsheet, Check, AlertCircle, Loader2, X,
 } from 'lucide-react';
 import { LMS } from './lmsApi';
 import { Loader, Empty, Pill, Drawer, Confirm, Toggle } from './LmsStyles';
@@ -22,6 +23,23 @@ const emptyQuiz = {
   show_answers: 'after_submit', negative_marking: false,
   show_result: true, is_graded: true, status: 'draft',
 };
+
+/* ── batch create: one quiz per spreadsheet ─────────────────────────────────
+   The first quiz is titled exactly what was typed; every one after it gets a
+   " (n)" suffix, so picking four files reads like the admin created the quiz
+   four times by hand:
+
+     Quiz Section 1 · Quiz Section 1 (2) · Quiz Section 1 (3) · Quiz Section 1 (4)
+
+   The number comes from the FILE's position, not from how many succeeded. A
+   sheet that fails to parse still burns its number, which keeps "(5)" pointing
+   at the fifth file no matter what happened to the ones before it. */
+const batchTitle = (base, i) => (i === 0 ? base : `${base} (${i + 1})`);
+
+/* Question banks are named with bare numbers ("Section Quiz 2", "...10"), and
+   a plain string sort puts 10 immediately after 1. */
+const byName = (a, b) =>
+  a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
 
 function QuizMenu({ quiz, onToggle, onDuplicate, onDelete, onEdit }) {
   const [open, setOpen] = useState(false);
@@ -60,6 +78,13 @@ export default function LmsQuizzes() {
   const [saving, setSaving] = useState(false);
   const [confirm, setConfirm] = useState(null);
 
+  /* Batch create. `files` is what was picked, `batch` is the per-file outcome
+     and stays null until a run starts — both are indexed by position, so the
+     preview rows and the progress rows are literally the same rows. */
+  const [files, setFiles] = useState([]);
+  const [batch, setBatch] = useState(null);
+  const fileInput = useRef(null);
+
   useEffect(() => {
     const t = setTimeout(() => setSearch(q.trim()), 300);
     return () => clearTimeout(t);
@@ -83,28 +108,106 @@ export default function LmsQuizzes() {
     LMS.listCourses({ status: 'all' }).then(d => setCourses(d.courses || [])).catch(() => {});
   }, []);
 
+  /* The drawer's settings as the endpoint wants them. Shared by the single
+     save and by every quiz in a batch, so a batch cannot drift from what the
+     form says it will do. */
+  const quizPayload = () => ({
+    ...draft,
+    course_id: draft.course_id ? Number(draft.course_id) : 0,
+    shuffle_questions: draft.shuffle_questions ? 1 : 0,
+    shuffle_options: draft.shuffle_options ? 1 : 0,
+    negative_marking: draft.negative_marking ? 1 : 0,
+    show_result: draft.show_result ? 1 : 0,
+    is_graded: draft.is_graded ? 1 : 0,
+  });
+
+  const addFiles = (picked) => {
+    const next = [...files];
+    for (const f of picked) {
+      /* The same sheet picked twice across two trips to the file dialog would
+         quietly create two identical quizzes. */
+      if (!next.some(x => x.name === f.name && x.size === f.size)) next.push(f);
+    }
+    setFiles(next.sort(byName));
+    /* Cleared so re-picking a file that was just removed still fires onChange —
+       the browser does not re-fire for an unchanged value. */
+    if (fileInput.current) fileInput.current.value = '';
+  };
+
+  const removeFile = (i) => setFiles(fs => fs.filter((_, n) => n !== i));
+
+  const closeDraft = () => {
+    if (saving) return;              // a run in flight is writing quizzes
+    setDraft(null);
+    setFiles([]);
+    setBatch(null);
+  };
+
+  /* One file at a time, and each file is PARSED BEFORE its quiz is created: a
+     sheet the importer cannot read then leaves no empty quiz behind to clean
+     up. Sequential rather than parallel — fourteen files is forty-two requests,
+     and the shared host would rather have them queued than all at once. A file
+     that fails does not stop the ones after it; its row carries the reason. */
+  const runBatch = async () => {
+    const base = draft.title.trim();
+    const rows = files.map((f, i) => ({
+      file: f.name, title: batchTitle(base, i), state: 'wait', note: '',
+    }));
+    setBatch(rows);
+    setSaving(true);
+
+    const settings = quizPayload();
+    let made = 0;
+
+    for (let i = 0; i < files.length; i++) {
+      const set = (patch) => setBatch(b => b.map((r, n) => (n === i ? { ...r, ...patch } : r)));
+      set({ state: 'busy', note: 'Reading the file…' });
+      try {
+        const fd = new FormData();
+        fd.append('file', files[i]);
+        const parsed = await LMS.importParseQuestions(fd);
+        const list = parsed?.questions || [];
+        if (!list.length) throw new Error('No questions could be read from this file');
+
+        set({ note: `Creating the quiz — ${list.length} question${list.length === 1 ? '' : 's'}…` });
+        const created = await LMS.createQuiz({ ...settings, title: rows[i].title });
+        const res = await LMS.importRunQuestions(Number(created.id), list);
+
+        made++;
+        const bad = (res.failed || []).length;
+        set({
+          state: 'done',
+          note: `${res.added} question${res.added === 1 ? '' : 's'} imported`
+            + (bad ? ` · ${bad} row${bad === 1 ? '' : 's'} skipped` : ''),
+        });
+      } catch (e) {
+        set({ state: 'bad', note: e.message });
+      }
+    }
+
+    setSaving(false);
+    load();
+    /* The drawer deliberately stays open on the finished rows: with a dozen
+       files, "which one failed" is the only thing worth reading afterwards. */
+    if (made === files.length) toast.success(`${made} ${made === 1 ? 'quiz' : 'quizzes'} created`);
+    else toast.error(`${made} of ${files.length} created — see the list in the drawer`);
+  };
+
   const save = async () => {
     if (!draft.title.trim()) return toast.error('Quiz title is required');
+    if (!draft.id && files.length) return runBatch();
     setSaving(true);
     try {
-      const payload = {
-        ...draft,
-        course_id: draft.course_id ? Number(draft.course_id) : 0,
-        shuffle_questions: draft.shuffle_questions ? 1 : 0,
-        shuffle_options: draft.shuffle_options ? 1 : 0,
-        negative_marking: draft.negative_marking ? 1 : 0,
-        show_result: draft.show_result ? 1 : 0,
-        is_graded: draft.is_graded ? 1 : 0,
-      };
+      const payload = quizPayload();
       if (draft.id) {
         await LMS.updateQuiz(payload);
         toast.success('Quiz updated');
-        setDraft(null);
+        setDraft(null); setFiles([]); setBatch(null);
         load();
       } else {
         const d = await LMS.createQuiz(payload);
         toast.success('Quiz created');
-        setDraft(null);
+        setDraft(null); setFiles([]); setBatch(null);
         navigate(`/lms/quizzes/${d.id}`);
       }
     } catch (e) {
@@ -236,14 +339,28 @@ export default function LmsQuizzes() {
         open={!!draft}
         title={draft?.id ? 'Quiz settings' : 'Create quiz'}
         subtitle={draft?.id ? draft.title : 'Set the rules once — they apply to every attempt'}
-        onClose={() => setDraft(null)}
+        onClose={closeDraft}
         footer={
-          <>
-            <button className="lms-btn lms-btn-ghost" onClick={() => setDraft(null)}>Cancel</button>
-            <button className="lms-btn lms-btn-dark" onClick={save} disabled={saving}>
-              {saving ? 'Saving…' : draft?.id ? 'Save changes' : 'Create quiz'}
-            </button>
-          </>
+          /* Once a batch has finished there is nothing left to cancel and
+             nothing left to submit — only the report to read and dismiss. */
+          batch && !saving ? (
+            <button className="lms-btn lms-btn-dark" onClick={closeDraft}>Done</button>
+          ) : (
+            <>
+              <button className="lms-btn lms-btn-ghost" onClick={closeDraft} disabled={saving}>Cancel</button>
+              <button className="lms-btn lms-btn-dark" onClick={save} disabled={saving}>
+                {saving
+                  ? batch
+                    ? `Creating ${batch.filter(r => r.state === 'done' || r.state === 'bad').length} of ${batch.length}…`
+                    : 'Saving…'
+                  : draft?.id
+                    ? 'Save changes'
+                    : files.length > 1
+                      ? `Create ${files.length} quizzes`
+                      : 'Create quiz'}
+              </button>
+            </>
+          )
         }
       >
         {draft && (
@@ -280,6 +397,55 @@ export default function LmsQuizzes() {
                 {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
               </select>
             </div>
+
+            {/* Batch create. Only on the create path — an existing quiz already
+                has the per-quiz importer in the quiz builder, and "add files"
+                there would be a different action with a different meaning. */}
+            {!draft.id && (
+              <div className="lms-field">
+                <label className="lms-label">Question files</label>
+                <input ref={fileInput} type="file" accept=".csv,.xlsx,.xlsm" multiple hidden
+                  onChange={e => addFiles(Array.from(e.target.files || []))} />
+                <button className="lms-btn lms-btn-ghost" type="button" disabled={saving}
+                  onClick={() => fileInput.current?.click()}>
+                  <Upload size={15} /> {files.length ? 'Add more files' : 'Choose files'}
+                </button>
+                <p className="lms-help">
+                  Optional — one spreadsheet per quiz. Every file becomes its own quiz, numbered
+                  from the title above, and all of them get the rules, course and status set here.
+                  Leave this empty to create a single quiz and add questions by hand.
+                </p>
+
+                {(batch || files).length > 0 && (
+                  <div className="lms-batch" style={{ marginTop: 12 }}>
+                    {(batch || files.map((f, i) => ({
+                      file: f.name,
+                      title: batchTitle(draft.title.trim() || 'Untitled quiz', i),
+                      state: 'wait',
+                      note: '',
+                    }))).map((r, i) => (
+                      <div className={`lms-batch-row ${r.state}`} key={r.file + i}>
+                        <span className="lms-batch-n">{i + 1}</span>
+                        {r.state === 'busy' ? <Loader2 size={15} className="lms-batch-spin" />
+                          : r.state === 'done' ? <Check size={15} color="var(--lms-green-dark)" />
+                          : r.state === 'bad' ? <AlertCircle size={15} color="var(--lms-red-dark)" />
+                          : <FileSpreadsheet size={15} color="var(--lms-text-3)" />}
+                        <div className="lms-batch-main">
+                          <div className="lms-batch-title">{r.title}</div>
+                          <div className="lms-batch-note" title={r.note || r.file}>{r.note || r.file}</div>
+                        </div>
+                        {!batch && (
+                          <button className="lms-icon-btn" type="button"
+                            onClick={() => removeFile(i)} aria-label={`Remove ${r.file}`}>
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="lms-divider" />
             <h3 className="lms-h3" style={{ marginBottom: 14 }}>Rules</h3>

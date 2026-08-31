@@ -45,9 +45,12 @@ function quiz_load($conn, $uid, $lessonId) {
     $res = $conn->query("SELECT l.id lesson_id, l.course_id, l.quiz_id, l.title lesson_title,
                                 e.expiry_date,
                                 GREATEST(COALESCE(l.is_coming_soon, 0),
-                                         COALESCE(s.is_coming_soon, 0)) coming_soon
+                                         COALESCE(s.is_coming_soon, 0),
+                                         COALESCE(c.is_coming_soon, 0),
+                                         1 - COALESCE(c.is_enabled, 1)) coming_soon
                            FROM lms_lessons l
                            LEFT JOIN lms_sections s ON s.id = l.section_id
+                           JOIN lms_courses c ON c.id = l.course_id
                            JOIN lms_enrollments e
                              ON e.course_id = l.course_id
                             AND e.user_id = " . (int)$uid . "

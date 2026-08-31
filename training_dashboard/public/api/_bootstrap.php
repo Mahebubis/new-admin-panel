@@ -363,12 +363,14 @@ function learn_watch_columns($conn) {
  * around an admin API that has not been redeployed yet. It adds them itself,
  * with byte-identical DDL, and whichever side runs first wins.
  *
- * is_enabled is deliberately NOT in this list. The portal never reads it: it
- * is a routing flag for user_dashboard, and a module switched off there must
- * stay open for learners already inside the course.
+ * lms_courses.is_enabled is in this list as well, and it did not used to be.
+ * The switch started out as a user_dashboard-only routing flag this portal
+ * ignored entirely. It is now read here too: a switched-off course is not
+ * hidden, but every lesson in it reads as coming soon. Either way the column
+ * has to exist before it can be selected.
  *
  * Cached in a marker file for an hour — the course page reads this on every
- * load and SHOW COLUMNS twice per request is a waste.
+ * load and SHOW COLUMNS on each request is a waste.
  */
 function learn_soon_columns($conn) {
     static $done = null;
@@ -385,12 +387,16 @@ function learn_soon_columns($conn) {
         'coming_soon_note' => '`coming_soon_note` VARCHAR(255) NULL DEFAULT NULL',
     ];
 
-    foreach (['lms_sections', 'lms_lessons'] as $table) {
+    /* lms_courses gets is_enabled as well as the coming-soon pair; the other
+       two tables never had is_enabled and must not grow one. */
+    $extra = ['lms_courses' => ['is_enabled' => '`is_enabled` TINYINT(1) NOT NULL DEFAULT 1']];
+
+    foreach (['lms_courses', 'lms_sections', 'lms_lessons'] as $table) {
         $have = [];
         $r = $conn->query("SHOW COLUMNS FROM $table");
         while ($r && ($row = $r->fetch_assoc())) $have[strtolower((string)$row['Field'])] = true;
         if (!$have) continue;                       // table missing: nothing to do
-        foreach ($want as $name => $ddl) {
+        foreach (array_merge($want, $extra[$table] ?? []) as $name => $ddl) {
             if (isset($have[$name])) continue;
             if (!$conn->query("ALTER TABLE $table ADD COLUMN $ddl")) {
                 learn_log('SCHEMA', "could not add $table.$name: " . $conn->error);

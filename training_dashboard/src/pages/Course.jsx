@@ -107,7 +107,12 @@ export default function Course() {
           const pick = d.lessons?.find((l) => l.id === wanted)
             || open.find((l) => l.id === (d.resume?.lesson_id || 0))
             || open.find((l) => l.status !== 'completed')
-            || open[0];
+            || open[0]
+            /* Every lesson is coming soon. Landing on the first one anyway is
+               what puts the coming-soon panel on the stage; picking nothing
+               left activeId at 0, which fell through to an empty video
+               player captioned "no video attached". */
+            || d.lessons?.[0];
           setActiveId(pick?.id || 0);
         }
       })

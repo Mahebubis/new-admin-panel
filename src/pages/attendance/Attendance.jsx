@@ -35,7 +35,7 @@ function buildMonths(days) {
     for (let i = 0; i < first.getDay(); i++) cells.push(null);
     for (let d = 1; d <= daysInMonth; d++) {
       const ds = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      cells.push({ day: d, status: map[key][ds] || null });
+      cells.push({ day: d, date: ds, status: map[key][ds] || null });
     }
     return {
       key, label: first.toLocaleString('en-US', { month: 'long', year: 'numeric' }), cells,
@@ -43,9 +43,159 @@ function buildMonths(days) {
   });
 }
 
+/* ════════ DAY CONFIRM MODAL ════════
+   Opens when a calendar day is clicked. Asks the API what already exists for
+   that user+date in user_login_activity and attendance_log, then warns before
+   applying (insert the missing rows, skip the ones already there) or removing
+   (delete both rows). Nothing is written until "Yes" is pressed. */
+function ConfirmDayModal({ payment_id, date, onClose, onDone }) {
+  const [day,     setDay]     = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving,  setSaving]  = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api.get(API, { params: { action: 'day', payment_id, date } })
+      .then(r => { if (alive) setDay(r.data?.data?.day || null); })
+      .catch(e => {
+        if (!alive) return;
+        toast.error(e.response?.data?.message || 'Could not read this day');
+        onClose();
+      })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [payment_id, date, onClose]);
+
+  const mode = day?.is_present ? 'remove' : 'apply';
+
+  const confirm = () => {
+    setSaving(true);
+    api.post(`${API}?action=toggle`, { payment_id, date, mode })
+      .then(r => {
+        toast.success(r.data?.message || 'Done');
+        onDone();
+        onClose();
+      })
+      .catch(e => toast.error(e.response?.data?.message || 'Could not update attendance'))
+      .finally(() => setSaving(false));
+  };
+
+  const rowS = { display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12, padding: '5px 0' };
+  const tag = (ok) => (
+    <span style={{ fontWeight: 700, color: ok ? '#15803d' : '#94a3b8' }}>
+      {ok ? 'Record found' : 'No record'}
+    </span>
+  );
+
+  return (
+    /* stopPropagation everywhere — this modal renders inside the calendar
+       overlay, whose own onClick would otherwise close the calendar too */
+    <div onClick={e => { e.stopPropagation(); if (!saving) onClose(); }} style={{
+      position: 'fixed', inset: 0, background: 'rgba(15,23,42,.6)', zIndex: 1100,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: '#fff', borderRadius: 14, width: 420, maxWidth: '100%',
+        boxShadow: '0 20px 60px rgba(0,0,0,.35)', overflow: 'hidden',
+      }}>
+        <div style={{
+          padding: '16px 20px',
+          background: loading ? '#f8fafc' : mode === 'remove' ? '#fef2f2' : '#f0fdf4',
+          borderBottom: '1px solid #f1f5f9',
+        }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: '#1e293b' }}>
+            {loading ? '⏳ Checking this date…'
+              : mode === 'remove' ? '⚠️ Remove attendance?' : '⚠️ Apply attendance?'}
+          </div>
+          <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>{fmtDate(date)}</div>
+        </div>
+
+        <div style={{ padding: 20 }}>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 18 }}>
+              <div style={{ display: 'inline-block', width: 24, height: 24, border: '3px solid #ede9fe',
+                borderTop: '3px solid #4f46e5', borderRadius: '50%', animation: 'at_spin .7s linear infinite' }} />
+            </div>
+          ) : !day ? (
+            <div style={{ fontSize: 12.5, color: '#94a3b8' }}>No data for this date.</div>
+          ) : (
+            <>
+              <div style={{ fontSize: 12.5, color: '#334155', marginBottom: 12 }}>
+                <strong>{day.name}</strong> · {day.email}
+              </div>
+
+              <div style={{ border: '1px solid #f1f5f9', borderRadius: 10, padding: '8px 12px', marginBottom: 12 }}>
+                <div style={rowS}><span style={{ color: '#64748b' }}>user_login_activity</span>{tag(day.has_login)}</div>
+                <div style={rowS}><span style={{ color: '#64748b' }}>attendance_log</span>{tag(day.has_attendance)}</div>
+                <div style={{ ...rowS, borderTop: '1px dashed #e2e8f0', marginTop: 4, paddingTop: 8 }}>
+                  <span style={{ color: '#64748b' }}>Current status</span>
+                  <span style={{ fontWeight: 800, color: day.is_present ? '#16a34a' : '#dc2626' }}>
+                    {day.is_present ? 'Present' : 'Absent'}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{
+                background: mode === 'remove' ? '#fef2f2' : '#f0fdf4',
+                border: `1px solid ${mode === 'remove' ? '#fecaca' : '#bbf7d0'}`,
+                borderRadius: 10, padding: '11px 13px', fontSize: 12,
+                color: mode === 'remove' ? '#991b1b' : '#166534', lineHeight: 1.7,
+              }}>
+                {mode === 'remove' ? (
+                  <>
+                    <div style={{ fontWeight: 700, marginBottom: 3 }}>This will DELETE the records below:</div>
+                    {day.has_attendance && <div>• attendance_log row for {date}</div>}
+                    {day.has_login && <div>• user_login_activity row for {date}</div>}
+                    <div style={{ marginTop: 4 }}>The day will turn <strong>Absent</strong>. This cannot be undone.</div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontWeight: 700, marginBottom: 3 }}>This will INSERT:</div>
+                    <div>• user_login_activity — {day.has_login ? 'skipped (already exists)' : `login_date = ${date}`}</div>
+                    <div>• attendance_log — {day.has_attendance
+                      ? 'skipped (already exists)'
+                      : `attendance_date = ${date}, marked_at = ${date}, default note`}</div>
+                    <div style={{ marginTop: 4 }}>The day will turn <strong>Present</strong>.</div>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end',
+          padding: '12px 20px', borderTop: '1px solid #f1f5f9', background: '#fafafa' }}>
+          <button onClick={onClose} disabled={saving} style={{
+            padding: '8px 16px', border: '1.5px solid #e2e8f0', borderRadius: 8, background: '#fff',
+            color: '#475569', fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit',
+            cursor: saving ? 'not-allowed' : 'pointer',
+          }}>Cancel</button>
+          <button onClick={confirm} disabled={loading || saving || !day} style={{
+            padding: '8px 18px', border: 'none', borderRadius: 8,
+            background: loading || saving || !day ? '#cbd5e1' : mode === 'remove' ? '#dc2626' : '#16a34a',
+            color: '#fff', fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit',
+            cursor: loading || saving || !day ? 'not-allowed' : 'pointer',
+          }}>
+            {saving ? 'Working…' : mode === 'remove' ? 'Yes, remove it' : 'Yes, apply it'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ════════ CALENDAR MODAL ════════ */
-function CalendarModal({ data, onClose }) {
+function CalendarModal({ data, onClose, onChanged }) {
   const months = useMemo(() => buildMonths(data.days || []), [data]);
+  const [pendingDate, setPendingDate] = useState(null);
+  const closeConfirm = useCallback(() => setPendingDate(null), []);
+
+  /* only past/today days inside the batch window can be edited */
+  const onCellClick = (c) => {
+    if (!c.status) return;
+    if (c.status === 'future') { toast.error('Attendance cannot be set for a future date'); return; }
+    setPendingDate(c.date);
+  };
 
   // start on the month that contains today, else the last month
   const todayKey = new Date().toISOString().slice(0, 7);
@@ -149,20 +299,34 @@ function CalendarModal({ data, onClose }) {
                   ))}
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4 }}>
-                  {cur.cells.map((c, i) => c === null ? <div key={i} /> : (
-                    <div key={i} style={{
-                      aspectRatio: '1', borderRadius: 8, display: 'flex', flexDirection: 'column',
-                      alignItems: 'center', justifyContent: 'center',
-                      background: c.status ? cellBg[c.status] : 'transparent',
-                      color: c.status ? cellFg[c.status] : '#cbd5e1',
-                      fontSize: 12, fontWeight: 700,
-                      border: c.status ? 'none' : '1px dashed #e2e8f0',
-                    }}>
-                      <span>{c.day}</span>
-                      {c.status === 'present' && <span style={{ fontSize: 9 }}>✓</span>}
-                      {c.status === 'absent'  && <span style={{ fontSize: 9 }}>✕</span>}
-                    </div>
-                  ))}
+                  {cur.cells.map((c, i) => {
+                    if (c === null) return <div key={i} />;
+                    const editable = c.status === 'present' || c.status === 'absent';
+                    return (
+                      <div key={i} className={editable ? 'at-day' : undefined}
+                        onClick={editable ? () => onCellClick(c) : undefined}
+                        title={editable
+                          ? `${fmtDate(c.date)} — click to ${c.status === 'present' ? 'remove' : 'apply'} attendance`
+                          : undefined}
+                        style={{
+                          aspectRatio: '1', borderRadius: 8, display: 'flex', flexDirection: 'column',
+                          alignItems: 'center', justifyContent: 'center',
+                          background: c.status ? cellBg[c.status] : 'transparent',
+                          color: c.status ? cellFg[c.status] : '#cbd5e1',
+                          fontSize: 12, fontWeight: 700,
+                          border: c.status ? 'none' : '1px dashed #e2e8f0',
+                          cursor: editable ? 'pointer' : 'default',
+                          transition: 'transform .12s, box-shadow .12s',
+                        }}>
+                        <span>{c.day}</span>
+                        {c.status === 'present' && <span style={{ fontSize: 9 }}>✓</span>}
+                        {c.status === 'absent'  && <span style={{ fontSize: 9 }}>✕</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ textAlign: 'center', fontSize: 10.5, color: '#94a3b8', marginTop: 8 }}>
+                  Click any past day to apply or remove its attendance
                 </div>
               </div>
 
@@ -187,6 +351,15 @@ function CalendarModal({ data, onClose }) {
           </div>
         </div>
       </div>
+
+      {pendingDate && (
+        <ConfirmDayModal
+          payment_id={data.payment_id}
+          date={pendingDate}
+          onClose={closeConfirm}
+          onDone={onChanged}
+        />
+      )}
     </div>
   );
 }
@@ -449,12 +622,26 @@ export default function Attendance() {
       .finally(() => setCalLoading(false));
   };
 
+  /* ── after a day was applied / removed: repull the calendar + the % column ── */
+  const refreshCalendar = () => {
+    const pid = calData?.payment_id;
+    if (!pid) return;
+    api.get(`${API}?action=calendar&payment_id=${pid}`)
+      .then(r => {
+        const c = r.data?.data?.calendar;
+        if (c) setCalData(c);
+      })
+      .catch(() => toast.error('Could not refresh the calendar'));
+    if (searched) doSearch(); else loadList();
+  };
+
   return (
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
         .at-root *{box-sizing:border-box;font-family:'Plus Jakarta Sans',sans-serif;}
         .at-tr:hover td{background:#faf9ff!important;}
+        .at-day:hover{transform:scale(1.09);box-shadow:0 3px 10px rgba(15,23,42,.28);}
         @keyframes at_spin{to{transform:rotate(360deg)}}
       `}</style>
 
@@ -569,7 +756,9 @@ export default function Attendance() {
         </>)}
       </div>
 
-      {calData && <CalendarModal data={calData} onClose={() => setCalData(null)} />}
+      {calData && (
+        <CalendarModal data={calData} onClose={() => setCalData(null)} onChanged={refreshCalendar} />
+      )}
     </>
   );
 }

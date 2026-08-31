@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
-import { Briefcase, Headphones, FileText } from "lucide-react";
+import { Briefcase, Headphones, FileText, ShoppingBag } from "lucide-react";
 
 const API = '/api/students/search_result.php';
 const FH = { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } };
@@ -29,6 +29,40 @@ function Badge({ color, children }) {
         </span>
     );
 }
+
+/* ─── project submission status ───
+   `project_state` comes from the API: the real project_submission.status
+   (approved / rejected / pending) when a submission row exists, otherwise
+   not_submitted, or unknown when the internship name has no internship_list
+   match so no submission can be linked to it. */
+const PROJECT_STATE = {
+    approved: { label: 'Approved', color: 'success' },
+    rejected: { label: 'Rejected', color: 'danger' },
+    pending: { label: 'Pending', color: 'warning' },
+    not_submitted: { label: 'Not Submitted', color: 'gray' },
+    unknown: { label: 'Unknown', color: 'gray' },
+};
+
+function ProjectBadge({ row }) {
+    const state = row.project_state
+        || (row.project_status ? String(row.project_status).toLowerCase() : 'not_submitted');
+    const meta = PROJECT_STATE[state] || {
+        label: state.charAt(0).toUpperCase() + state.slice(1).replace(/_/g, ' '),
+        color: 'warning',
+    };
+    const title =
+        state === 'rejected' && row.project_reject_reason ? `Rejected — ${row.project_reject_reason}`
+            : state === 'unknown' ? 'This internship name has no match in internship_list, so no submission can be linked'
+                : state === 'not_submitted' ? 'No project submitted yet'
+                    : row.project_submission_date ? `Submitted on ${row.project_submission_date}` : undefined;
+
+    return <span title={title}><Badge color={meta.color}>{meta.label}</Badge></span>;
+}
+
+/* ─── starter kit (99 Store) order status ─── */
+const skColor = (s) => (s === 'success' ? 'success' : s === 'failed' ? 'danger' : 'warning');
+const skDate = (d) => (d ? new Date(String(d).replace(' ', 'T')).toLocaleDateString('en-GB',
+    { day: '2-digit', month: 'short', year: 'numeric' }) : '-');
 
 /* ─── copy button ─── */
 function Copy({ text }) {
@@ -134,6 +168,7 @@ export default function SearchResult() {
     const [exam, setExam] = useState(null);
     const [tickets, setTickets] = useState([]);
     const [payments, setPayments] = useState([]);
+    const [starterKits, setStarterKits] = useState([]);
     const [hasRefund, setHasRefund] = useState(false);
     const [modal, setModal] = useState(null); // { title, type }
 
@@ -143,7 +178,7 @@ export default function SearchResult() {
 
         setLoading(true);
         setMultiple([]); setUser(null);
-        setInternships([]); setExam(null); setTickets([]); setPayments([]);
+        setInternships([]); setExam(null); setTickets([]); setPayments([]); setStarterKits([]);
 
         api.post(API, mk({ action: 'search', query }), FH)
             .then(res => {
@@ -156,6 +191,7 @@ export default function SearchResult() {
                 setExam(d.exam);
                 setTickets(d.tickets || []);
                 setPayments(d.payments || []);
+                setStarterKits(d.starter_kits || []);
                 setHasRefund(d.has_refund || false);
             })
             .catch(() => { if (!cancelled) toast.error('Server error'); })
@@ -170,6 +206,12 @@ export default function SearchResult() {
     const hasExam = !!exam;
     const internCount = internships.length;
     const latestInternDate = internCount > 0 ? new Date(internships[0].paid_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : null;
+
+    /* starter kit (99 Store) — only successful orders count as money paid */
+    const skCount = starterKits.length;
+    const skPaid = starterKits.filter(k => k.status === 'success');
+    const skPaidCount = skPaid.length;
+    const skPaidAmount = skPaid.reduce((t, k) => t + (parseFloat(k.amount) || 0), 0);
 
     if (loading) return (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
@@ -374,8 +416,13 @@ export default function SearchResult() {
                     </Section>
                 </div>
 
-                {/* ── BOTTOM SECTIONS ── */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, flex: 1, minHeight: 0 }}>
+                {/* ── BOTTOM SECTIONS ──
+                    the Starter Kit card only takes a column when the student
+                    actually bought one, so buyers-of-nothing keep the old 2-up layout */}
+                <div style={{
+                    display: 'grid', gap: 10, flex: 1, minHeight: 0,
+                    gridTemplateColumns: skCount > 0 ? '1fr 1fr 1fr' : '1fr 1fr',
+                }}>
 
                     {/* INTERNSHIPS */}
                     <Section icon={<Briefcase size={16} />} iconColor="#f59e0b" title="Internship Data"
@@ -396,9 +443,7 @@ export default function SearchResult() {
                                         <td style={tdS}>{r.batch || 'N/A'}</td>
                                         <td style={tdS}>{r.total_duration ? `${r.total_duration} days` : '-'}</td>
                                         <td style={tdS}>{r.internship_level || '-'}</td>
-                                        <td style={tdS}><Badge color={r.project_status === 'approved' ? 'success' : r.project_status === 'rejected' ? 'danger' : r.project_status ? 'warning' : 'gray'}>
-                                            {r.project_status ? r.project_status.charAt(0).toUpperCase() + r.project_status.slice(1) : 'Pending'}
-                                        </Badge></td>
+                                        <td style={tdS}><ProjectBadge row={r} /></td>
                                         <td style={tdS}><a href={`/admin/edit_internship.php?payment_id=${encodeURIComponent(r.payment_id)}`}
                                             target="_blank" style={{ color: '#4f46e5', fontSize: 11, fontWeight: 600 }}>Edit</a></td>
                                     </tr>
@@ -433,6 +478,36 @@ export default function SearchResult() {
                             />
                         )}
                     </Section>
+
+                    {/* STARTER KIT (99 Store) — only rendered when the student bought one */}
+                    {skCount > 0 && (
+                        <Section icon={<ShoppingBag size={16} />} iconColor="#0ea5e9" title="Starter Kit"
+                            badge={<Badge color={skPaidCount > 0 ? 'success' : 'warning'}>
+                                {skPaidCount > 0 ? `₹${skPaidAmount} paid` : `${skCount} order${skCount > 1 ? 's' : ''}`}
+                            </Badge>}
+                            footer={skCount > 2 && (
+                                <button className="sr-viewmore" onClick={() => setModal({ title: `All ${skCount} Starter Kit Orders`, type: 'starterkits' })}>
+                                    View All {skCount} Orders
+                                </button>
+                            )}>
+                            <MiniTable headers={['Course', 'Amount', 'Status', 'Date']}
+                                rows={starterKits.slice(0, 2).map((k, i) => (
+                                    <tr key={i}>
+                                        <td style={{ ...tdS, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                            title={k.course_label}>
+                                            {k.course_label || '-'}
+                                            {k.course_count > 1 && (
+                                                <span style={{ color: '#94a3b8', fontSize: 10 }}> ({k.course_count})</span>
+                                            )}
+                                        </td>
+                                        <td style={tdS}><strong>₹{k.amount ?? '0'}</strong></td>
+                                        <td style={tdS}><Badge color={skColor(k.status)}>{k.status || '-'}</Badge></td>
+                                        <td style={{ ...tdS, fontSize: 11 }}>{skDate(k.paid_at)}</td>
+                                    </tr>
+                                ))}
+                            />
+                        </Section>
+                    )}
 
                     {/* PAYMENTS — full width */}
                     <div style={{ gridColumn: '1/-1' }}>
@@ -470,7 +545,7 @@ export default function SearchResult() {
             {modal && (
                 <Modal title={modal.title} onClose={() => setModal(null)}>
                     {modal.type === 'internships' && (
-                        <MiniTable headers={['Internship', 'Batch', 'Duration', 'Plan', 'Paid At', 'Project', 'Action']}
+                        <MiniTable headers={['Internship', 'Batch', 'Duration', 'Plan', 'Paid At', 'Project', 'Reject Reason', 'Action']}
                             rows={internships.map((r, i) => (
                                 <tr key={i}>
                                     <td style={tdS}>{r.internship}</td>
@@ -478,9 +553,10 @@ export default function SearchResult() {
                                     <td style={tdS}>{r.total_duration} days</td>
                                     <td style={tdS}>{r.internship_level || '-'}</td>
                                     <td style={{ ...tdS, fontSize: 11 }}>{r.paid_at}</td>
-                                    <td style={tdS}><Badge color={r.project_status === 'approved' ? 'success' : r.project_status === 'rejected' ? 'danger' : r.project_status ? 'warning' : 'gray'}>
-                                        {r.project_status || 'Pending'}
-                                    </Badge></td>
+                                    <td style={tdS}><ProjectBadge row={r} /></td>
+                                    <td style={{ ...tdS, fontSize: 11, color: '#64748b', maxWidth: 180 }}>
+                                        {r.project_state === 'rejected' ? (r.project_reject_reason || '-') : '-'}
+                                    </td>
                                     <td style={tdS}><a href={`/admin/edit_internship.php?payment_id=${encodeURIComponent(r.payment_id)}`}
                                         target="_blank" style={{ color: '#4f46e5', fontSize: 11, fontWeight: 600 }}>Edit</a></td>
                                 </tr>
@@ -497,6 +573,31 @@ export default function SearchResult() {
                                     <td style={{ ...tdS, fontSize: 11 }}>{new Date(t.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
                                     <td style={tdS}><a href={`/admin/view_ticket.php?ticket_id=${t.ticket_id}`}
                                         target="_blank" style={{ color: '#4f46e5', fontSize: 11, fontWeight: 600 }}>View</a></td>
+                                </tr>
+                            ))}
+                        />
+                    )}
+                    {modal.type === 'starterkits' && (
+                        <MiniTable headers={['Order ID', 'Payment ID', 'Courses', 'Batch', 'Provider', 'Amount', 'Status', 'Date']}
+                            rows={starterKits.map((k, i) => (
+                                <tr key={i}>
+                                    <td style={{ ...tdS, fontSize: 10, color: '#94a3b8' }}>{k.order_id || k.razorpay_order_id || '-'}</td>
+                                    <td style={{ ...tdS, fontSize: 10, color: '#94a3b8' }}>{k.payment_id || '-'}</td>
+                                    <td style={tdS}>
+                                        {(k.courses || []).length
+                                            ? k.courses.map((c, j) => (
+                                                <div key={j}>
+                                                    {c.name}
+                                                    {c.price != null && <span style={{ color: '#94a3b8' }}> — ₹{c.price}</span>}
+                                                </div>
+                                            ))
+                                            : (k.course_label || '-')}
+                                    </td>
+                                    <td style={tdS}>{k.batch || '-'}</td>
+                                    <td style={tdS}>{k.provider || '-'}</td>
+                                    <td style={tdS}><strong>₹{k.amount ?? '0'}</strong></td>
+                                    <td style={tdS}><Badge color={skColor(k.status)}>{k.status || '-'}</Badge></td>
+                                    <td style={{ ...tdS, fontSize: 11 }}>{skDate(k.paid_at)}</td>
                                 </tr>
                             ))}
                         />

@@ -75,6 +75,11 @@ export const LMS = {
   /* The user_dashboard routing switch. One per course — the learner portal
      never reads it. `value` is optional: omit it to flip, pass it to force. */
   toggleCourseEnabled: (id, value) => api('resource=courses&action=toggle_enabled', { id, value }),
+  /* The whole course marked coming soon. Cascades to every module and lesson
+     at read time — unlike setAllComingSoon below, which stamps each row and
+     cannot be undone back to what was there before. */
+  toggleCourseComingSoon: (id, value, coming_soon_note) =>
+    api('resource=courses&action=toggle_coming_soon', { id, value, coming_soon_note }),
   setAllComingSoon: (id, coming_soon, coming_soon_note = '') =>
     api('resource=courses&action=set_all_coming_soon', { id, coming_soon: coming_soon ? 1 : 0, coming_soon_note }),
   uploadThumbnail: (fd) => apiForm('resource=courses&action=thumbnail', fd),

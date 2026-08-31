@@ -421,6 +421,24 @@ export default function LmsCourseBuilder() {
     } catch (e) { toast.error(e.message); }
   };
 
+  /* The whole course marked coming soon — one flag, cascading at read time
+     over every module and lesson. Optimistic like the row toggles. */
+  const flipCourseComingSoon = async () => {
+    const was  = Number(course.is_coming_soon ?? 0);
+    const next = was ? 0 : 1;
+    setCourse(c => ({ ...c, is_coming_soon: next }));
+    try {
+      await LMS.toggleCourseComingSoon(Number(courseId), next);
+      toast.success(next ? 'Whole course marked coming soon' : 'Coming-soon cleared');
+      /* Reloaded because every module and lesson row inherits this — their
+         badges are computed server-side and would otherwise stay stale. */
+      load();
+    } catch (e) {
+      toast.error(e.message);
+      setCourse(c => ({ ...c, is_coming_soon: was }));
+    }
+  };
+
   /* ── the routing switch ────────────────────────────────────────────────
      One per course, and the only place it exists. It was per-module and
      per-lesson for a day: that was a level too far down, because
@@ -594,6 +612,7 @@ export default function LmsCourseBuilder() {
             </Pill>
             <Pill tone="grey">{course.encryption === 'encrypted' ? 'Encrypted' : 'Unencrypted'}</Pill>
             {!Number(course.is_enabled ?? 1) && <Pill tone="red"><PowerOff size={11} /> Switched off</Pill>}
+            {!!Number(course.is_coming_soon) && <Pill tone="blue"><Hourglass size={11} /> Whole course coming soon</Pill>}
           </div>
           <h1 className="lms-h1">{course.title}</h1>
         </div>
@@ -633,6 +652,19 @@ export default function LmsCourseBuilder() {
                 <div className="lms-menu-sep" />
                 {/* Every module AND every lesson at once. Confirmed rather
                     than fired on the click: it rewrites the whole course. */}
+                {/* One flag on the course, cascading to everything inside it.
+                    The two sweeps below are the other tool: they stamp each
+                    module and lesson individually, which is what you want when
+                    most of a live course is being re-recorded and a few parts
+                    are not — but they overwrite per-module state and clearing
+                    them cannot put it back. */}
+                <button onClick={() => flipCourseComingSoon()}>
+                  <Hourglass size={15} />
+                  {Number(course.is_coming_soon)
+                    ? 'Clear coming soon on the course'
+                    : 'Mark whole course coming soon'}
+                </button>
+                <div className="lms-menu-sep" />
                 <button onClick={() => setSweep({
                   kind: 'coming_soon', value: true,
                   title: 'Mark the whole course coming soon?',
@@ -751,7 +783,12 @@ export default function LmsCourseBuilder() {
                 {isOpen ? <ChevronUp size={17} color="var(--lms-text-2)" /> : <ChevronDown size={17} color="var(--lms-text-2)" />}
                 <span className="lms-section-num">{idx + 1}</span>
                 <span className="lms-section-title">{s.title}</span>
-                {!!Number(s.is_coming_soon) && <Pill tone="blue"><Hourglass size={11} /> Coming soon</Pill>}
+                {!!Number(s.soon_effective ?? s.is_coming_soon) && (
+                  <Pill tone={Number(s.soon_inherited) ? 'grey' : 'blue'}>
+                    <Hourglass size={11} />
+                    {Number(s.soon_inherited) ? 'Coming soon (course)' : 'Coming soon'}
+                  </Pill>
+                )}
                 <span className="lms-section-meta">
                   {lessonCount} Lesson{lessonCount === 1 ? '' : 's'} • {quizCount} Quiz{quizCount === 1 ? '' : 'zes'}
                 </span>
@@ -853,7 +890,12 @@ export default function LmsCourseBuilder() {
                         {l.lesson_type === 'quiz' && !l.quiz_id && (
                           <Pill tone="amber">No quiz attached</Pill>
                         )}
-                        {!!Number(l.is_coming_soon) && <Pill tone="blue"><Hourglass size={11} /> Coming soon</Pill>}
+                        {!!Number(l.soon_effective ?? l.is_coming_soon) && (
+                          <Pill tone={Number(l.soon_inherited) ? 'grey' : 'blue'}>
+                            <Hourglass size={11} />
+                            {Number(l.soon_inherited) ? 'Coming soon (inherited)' : 'Coming soon'}
+                          </Pill>
+                        )}
                         {!!l.is_hidden && <Pill tone="grey"><EyeOff size={11} /> Hidden</Pill>}
                         {l.status === 'published' && <Pill tone="green">Published</Pill>}
                         {l.field_count > 0 && (

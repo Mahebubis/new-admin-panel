@@ -462,6 +462,19 @@ export const LMS_CSS = `
 .lms-course-switch-label{font-size:13px;font-weight:600;line-height:1.3;white-space:nowrap;}
 .lms-course-switch-hint{font-size:11px;color:var(--lms-text-3);line-height:1.3;white-space:nowrap;}
 
+/* The same switch on a course card, sitting opposite the sections/enrolled
+   line. Smaller than the builder's, because here it is one control among
+   several rather than the header's main statement. */
+.lms-course-foot-row{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.lms-card-switch{display:inline-flex;align-items:center;gap:7px;flex-shrink:0;cursor:default;}
+.lms-card-switch-label{font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;
+  color:var(--lms-text-3);transition:color .16s;}
+.lms-card-switch-label.on{color:var(--lms-green-dark);}
+/* 40x22 is right on a settings row and heavy on a card footer. */
+.lms-card-switch .lms-toggle{width:32px;height:18px;}
+.lms-card-switch .lms-toggle::after{width:14px;height:14px;}
+.lms-card-switch .lms-toggle.on::after{transform:translateX(14px);}
+
 /* ── spreadsheet question import ──────────────────────────────────────── */
 /* The column key. Two columns on a wide modal, one on a narrow one — the
    names are the contract with the file, so they get to be legible. */
@@ -494,6 +507,25 @@ export const LMS_CSS = `
 .lms-import-opt.right{color:var(--lms-green-dark);font-weight:600;}
 .lms-import-opt .dot{width:13px;height:13px;border:1.5px solid var(--lms-border-2);border-radius:50%;flex-shrink:0;}
 .lms-import-opt svg{flex-shrink:0;}
+
+/* ── batch quiz create (one quiz per uploaded file) ────────────────────── */
+/* The row list IS the contract of the feature: pick N files, get N quizzes
+   with exactly these titles. Showing the title before the run is what stops
+   "why is this one called (7)?" being asked after it. The same rows carry the
+   per-file status during the run, so nothing has to move on screen. */
+.lms-batch{border:1px solid var(--lms-border);border-radius:var(--lms-r);overflow:hidden;}
+.lms-batch-row{display:flex;align-items:center;gap:11px;padding:9px 12px;font-size:13px;
+  background:var(--lms-bg);border-bottom:1px solid var(--lms-border);}
+.lms-batch-row:last-child{border-bottom:none;}
+.lms-batch-row.bad{background:var(--lms-red-soft);}
+.lms-batch-n{min-width:18px;flex-shrink:0;font-size:11.5px;font-weight:600;color:var(--lms-text-3);}
+.lms-batch-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;}
+.lms-batch-title{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lms-batch-note{font-size:11.5px;color:var(--lms-text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lms-batch-row.bad .lms-batch-note{color:var(--lms-red-dark);}
+.lms-batch-row.done .lms-batch-note{color:var(--lms-green-dark);}
+.lms-batch-row > svg{flex-shrink:0;}
+.lms-batch-spin{animation:lms-spin .8s linear infinite;}
 
 /* ── tables ───────────────────────────────────────────────────── */
 .lms-table-wrap{border:1px solid var(--lms-border);border-radius:var(--lms-r-lg);overflow:hidden;background:var(--lms-bg);}

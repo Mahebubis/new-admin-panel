@@ -174,6 +174,9 @@ function learn_grant_purchased($conn, $uid) {
                              OR STR_TO_DATE($col, '%D %M, %Y') IS NULL
                              OR STR_TO_DATE($col, '%D %M, %Y') <= CURDATE())";
     $match  = "CONVERT(c.internship_name USING utf8mb4) COLLATE utf8mb4_unicode_ci";
+    /* is_enabled is not tested here. A switched-off course is still enrolled
+       into — the learner sees it as coming soon, and the row has to exist for
+       that card to appear at all. Only c.status gates enrolment. */
     $live   = "c.status = 'published'
                AND c.internship_name IS NOT NULL AND c.internship_name <> ''";
 
@@ -275,10 +278,43 @@ function learn_video_source($url, $provider) {
 
 /** The learner's enrolments, newest first, with progress folded in. */
 function learn_enrollment_rows($conn, $uid) {
+    /* ── switched off reads as coming soon ─────────────────────────────────
+       lms_courses.is_enabled is the admin's "close this course" switch. It
+       does NOT hide the course from a learner who is enrolled: it puts the
+       same Coming-soon face on it that is_coming_soon does. Taking a paid-for
+       course off someone's list without explanation is the one outcome worse
+       than making them wait.
+
+       Two switches, one visible result, and that is deliberate — is_enabled is
+       also read by user_dashboard for routing, where it means something
+       different, so it stays a separate column rather than being folded into
+       is_coming_soon.
+
+       What DOES hide a course is c.status <> 'published'. That has always been
+       true and is unchanged: an unpublished course reaches nobody.
+
+       learn_soon_columns() has already guaranteed the columns exist; COALESCE
+       covers a row written before the default applied. */
+    learn_soon_columns($conn);
+
     $sql = "SELECT e.id enrollment_id, e.access_type, e.amount, e.expiry_date, e.status enrollment_status,
                    e.enrolled_at, e.source,
                    c.id course_id, c.title, c.slug, c.subtitle, c.description, c.category,
                    c.thumbnail_url, c.instructor, c.validity_days,
+                   GREATEST(COALESCE(c.is_coming_soon, 0),
+                            1 - COALESCE(c.is_enabled, 1)) course_soon,
+                   COALESCE(c.coming_soon_note, '') course_note,
+                   /* Lessons a learner can actually OPEN — a coming-soon lesson
+                      in the denominator means the bar can never reach 100%.
+                      The three levels cascade, so the course's own flag is
+                      folded in here rather than checked separately. */
+                   (SELECT COUNT(*) FROM lms_lessons l
+                      LEFT JOIN lms_sections s2 ON s2.id = l.section_id
+                     WHERE l.course_id = c.id AND l.is_hidden = 0 AND l.status = 'published'
+                       AND GREATEST(COALESCE(l.is_coming_soon, 0),
+                                    COALESCE(s2.is_coming_soon, 0),
+                                    COALESCE(c.is_coming_soon, 0),
+                                    1 - COALESCE(c.is_enabled, 1)) = 0) open_count,
                    (SELECT COUNT(*) FROM lms_lessons l
                       WHERE l.course_id = c.id AND l.is_hidden = 0 AND l.status = 'published') lesson_count,
                    (SELECT COUNT(*) FROM lms_lessons l
@@ -301,8 +337,16 @@ function learn_enrollment_rows($conn, $uid) {
     $res  = $conn->query($sql);
     $rows = [];
     while ($res && ($r = $res->fetch_assoc())) {
-        $lessons = (int)$r['lesson_count'];
-        $done    = (int)$r['done_count'];
+        /* Published AND coming soon is a real combination: it is how a course
+           is announced before it is recorded. The card says so instead of
+           showing lesson counts and a progress bar for content nobody can
+           open yet. A course with lessons that are ALL coming soon reads the
+           same way, even without the course-level flag. */
+        $open    = (int)$r['open_count'];
+        $lessons = $open;
+        $soon    = (int)$r['course_soon'] === 1
+                   || ($open === 0 && (int)$r['lesson_count'] > 0);
+        $done    = min((int)$r['done_count'], $lessons);
         $expired = $r['expiry_date'] && $r['expiry_date'] < date('Y-m-d');
 
         $rows[] = [
@@ -316,6 +360,8 @@ function learn_enrollment_rows($conn, $uid) {
             'thumbnail_url' => $r['thumbnail_url'],
             'instructor'    => $r['instructor'],
             'lesson_count'  => $lessons,
+            'coming_soon'      => $soon,
+            'coming_soon_note' => trim((string)$r['course_note']),
             'quiz_count'    => (int)$r['quiz_count'],
             'total_secs'    => (int)$r['total_secs'],
             'completed'     => $done,
@@ -459,7 +505,12 @@ if ($action === 'course') {
     $cid  = (int)($_GET['course_id'] ?? 0);
     if (!$slug && !$cid) learn_error('A course slug or id is required');
 
+    learn_soon_columns($conn);
+
     $where = $cid ? "c.id = $cid" : "c.slug = '" . learn_esc($conn, $slug) . "'";
+    /* is_enabled is NOT filtered here. A switched-off course still opens for
+       someone enrolled in it — every lesson inside simply reads as coming
+       soon, which is what $courseSoon below folds it into. */
     $res = $conn->query("SELECT c.*, e.id enrollment_id, e.access_type, e.expiry_date, e.status enrollment_status
                          FROM lms_courses c
                          JOIN lms_enrollments e ON e.course_id = c.id AND e.user_id = " . (int)$uid . "
@@ -534,15 +585,19 @@ if ($action === 'course') {
     }
 
     /* ── coming soon ───────────────────────────────────────────────────────
-       A module or a lesson can be marked "coming soon" in the admin panel.
-       It is NOT the same as hiding it: the row stays in the syllabus on
-       purpose — the point is to show a learner what is being built — but it
-       does not open, does not count towards their progress, and is never what
-       "resume" lands on.
+       A course, a module or a lesson can be marked "coming soon" in the admin
+       panel, and the three cascade downwards: a coming-soon course makes every
+       module and lesson in it coming soon, and clearing a lesson's own flag
+       cannot escape either.
 
-       lms_sections/lms_lessons also carry is_enabled. That one is deliberately
-       not read here: it is a routing flag for user_dashboard, and honouring it
-       would pull modules out from under learners already inside the course.
+       It is NOT the same as hiding: the row stays in the syllabus on purpose —
+       the point is to show a learner what is being built — but it does not
+       open, does not count towards their progress, and is never what "resume"
+       lands on.
+
+       lms_courses.is_enabled is folded in above as a fourth source of the same
+       state: switching a course off puts the identical Coming-soon face on it,
+       so the two admin switches never disagree on screen.
 
        The columns themselves are guaranteed by learn_soon_columns() just
        above: SELECTing a column that does not exist is a fatal error, not a
@@ -550,6 +605,16 @@ if ($action === 'course') {
        predates them. The COALESCE that remains is for the note, which is
        genuinely nullable. */
     learn_soon_columns($conn);
+
+    /* The course's own flag, which cascades over every module and lesson in
+       it. Three levels now carry the same pair — course, module, lesson — and
+       a reader has to take the strongest of the three, because clearing a
+       lesson's own flag must not let it escape a coming-soon course. */
+    /* Switched off counts as coming soon, so the two admin switches produce
+       one consistent face for the learner. */
+    $courseSoon = (int)($c['is_coming_soon'] ?? 0) === 1
+                  || (int)($c['is_enabled'] ?? 1) !== 1;
+    $courseNote = trim((string)($c['coming_soon_note'] ?? ''));
 
     $sectionSoon = [];
     $sections = [];
@@ -561,12 +626,16 @@ if ($action === 'course') {
                         ORDER BY sort_order, id");
     while ($sr && ($s = $sr->fetch_assoc())) {
         $sid  = (int)$s['id'];
-        $soon = (int)$s['is_coming_soon'] === 1;
-        $sectionSoon[$sid] = ['soon' => $soon, 'note' => (string)$s['coming_soon_note']];
+        $soon = $courseSoon || (int)$s['is_coming_soon'] === 1;
+        /* The most specific note wins — a module can say something a whole
+           course cannot, and an empty module note falls through to the
+           course's rather than blanking the line. */
+        $sNote = trim((string)$s['coming_soon_note']) !== '' ? trim((string)$s['coming_soon_note']) : $courseNote;
+        $sectionSoon[$sid] = ['soon' => $soon, 'note' => $sNote];
         $sections[$sid] = [
             'id' => $sid, 'title' => $s['title'], 'description' => $s['description'],
             'coming_soon'      => $soon,
-            'coming_soon_note' => (string)$s['coming_soon_note'],
+            'coming_soon_note' => $sNote,
             'lessons' => [], 'lesson_count' => 0, 'quiz_count' => 0, 'attachment_count' => 0,
             'coming_soon_count' => 0,
         ];
@@ -587,8 +656,8 @@ if ($action === 'course') {
            everything in it without touching eighteen lesson rows one at a
            time. The lesson's own note is preferred when it has one, so a
            lesson can say something more specific than its module. */
-        $secSoon  = $sectionSoon[(int)$l['section_id']] ?? ['soon' => false, 'note' => ''];
-        $soon     = $secSoon['soon'] || (int)$l['is_coming_soon'] === 1;
+        $secSoon  = $sectionSoon[(int)$l['section_id']] ?? ['soon' => $courseSoon, 'note' => $courseNote];
+        $soon     = $courseSoon || $secSoon['soon'] || (int)$l['is_coming_soon'] === 1;
         $soonNote = (string)$l['coming_soon_note'] !== '' ? (string)$l['coming_soon_note'] : $secSoon['note'];
         $item  = [
             'id'           => $lid,
@@ -713,9 +782,12 @@ if ($action === 'lesson') {
 
     $res = $conn->query("SELECT l.*, c.title course_title, c.slug course_slug, e.expiry_date,
                                 GREATEST(COALESCE(l.is_coming_soon, 0),
-                                         COALESCE(s.is_coming_soon, 0)) coming_soon,
+                                         COALESCE(s.is_coming_soon, 0),
+                                         COALESCE(c.is_coming_soon, 0),
+                                         1 - COALESCE(c.is_enabled, 1)) coming_soon,
                                 COALESCE(NULLIF(l.coming_soon_note, ''),
-                                         COALESCE(s.coming_soon_note, '')) coming_soon_note
+                                         NULLIF(s.coming_soon_note, ''),
+                                         COALESCE(c.coming_soon_note, '')) coming_soon_note
                          FROM lms_lessons l
                          LEFT JOIN lms_sections s ON s.id = l.section_id
                          JOIN lms_courses c     ON c.id = l.course_id
