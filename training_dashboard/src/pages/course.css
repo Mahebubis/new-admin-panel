@@ -58,6 +58,7 @@
 .stage-btn:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
 .stage-btn:active { transform: scale(0.92); }
 
+
 .stage-menu-wrap { position: relative; }
 .stage-menu-scrim { position: fixed; inset: 0; z-index: 6; }
 
@@ -84,9 +85,9 @@
    behind it is what makes the moment read as "that finished" — and because a
    stage that changes height would shove the whole page around.
 
-   The scrim is deliberately partial: the learner can still see where they are.
-   Two choices and no third — carry on with this lesson ticked off, or dismiss
-   and stay exactly where you are with nothing recorded. */
+   The scrim is near-solid here, unlike the old strip: this card asks for a
+   decision and starts a clock, so the frame behind it must not compete with
+   it for attention. */
 @keyframes stageDoneIn {
   from { opacity: 0; transform: translateY(-22px) scale(0.97); }
   60%  { opacity: 1; transform: translateY(4px)   scale(1); }
@@ -96,67 +97,113 @@
 
 .stage-done {
   position: absolute; inset: 0; z-index: 8;
-  display: flex; align-items: flex-start; justify-content: center;
+  display: flex; align-items: center; justify-content: center;
   padding: 18px 16px;
-  background: linear-gradient(180deg, rgba(9, 13, 22, 0.82) 0%, rgba(9, 13, 22, 0.42) 55%, rgba(9, 13, 22, 0.2) 100%);
+  background: rgba(9, 13, 22, 0.82);
   animation: stageDoneScrim var(--base) var(--ease);
 }
 
 .stage-done-card {
-  display: flex; align-items: center; gap: 14px;
-  width: 100%; max-width: 620px; padding: 14px 16px;
-  background: #1b2334; border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: var(--r); box-shadow: var(--shadow-lg);
-  animation: stageDoneIn 420ms var(--ease) both;
+  position: relative;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 14px;
+  text-align: center;
+  animation: stageDoneIn 340ms var(--ease) both;
 }
 
-.stage-done-ico {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%;
-  background: rgba(46, 178, 118, 0.16); color: var(--ok);
+/* ── the ring, which is both the replay button and the clock ──────────────
+   Five seconds of doing nothing ticks the lesson off and starts the next one,
+   and the ring draining is the only warning a learner gets — so it has to be
+   the most legible thing on the card. Pressing it plays this lesson again. */
+.stage-done-ring {
+  position: relative;
+  width: 92px; height: 92px;
+  border: none; background: none; padding: 0;
+  color: #fff; cursor: pointer;
+  transition: transform var(--fast) var(--ease);
+}
+.stage-done-ring:hover { transform: scale(1.06); }
+.stage-done-ring:active { transform: scale(0.97); }
+
+.stage-done-ring-svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.stage-done-ring-bg,
+.stage-done-ring-fill {
+  fill: rgba(255, 255, 255, 0.08);
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+.stage-done-ring-bg   { stroke: rgba(255, 255, 255, 0.16); }
+.stage-done-ring-fill {
+  fill: none;
+  stroke: var(--brand);
+  /* 2πr for r=45. The dash is the whole circumference, so animating the
+     offset from 0 to that length empties the ring exactly once. */
+  stroke-dasharray: 283;
+  stroke-dashoffset: 0;
+  animation: stageDoneCount 5s linear both;
+}
+@keyframes stageDoneCount {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: 283; }
 }
 
-.stage-done-text { flex: 1; min-width: 0; }
-.stage-done-title { font-size: 15px; font-weight: 600; color: #fff; }
-.stage-done-sub {
-  margin-top: 2px; font-size: 12.5px; color: rgba(255, 255, 255, 0.66);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+.stage-done-ring-ico {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
 }
 
-.stage-done-btns { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-
-.stage-done-cancel {
-  padding: 9px 14px; border-radius: var(--r-sm);
-  font-size: 13px; font-weight: 500; color: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+.stage-done-title {
+  font-size: 20px; font-weight: 600; color: #fff; letter-spacing: -0.01em;
 }
-.stage-done-cancel:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
 
 .stage-done-go {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 9px 16px; border-radius: var(--r-sm);
-  background: var(--brand); color: #fff;
-  font-size: 13px; font-weight: 600; white-space: nowrap;
-  transition: filter var(--fast) var(--ease), transform var(--fast) var(--ease);
+  display: inline-flex; align-items: center; gap: 9px;
+  padding: 13px 22px; border-radius: var(--r);
+  background: #0f1522; border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 14.5px; font-weight: 600; white-space: nowrap;
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease),
+              transform var(--fast) var(--ease);
 }
-.stage-done-go:hover { filter: brightness(1.08); }
+.stage-done-go:hover { background: var(--brand); border-color: transparent; }
 .stage-done-go:active { transform: scale(0.97); }
 
-/* A phone has no room for a single row: the card stacks and the primary
-   action goes full width, which is also the easier thumb target. */
-@media (max-width: 700px) {
-  .stage-done { align-items: flex-start; padding: 12px; }
-  .stage-done-card { flex-wrap: wrap; gap: 12px; padding: 13px 14px; }
-  .stage-done-ico { width: 34px; height: 34px; }
-  .stage-done-sub { white-space: normal; }
-  .stage-done-btns { width: 100%; }
-  .stage-done-go { flex: 1; justify-content: center; }
+.stage-done-count {
+  margin: 0;
+  font-size: 12.5px; color: rgba(255, 255, 255, 0.62);
+  max-width: 320px;
+}
+.stage-done-count b { color: rgba(255, 255, 255, 0.86); font-weight: 600; }
+
+.stage-done-x {
+  position: absolute; top: 12px; right: 12px;
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.3);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 20px; line-height: 1; cursor: pointer;
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.stage-done-x:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
+
+/* A short stage — a phone, or a landscape strip — has no room for the full
+   card, so everything shrinks rather than the ring being pushed off. */
+@media (max-width: 700px), (max-height: 560px) {
+  .stage-done-card { gap: 10px; }
+  .stage-done-ring { width: 66px; height: 66px; }
+  .stage-done-ring-ico svg { width: 24px; height: 24px; }
+  .stage-done-title { font-size: 16px; }
+  .stage-done-go { padding: 11px 16px; font-size: 13px; }
+  .stage-done-count { font-size: 11.5px; }
+  .stage-done-x { top: 8px; right: 8px; width: 30px; height: 30px; font-size: 18px; }
 }
 
-/* Someone who asked for less motion still gets the card, just not the fall. */
+/* Someone who asked for less motion still gets the card and the clock — the
+   ring just steps rather than sweeps. */
 @media (prefers-reduced-motion: reduce) {
   .stage-done-card { animation: none; }
+  .stage-done-ring-fill { animation-timing-function: step-end; }
 }
 
 /* ── article lessons on the same stage ─────────────────────────────────── */
@@ -319,6 +366,10 @@
   .course-fav span { display: none; }
   .panel-pad { padding: 20px 16px 40px; }
   .course-tabs { padding: 0 16px; gap: 22px; }
+
+  /* The two stage controls tuck into the corner on a small screen. */
+  .stage-controls { right: 10px; top: 10px; gap: 4px; }
+  .stage-btn { width: 34px; height: 34px; }
 }
 
 

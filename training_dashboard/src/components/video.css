@@ -255,10 +255,21 @@
   background: rgba(9, 13, 22, 0.72);
   border: 1px solid rgba(255, 255, 255, 0.16);
   backdrop-filter: blur(4px);
-  opacity: 0.72;
-  transition: opacity var(--fast) var(--ease);
+  /* Visible by default, which is the right answer on a touch screen: there is
+     no hover there, and a strip that waited for one would simply never
+     appear. A mouse gets the rule below instead. */
+  opacity: 0.9;
+  transition: opacity var(--base) var(--ease);
 }
-.vp-embed-ctl:hover { opacity: 1; }
+
+/* With a real pointer the strip stays out of the picture and comes back when
+   the learner reaches for it — the embed's own bar is enough on its own, and
+   ours sitting over the lecture the whole time is furniture. */
+@media (hover: hover) and (pointer: fine) {
+  .vp-embed-ctl { opacity: 0; pointer-events: none; }
+  .vp:hover .vp-embed-ctl,
+  .vp-embed-ctl:focus-within { opacity: 1; pointer-events: auto; }
+}
 
 .vp-embed-btn {
   display: inline-flex; align-items: center; justify-content: center;
@@ -268,6 +279,11 @@
 }
 .vp-embed-btn:hover { background: rgba(255, 255, 255, 0.16); }
 .vp-embed-btn:active { transform: scale(0.92); }
+
+/* Play/pause carries the strip: it is the control a learner reaches for
+   first, and the one the embed's own bar can have covered. */
+.vp-embed-play { background: rgba(255, 255, 255, 0.14); }
+.vp-embed-play:hover { background: var(--brand); }
 
 .vp-embed-time {
   padding: 0 6px; font-size: 11.5px; font-variant-numeric: tabular-nums;

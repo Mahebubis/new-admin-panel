@@ -89,7 +89,20 @@
 .syl-lesson-title { font-size: 14px; font-weight: 500; line-height: 1.4; }
 .syl-lesson.active .syl-lesson-title { font-weight: 600; }
 .syl-lesson-meta { font-size: 12px; color: var(--text-2); display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
-.syl-att { font-style: normal; color: var(--link); display: inline-flex; align-items: center; gap: 4px; }
+/* The Attachment chip is a control of its own — it opens the download sheet
+   rather than playing the lesson — so it is given a hit area, a hover and a
+   focus ring that say so. */
+.syl-att {
+  font-style: normal; color: var(--link);
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px; margin: -2px -1px;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.syl-att:hover { background: var(--seen-soft); color: var(--link); text-decoration: underline; }
+.syl-att:active { transform: scale(0.96); }
+.syl-att:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 
 /* ── "you were here" ─────────────────────────────────────────────────────
    A lesson already played reads dark blue: the title tints, the meta line

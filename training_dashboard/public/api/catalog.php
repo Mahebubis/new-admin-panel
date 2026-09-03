@@ -552,6 +552,14 @@ if ($action === 'course') {
                         ORDER BY updated_at ASC");
     while ($pr && ($p = $pr->fetch_assoc())) {
         $lid = (int)$p['lesson_id'];
+        /* A table that lost its UNIQUE (user_id, lesson_id) key can hold the
+           same lesson twice, and the newer row is not always the one that says
+           'completed'. Finishing a lesson is not something a later heartbeat
+           gets to take back, so the tick survives whichever order they arrive
+           in. */
+        if (isset($prog[$lid]) && $prog[$lid]['status'] === 'completed') {
+            $p['status'] = 'completed';
+        }
         $prog[$lid] = [
             'status'        => $p['status'],
             'watched_secs'  => (int)$p['watched_secs'],
@@ -641,13 +649,30 @@ if ($action === 'course') {
         ];
     }
 
-    $lr = $conn->query("SELECT id, section_id, title, lesson_type, video_provider, video_url,
-                               duration_secs, content, quiz_id, is_free_preview, sort_order,
-                               COALESCE(is_coming_soon, 0) is_coming_soon,
-                               COALESCE(coming_soon_note, '') coming_soon_note
-                        FROM lms_lessons
-                        WHERE course_id = $cidReal AND is_hidden = 0 AND status = 'published'
-                        ORDER BY sort_order, id");
+    /* ── ordered by MODULE first, then by position inside it ──────────────
+       `ORDER BY sort_order, id` alone was wrong, and wrong in a way that only
+       showed up at the end of a lesson. lms_lessons.sort_order counts from 1
+       again in every module — module 1 lesson 1 and module 2 lesson 1 are both
+       sort_order 1 — so ordering the whole course by it interleaved the
+       modules: lesson 1 of every module, then lesson 2 of every module, and so
+       on. The syllabus still read correctly because it groups by section, but
+       the flat list this endpoint also sends is what "up next", "play next"
+       and the resume pick all walk. Finishing module 1 lesson 1 therefore
+       jumped to module 2.
+
+       Sorting by the section's own position first puts the flat list in the
+       order the learner sees on screen. NULL/orphan sections sort last rather
+       than first, which is what COALESCE buys. */
+    $lr = $conn->query("SELECT l.id, l.section_id, l.title, l.lesson_type, l.video_provider,
+                               l.video_url, l.duration_secs, l.content, l.quiz_id,
+                               l.is_free_preview, l.sort_order,
+                               COALESCE(l.is_coming_soon, 0) is_coming_soon,
+                               COALESCE(l.coming_soon_note, '') coming_soon_note
+                        FROM lms_lessons l
+                        LEFT JOIN lms_sections s ON s.id = l.section_id
+                        WHERE l.course_id = $cidReal AND l.is_hidden = 0 AND l.status = 'published'
+                        ORDER BY COALESCE(s.sort_order, 999999), COALESCE(s.id, 999999),
+                                 l.sort_order, l.id");
     $flat = [];
     while ($lr && ($l = $lr->fetch_assoc())) {
         $lid   = (int)$l['id'];
@@ -831,12 +856,17 @@ if ($action === 'analytics') {
         SUM(lesson_type = 'form')  assignments
         FROM lms_lessons WHERE course_id = $cid AND is_hidden = 0 AND status = 'published'");
 
+    /* COUNT(DISTINCT …), and the same is_hidden/status filter the totals use.
+       A SUM() over the join counted a lesson twice on a lms_progress that had
+       lost its UNIQUE key, and counted lessons the course no longer shows —
+       either one puts "8 of 6 videos" on the learner's analytics page. */
     $done = $row("SELECT
-        SUM(l.lesson_type = 'video') videos,
-        SUM(l.lesson_type = 'quiz')  quizzes,
-        SUM(l.lesson_type = 'form')  assignments
+        COUNT(DISTINCT IF(l.lesson_type = 'video', p.lesson_id, NULL)) videos,
+        COUNT(DISTINCT IF(l.lesson_type = 'quiz',  p.lesson_id, NULL)) quizzes,
+        COUNT(DISTINCT IF(l.lesson_type = 'form',  p.lesson_id, NULL)) assignments
         FROM lms_progress p JOIN lms_lessons l ON l.id = p.lesson_id
-        WHERE p.user_id = " . (int)$uid . " AND p.course_id = $cid AND p.status = 'completed'");
+        WHERE p.user_id = " . (int)$uid . " AND p.course_id = $cid AND p.status = 'completed'
+          AND l.is_hidden = 0 AND l.status = 'published'");
 
     $quiz = $row("SELECT COUNT(*) attempts, AVG(a.percentage) avg_pct,
                          SUM(a.score) score, SUM(a.total_marks) total

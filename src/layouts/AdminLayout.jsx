@@ -1213,10 +1213,26 @@ const sidebarMenu = [
       { text: 'Monitoring', link: '/monitoring', icon: 'fas fa-wave-square', perm: 'monitoring' },
     ]
   },
+
+  {
+    key: 'freshdesk', group: 'Freshdesk', icon: 'fas fa-headset', items: [
+      { text: 'Freshdesk', link: '/freshdesk', icon: 'fas fa-ticket', perm: 'freshdesk' },
+    ]
+  },
+
+  {
+    key: 'enrollment_audit', group: 'Enrollment Audit', icon: 'fas fa-file-circle-check', items: [
+      { text: 'Enrollment Audit', link: '/enrollment-audit', icon: 'fas fa-file-import', perm: 'enrollment_audit' },
+    ]
+  },
 ];
 
 // Routes that need maximum table width — collapse sidebar on entry.
-const AUTO_COLLAPSE_ROUTES = ['/reports/meta-old', '/reports/agency-2'];
+// '/freshdesk' brings its own right-hand rail, which starts expanded; this
+// effect (not the bus) does the collapse because it is owned by THIS component,
+// so it also fires on a direct page load, where a child's mount announcement
+// would arrive before the listener below is subscribed.
+const AUTO_COLLAPSE_ROUTES = ['/reports/meta-old', '/reports/agency-2', '/freshdesk'];
 
 export default function AdminLayout() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebarCollapsed') === '1');
@@ -1239,10 +1255,11 @@ export default function AdminLayout() {
     }
   }, [location.pathname]);
 
-  // The LMS section navigates from its own right-hand rail; the two are
-  // mutually exclusive, so whenever that rail expands this sidebar folds.
-  // LmsLayout announces on mount, which is what collapses us on entering /lms.
-  useEffect(() => onExpanded(which => { if (which === 'lms') setCollapsed(true); }), []);
+  // Some sections navigate from their own right-hand rail (LMS, Freshdesk); a
+  // rail and this sidebar are mutually exclusive, so whenever any of them
+  // expands this sidebar folds. They announce on mount, which is what collapses
+  // us on entering /lms or /freshdesk.
+  useEffect(() => onExpanded(which => { if (which !== 'admin') setCollapsed(true); }), []);
 
   // Collapsed-sidebar tooltip flyout — rendered via portal so it escapes
   // the sidebar's overflow-hidden clipping.
@@ -1314,7 +1331,7 @@ export default function AdminLayout() {
     const next = !collapsed;
     setCollapsed(next);
     localStorage.setItem('sidebarCollapsed', next ? '1' : '0');
-    // Expanding here pushes the LMS rail closed (see hooks/sidebarBus.js).
+    // Expanding here pushes any section rail closed (see hooks/sidebarBus.js).
     if (!next) announceExpanded('admin');
   };
 

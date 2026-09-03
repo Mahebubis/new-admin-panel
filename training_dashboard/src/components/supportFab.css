@@ -1,0 +1,119 @@
+/* ===========================================================================
+   supportFab.css — the draggable support button.
+
+   Fixed, above the header and the player but below the attachment sheet, and
+   positioned only with left/top so a drag and the snap that follows animate
+   the same two properties.
+   =========================================================================== */
+
+.fab {
+  position: fixed;
+  z-index: 3000;                 /* over the header (60) and the toast (80) */
+  width: var(--fab-size, 56px);
+  height: var(--fab-size, 56px);
+  transition: left 0.26s var(--ease), top 0.26s var(--ease);
+}
+
+/* While a finger is on it there is nothing to animate — the pointer IS the
+   animation, and easing here would make it lag behind the touch. */
+.fab-dragging { transition: none; }
+
+.fab-btn {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  border: none; border-radius: 50%;
+  background: var(--brand);
+  color: #fff;
+  box-shadow: 0 8px 22px rgba(226, 118, 27, 0.42), 0 2px 6px rgba(20, 33, 61, 0.18);
+  cursor: grab;
+  /* The browser must not claim the gesture for scrolling before we see it. */
+  touch-action: none;
+  -webkit-user-select: none; user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--fast) var(--ease), transform var(--fast) var(--ease),
+              box-shadow var(--fast) var(--ease);
+}
+.fab-btn:hover { background: var(--brand-strong); transform: scale(1.05); }
+.fab-btn:active { transform: scale(0.96); }
+.fab-dragging .fab-btn {
+  cursor: grabbing;
+  transform: scale(1.08);
+  box-shadow: 0 14px 32px rgba(226, 118, 27, 0.5), 0 4px 10px rgba(20, 33, 61, 0.24);
+}
+.fab-btn:focus-visible { outline: 3px solid var(--brand-ring); outline-offset: 3px; }
+
+/* ── the hover label ────────────────────────────────────────────────────
+   On the side facing the middle of the screen, so it never runs off the
+   edge the button is parked against. */
+.fab-label {
+  position: absolute;
+  top: 50%;
+  white-space: nowrap;
+  padding: 7px 12px;
+  border-radius: var(--r-pill);
+  background: var(--text);
+  color: var(--bg);
+  font-size: 12.5px; font-weight: 600; letter-spacing: 0.01em;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) scale(0.94);
+  transition: opacity var(--fast) var(--ease), transform var(--fast) var(--ease);
+}
+.fab-right .fab-label { right: calc(100% + 10px); transform-origin: right center; }
+.fab-left  .fab-label { left:  calc(100% + 10px); transform-origin: left center; }
+
+.fab:hover .fab-label,
+.fab:focus-within .fab-label { opacity: 1; transform: translateY(-50%) scale(1); }
+.fab-dragging .fab-label { opacity: 0; }
+
+/* ── the dismiss ────────────────────────────────────────────────────────
+   Tucked on the inward-facing corner so it stays on screen whichever edge
+   the button has been parked against. */
+.fab-x {
+  position: absolute;
+  top: -5px;
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--text-2);
+  font-size: 15px; line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--shadow-xs);
+  opacity: 0;
+  /* It hangs outside the wrapper, so hovering it cannot be what reveals it —
+     invisible means untouchable, or it would be a stray hit target sitting
+     next to the button. */
+  pointer-events: none;
+  transition: opacity var(--fast) var(--ease), background var(--fast) var(--ease),
+              color var(--fast) var(--ease);
+}
+.fab-right .fab-x { left: -5px; }
+.fab-left  .fab-x { right: -5px; }
+.fab-x:hover { background: var(--danger-soft); color: var(--danger); }
+
+.fab:hover .fab-x,
+.fab:focus-within .fab-x { opacity: 1; pointer-events: auto; }
+.fab-dragging .fab-x { opacity: 0; pointer-events: none; }
+
+/* ── touch ──────────────────────────────────────────────────────────────
+   There is no hover on a phone, so the dismiss would be unreachable if it
+   waited for one. It stays visible instead, and the label — which only ever
+   repeated what the icon says — goes away entirely. */
+@media (hover: none) {
+  .fab-x { opacity: 1; pointer-events: auto; }
+  .fab-label { display: none; }
+}
+
+@media (max-width: 720px) {
+  .fab { --fab-size: 52px; }
+  .fab-btn { box-shadow: 0 6px 18px rgba(226, 118, 27, 0.42), 0 2px 5px rgba(20, 33, 61, 0.18); }
+  .fab-x { width: 24px; height: 24px; font-size: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fab, .fab-btn, .fab-label, .fab-x { transition-duration: 0.01ms; }
+  .fab-btn:hover, .fab-dragging .fab-btn { transform: none; }
+}

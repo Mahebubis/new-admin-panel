@@ -61,6 +61,12 @@ const EXTRA_SECTION_PERMISSIONS = {
   'Monitoring': {
     monitoring: 'Monitoring (uptime & synthetic checks)',
   },
+  'Freshdesk': {
+    freshdesk: 'Freshdesk',
+  },
+  'Enrollment Audit': {
+    enrollment_audit: 'Enrollment Audit (upload & cross-check enrollments)',
+  },
 };
 
 /* ─── section → icon emoji map (mirrors PHP sectionIconMap) ─── */
@@ -88,6 +94,8 @@ const SECTION_ICONS = {
   'Notes': '📝',
   'LMS': '🎓',
   'Monitoring': '📡',
+  'Freshdesk': '🎫',
+  'Enrollment Audit': '📋',
 };
 
 /* ─── helpers ─── */

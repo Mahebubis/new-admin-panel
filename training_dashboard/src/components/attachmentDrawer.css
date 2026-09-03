@@ -1,0 +1,186 @@
+/* ===========================================================================
+   attachmentDrawer.css — the "Download Attachments" sheet.
+
+   Anchored to the top of the viewport and slid down into place, so it reads
+   as something pulled out of the header rather than a box that appeared in
+   the middle of the page. Same motion on a phone; only the width, padding and
+   the row layout change.
+   =========================================================================== */
+
+.att {
+  position: fixed;
+  inset: 0;
+  z-index: 4200;                 /* above the sticky header and the stage */
+  background: rgba(10, 12, 16, 0.55);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 7vh 24px 24px;
+  animation: att-fade 0.18s var(--ease);
+  overflow-y: auto;
+}
+
+@keyframes att-fade { from { opacity: 0; } to { opacity: 1; } }
+
+.att-panel {
+  position: relative;
+  width: min(720px, 100%);
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: 0 26px 60px rgba(10, 12, 16, 0.32);
+  padding: 30px 34px 12px;
+  transform-origin: top center;
+  animation: att-drop 0.28s var(--ease);
+}
+
+/* Down from above the top edge, with a touch of overshoot so it settles
+   rather than stops dead. */
+@keyframes att-drop {
+  from { opacity: 0; transform: translateY(-46px) scale(0.98); }
+  65%  { opacity: 1; transform: translateY(5px) scale(1); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .att, .att-panel { animation-duration: 0.01ms; }
+}
+
+.att-x {
+  position: absolute;
+  top: 16px; right: 18px;
+  width: 36px; height: 36px;
+  border: none; border-radius: 50%;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 26px; line-height: 1;
+  cursor: pointer;
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.att-x:hover { background: var(--bg-soft); color: var(--text); }
+
+.att-head { padding-right: 44px; }
+.att-title {
+  margin: 0;
+  font-size: 28px; font-weight: 700; letter-spacing: -0.02em;
+}
+.att-sub {
+  margin: 8px 0 0;
+  font-size: 13.5px; color: var(--text-2);
+}
+
+.att-none {
+  margin: 26px 0 22px;
+  font-size: 14px; color: var(--text-2);
+}
+
+.att-list {
+  margin-top: 22px;
+  max-height: min(56vh, 480px);
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+
+.att-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.att-ico {
+  flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px;
+  border-radius: var(--r);
+  background: var(--bg-soft);
+  color: var(--text-2);
+}
+
+.att-name {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.att-file {
+  font-size: 14.5px; font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.att-meta {
+  font-style: normal;
+  font-size: 11.5px; letter-spacing: 0.04em; color: var(--text-3);
+}
+
+.att-open {
+  flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px;
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.att-open:hover { background: var(--bg-soft); color: var(--brand); }
+
+.att-dl {
+  flex: none;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 9px 16px;
+  border: 1px solid transparent; border-radius: var(--r);
+  background: transparent;
+  color: var(--brand);
+  font-size: 14px; font-weight: 600;
+  cursor: pointer;
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease),
+              color var(--fast) var(--ease), transform var(--fast) var(--ease);
+}
+.att-dl:hover:not(:disabled) { background: var(--brand-soft); border-color: var(--brand-ring); }
+.att-dl:active:not(:disabled) { transform: scale(0.97); }
+.att-dl:disabled { color: var(--text-3); cursor: default; }
+
+.att-foot {
+  display: flex; justify-content: flex-end;
+  padding: 14px 0 18px;
+}
+.att-all {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 18px;
+  border: 1px solid var(--border-2); border-radius: var(--r);
+  background: transparent; color: var(--text);
+  font-size: 13.5px; font-weight: 600;
+  cursor: pointer;
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.att-all:hover:not(:disabled) { background: var(--bg-soft); border-color: var(--text-3); }
+.att-all:disabled { color: var(--text-3); cursor: default; }
+
+/* Empty sheets should not carry the list's bottom rule into the footer. */
+.att-list .att-row:last-child { border-bottom: none; }
+
+/* ── phone ──────────────────────────────────────────────────────────────
+   The sheet reaches the top edge and spans the width, and each row stacks
+   so a long file name is not squeezed against the Download button. */
+@media (max-width: 720px) {
+  .att { padding: 0; }
+  .att-panel {
+    width: 100%;
+    border-radius: 0 0 var(--r-lg) var(--r-lg);
+    border-top: none;
+    padding: 24px 18px 8px;
+  }
+  .att-title { font-size: 22px; }
+  .att-x { top: 12px; right: 10px; }
+  .att-list { max-height: 62vh; }
+  .att-row {
+    flex-wrap: wrap;
+    row-gap: 10px;
+    padding: 14px 2px;
+  }
+  .att-name { flex-basis: calc(100% - 90px); }
+  .att-dl {
+    margin-left: auto;
+    padding: 8px 14px;
+  }
+  .att-foot { padding-bottom: 14px; }
+}

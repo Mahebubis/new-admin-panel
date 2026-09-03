@@ -331,8 +331,15 @@ export default function LmsCourses() {
     const patch = (v) => setCourses(list => list.map(c => (c.id === course.id ? { ...c, is_enabled: v } : c)));
     patch(next);
     try {
-      await LMS.toggleCourseEnabled(course.id, next);
-      toast.success(next ? 'Course switched on' : 'Course switched off for user_dashboard');
+      /* The switch carries every lesson's published state with it, so the
+         toast reports the cascade — the count is the only sign of it on this
+         screen, which shows courses and not lessons. */
+      const d = await LMS.toggleCourseEnabled(course.id, next);
+      const n = Number(d?.lessons_touched ?? 0);
+      toast.success(
+        (next ? 'Course switched on' : 'Course switched off for user_dashboard')
+        + (n ? ` — ${n} lesson${n === 1 ? '' : 's'} ${next ? 'published' : 'unpublished'}` : '')
+      );
     } catch (e) {
       toast.error(e.message);
       patch(was);

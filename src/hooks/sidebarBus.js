@@ -1,18 +1,18 @@
 // ===========================================================================
-//  sidebarBus.js — keeps the admin panel's LEFT sidebar and the LMS section's
-//  RIGHT rail mutually exclusive.
+//  sidebarBus.js — keeps the admin panel's LEFT sidebar and a section's own
+//  RIGHT rail mutually exclusive. Sections with a rail: LMS, Freshdesk.
 //
-//  The LMS screens are wide (course tables, the lesson editor, reports), so
-//  only one of the two navigations may be expanded at a time: opening one
-//  announces itself on this bus and the other one folds away. Both listeners
-//  live in different route levels (AdminLayout wraps <Outlet/>, LmsLayout is
-//  rendered inside it), so a plain module-level emitter is simpler — and much
-//  less invasive — than threading a context through the whole layout tree.
+//  Those screens are wide (course tables, the lesson editor, ticket lists and
+//  reports), so only one of the two navigations may be expanded at a time:
+//  opening one announces itself on this bus and the other one folds away. The
+//  listeners live at different route levels (AdminLayout wraps <Outlet/>, the
+//  section pages render inside it), so a plain module-level emitter is simpler
+//  — and much less invasive — than threading a context through the layout tree.
 // ===========================================================================
 
 const listeners = new Set();
 
-/** Broadcast which navigation just expanded: 'admin' | 'lms'. */
+/** Broadcast which navigation just expanded: 'admin' | 'lms' | 'freshdesk'. */
 export function announceExpanded(which) {
   listeners.forEach(fn => { try { fn(which); } catch { /* never break the UI */ } });
 }

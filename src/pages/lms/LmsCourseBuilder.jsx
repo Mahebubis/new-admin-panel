@@ -443,7 +443,11 @@ export default function LmsCourseBuilder() {
      One per course, and the only place it exists. It was per-module and
      per-lesson for a day: that was a level too far down, because
      user_dashboard routes a buyer at a course, so three hundred toggles were
-     expressing one decision. */
+     expressing one decision.
+
+     It also carries EVERY LESSON's published state with it — on publishes them
+     all, off puts them all back to draft — so the outline is reloaded after
+     the call rather than patched: every lesson badge on screen just changed. */
   const [switching, setSwitching] = useState(false);
   const toggleCourseEnabled = async () => {
     const was  = Number(course.is_enabled ?? 1);
@@ -451,8 +455,11 @@ export default function LmsCourseBuilder() {
     setSwitching(true);
     setCourse(c => ({ ...c, is_enabled: next }));
     try {
-      await LMS.toggleCourseEnabled(Number(courseId), next);
-      toast.success(next ? 'Course switched on' : 'Course switched off');
+      const d = await LMS.toggleCourseEnabled(Number(courseId), next);
+      const n = Number(d?.lessons_touched ?? 0);
+      const lessons = n ? ` — ${n} lesson${n === 1 ? '' : 's'} ${next ? 'published' : 'unpublished'}` : '';
+      toast.success((next ? 'Course switched on' : 'Course switched off') + lessons);
+      load();
     } catch (e) {
       toast.error(e.message);
       setCourse(c => ({ ...c, is_enabled: was }));

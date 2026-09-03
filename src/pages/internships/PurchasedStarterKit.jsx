@@ -601,7 +601,7 @@ function AddOrderModal({ onClose, onCreated }) {
         (d.from === 'account' ? 'Filled from their account' : 'Filled from their last store order')
         + (d.orders ? ` · ${d.orders} existing order(s)` : '')
       );
-    } catch { setLookMsg('Lookup failed'); }
+    } catch (ex) { setLookMsg(ex?.response?.data?.message || 'Lookup failed'); }
     finally { setLooking(false); }
   };
 
@@ -673,7 +673,7 @@ function AddOrderModal({ onClose, onCreated }) {
           {/* email + lookup */}
           <Field label="Email" required
             hint={lookMsg || 'The name and phone are pulled from this email'}
-            hintColor={lookMsg && lookMsg.startsWith('No account') ? '#b45309' : '#16a34a'}>
+            hintColor={lookMsg && !lookMsg.startsWith('Filled') ? '#b45309' : '#16a34a'}>
             <div style={{ display:'flex', gap:8 }}>
               <input type="email" value={email} autoFocus
                 onChange={ev => { setEmail(ev.target.value); setLookMsg(''); }}

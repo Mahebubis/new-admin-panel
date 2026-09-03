@@ -5,6 +5,7 @@
 import { Outlet } from 'react-router-dom';
 import Header from './Header';
 import Footer from './Footer';
+import SupportFab from './SupportFab';
 import { EmptyFigure } from './icons';
 
 export default function Layout({ bare = false }) {
@@ -15,6 +16,9 @@ export default function Layout({ bare = false }) {
         <Outlet />
       </main>
       {!bare && <Footer />}
+      {/* Every signed-in screen hangs off this layout, so one mount here is
+          the support door on all of them. */}
+      <SupportFab />
     </div>
   );
 }

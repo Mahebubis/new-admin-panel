@@ -108,6 +108,8 @@ export const VolumeX  = (p) => <Icon {...p}><path d="M4 9.5h3.2L12 5.5v13L7.2 14
 export const Compress = (p) => <Icon {...p}><path d="M9 3v6H3M15 21v-6h6M21 9h-6V3M3 15h6v6" /></Icon>;
 /* The dot that marks a lesson the learner has already been inside. */
 export const History  = (p) => <Icon {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v5.2l3.2 1.9" /></Icon>;
+/* Watch it again — the loop the end-of-lesson card offers. */
+export const Replay   = (p) => <Icon {...p}><path d="M3 12a9 9 0 1 1 3 6.7" /><path d="M3 5v5h5" /></Icon>;
 
 /* ── documents, uploads and the support desk ─────────────────────────────── */
 export const Download     = (p) => <Icon {...p}><path d="M12 3v12M7.5 10.5 12 15l4.5-4.5" /><path d="M4 20h16" /></Icon>;

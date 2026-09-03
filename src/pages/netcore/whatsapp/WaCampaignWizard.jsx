@@ -375,23 +375,16 @@ export default function WaCampaignWizard() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginBottom: 16 }}>
-              {['No sending number selected',
-                'No API key for the selected sending number',
-                'The selected sending number is switched off',
-                'No template selected', 'Template variables are not all filled in',
-                'Message text is empty', 'Audience has 0 reachable WhatsApp numbers']
-                .filter(msg => checks.blocking.includes(msg) || defaultCheckShown(msg, draft))
-                .map(msg => {
-                  const failed = checks.blocking.includes(msg);
-                  return (
-                    <div key={msg} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ width: 20, height: 20, borderRadius: '50%', flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: failed ? '#fee2e2' : '#dcfce7', color: failed ? '#dc2626' : '#16a34a', fontSize: 12 }}>
-                        {failed ? '✕' : '✓'}
-                      </span>
-                      <span style={{ fontSize: 12.5, color: failed ? '#dc2626' : '#334155' }}>{checkLabel(msg, checks)}</span>
-                    </div>
-                  );
-                })}
+              {checklistRows(checks, draft).map(({ msg, failed }) => (
+                <div key={msg} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <span style={{ width: 20, height: 20, borderRadius: '50%', flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: failed ? '#fee2e2' : '#dcfce7', color: failed ? '#dc2626' : '#16a34a', fontSize: 12, marginTop: 1 }}>
+                    {failed ? '✕' : '✓'}
+                  </span>
+                  <span style={{ fontSize: 12.5, color: failed ? '#dc2626' : '#334155', lineHeight: 1.5 }}>
+                    {checkLabel(msg, checks)}
+                  </span>
+                </div>
+              ))}
             </div>
 
             {(checks.warnings || []).length > 0 && (
@@ -428,19 +421,85 @@ function defaultCheckShown(msg, draft) {
   return true;
 }
 
+/*
+ * The reassuring checks we show even when they pass, so the dialog reads as a
+ * pre-flight list rather than only appearing when something is wrong.
+ */
+const REASSURING_CHECKS = [
+  'No sending number selected',
+  'No Netcore API key on the selected sending number',
+  'The selected sending number is switched off',
+  'No template selected',
+  'Template variables are not all filled in',
+  'Message text is empty',
+  'Audience has 0 reachable WhatsApp numbers',
+];
+
+/**
+ * Every row the dialog should show: the standing pre-flight checks, plus ANY
+ * other reason the server refused.
+ *
+ * This used to render a fixed list of seven strings and match the server's
+ * messages against it. The server can produce thirteen, so a blocker it did not
+ * recognise — a missing Meta phone number ID, an unconfigured access token, a
+ * template disabled by Meta — vanished from the list entirely. The result was a
+ * dialog showing all green ticks, a red "needs attention" heading and a dead
+ * Send button, with the actual reason nowhere on screen.
+ *
+ * Anything unrecognised is now shown verbatim. A slightly raw sentence is far
+ * better than a hidden one.
+ */
+function checklistRows(checks, draft) {
+  const blocking = checks?.blocking || [];
+  const rows = [];
+  const seen = new Set();
+
+  for (const msg of REASSURING_CHECKS) {
+    if (!blocking.includes(msg) && !defaultCheckShown(msg, draft)) continue;
+    rows.push({ msg, failed: blocking.includes(msg) });
+    seen.add(msg);
+  }
+
+  // Server-side blockers with no friendly label of their own.
+  for (const msg of blocking) {
+    if (seen.has(msg)) continue;
+    rows.push({ msg, failed: true });
+    seen.add(msg);
+  }
+
+  // Failures first — the reason you opened this dialog should be at the top.
+  return rows.sort((a, b) => Number(b.failed) - Number(a.failed));
+}
+
+/*
+ * Turns a server-side failure message into the positive form, so a passing row
+ * reads as "Template selected ✓" rather than "No template selected ✓".
+ *
+ * Keys must match wa_validate_for_send() in wa_campaigns.php EXACTLY. A
+ * mismatch is invisible: the row simply shows the raw sentence. That is why
+ * "No Netcore API key on the selected sending number" is spelled out in full —
+ * the old label said "No API key for the selected sending number", which the
+ * server has never once produced, so that check could never render.
+ */
+const POSITIVE_LABEL = {
+  'No sending number selected': 'Sending number selected',
+  'No Netcore API key on the selected sending number': 'API key set for that number',
+  'No phone number ID for the selected sending number': 'Phone number ID set for that number',
+  'Meta access token is not configured': 'Meta access token configured',
+  'The selected sending number is switched off': 'That number is available for sending',
+  'No template selected': 'Template selected',
+  'Template variables are not all filled in': 'All template variables filled in',
+  'Message text is empty': 'Message text written',
+};
+
 function checkLabel(msg, checks) {
   if (msg === 'Audience has 0 reachable WhatsApp numbers') {
     return `Reachable WhatsApp numbers (${n0(checks.audience?.count)})`;
   }
-  return msg
-    .replace(' is not configured', ' configured')
-    .replace(' is not set', ' set')
-    .replace('No sending number selected', 'Sending number selected')
-    .replace('No API key for the selected sending number', 'API key set for that number')
-    .replace('The selected sending number is switched off', 'That number is available for sending')
-    .replace('No template selected', 'Template selected')
-    .replace('Template variables are not all filled in', 'All template variables filled in')
-    .replace('Message text is empty', 'Message text written');
+  // Unmapped messages (template disabled/rejected/pending, which carry the
+  // template name and Meta's own reason) are shown exactly as the server wrote
+  // them — they are already a full sentence and rewording would lose detail.
+  return POSITIVE_LABEL[msg] || msg;
 }
 
 function countVars(text) {

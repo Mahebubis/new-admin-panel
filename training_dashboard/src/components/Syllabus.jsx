@@ -16,6 +16,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Attachment, CheckCircle, ChevronDown, ChevronUp, History, LessonIcon, Lock, Search } from './icons';
+import AttachmentDrawer from './AttachmentDrawer';
 import './syllabus.css';
 
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -50,6 +51,20 @@ export default function Syllabus({ course, sections, progress, activeId, nextId,
     const holder = sections.find((s) => s.lessons.some((l) => l.id === activeId));
     if (holder && !open.has(holder.id)) setOpen((prev) => new Set(prev).add(holder.id));
   }
+
+  /* The lesson whose files the "Download Attachments" sheet is showing — 0
+     when it is closed. Tapping the Attachment chip on a row sets it, which is
+     the only thing that chip used to be missing. Held as an id, not the row
+     object, so a syllabus refresh behind the open sheet keeps it in step. */
+  const [attId, setAttId] = useState(0);
+  const attFor = useMemo(() => {
+    if (!attId) return null;
+    for (const s of sections) {
+      const found = s.lessons.find((l) => l.id === attId);
+      if (found) return found;
+    }
+    return null;
+  }, [attId, sections]);
 
   useEffect(() => { if (searching) searchRef.current?.focus(); }, [searching]);
 
@@ -230,8 +245,30 @@ export default function Syllabus({ course, sections, progress, activeId, nextId,
                                   : `Watched ${clock(at)}`}
                               </em></>
                             )}
+                            {/* The chip is its own control inside the row:
+                                it opens the download sheet instead of
+                                playing the lesson, so stop the click before
+                                the row's onPick sees it. A span rather than
+                                a button because the row itself is one. */}
                             {l.attachments?.length > 0 && (
-                              <> • <em className="syl-att"><Attachment size={13} /> Attachment</em></>
+                              <> • <em
+                                className="syl-att"
+                                role="button"
+                                tabIndex={0}
+                                title="Download attachments"
+                                onClick={(e) => { e.stopPropagation(); setAttId(l.id); }}
+                                onKeyDown={(e) => {
+                                  if (e.key !== 'Enter' && e.key !== ' ') return;
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setAttId(l.id);
+                                }}
+                              >
+                                <Attachment size={13} />
+                                {l.attachments.length > 1
+                                  ? ` ${l.attachments.length} Attachments`
+                                  : ' Attachment'}
+                              </em></>
                             )}
                           </span>
                         </span>
@@ -256,6 +293,8 @@ export default function Syllabus({ course, sections, progress, activeId, nextId,
           );
         })}
       </div>
+
+      <AttachmentDrawer lesson={attFor} onClose={() => setAttId(0)} />
     </aside>
   );
 }

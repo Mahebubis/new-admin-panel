@@ -25,16 +25,18 @@ const emptyQuiz = {
 };
 
 /* ── batch create: one quiz per spreadsheet ─────────────────────────────────
-   The first quiz is titled exactly what was typed; every one after it gets a
-   " (n)" suffix, so picking four files reads like the admin created the quiz
-   four times by hand:
+   EACH QUIZ IS NAMED AFTER ITS OWN FILE. Pick four sheets with ctrl-click and
+   the four quizzes come out carrying the sheet names, character for character:
 
-     Quiz Section 1 · Quiz Section 1 (2) · Quiz Section 1 (3) · Quiz Section 1 (4)
+     Module 1 — HTML.xlsx  ->  Module 1 — HTML
+     Module 2 — CSS.xlsx   ->  Module 2 — CSS
 
-   The number comes from the FILE's position, not from how many succeeded. A
-   sheet that fails to parse still burns its number, which keeps "(5)" pointing
-   at the fifth file no matter what happened to the ones before it. */
-const batchTitle = (base, i) => (i === 0 ? base : `${base} (${i + 1})`);
+   Only the extension is dropped; nothing is renumbered, re-cased or trimmed of
+   anything else, because the file names ARE the question banks' names and they
+   are what the admin will look for in the quiz list afterwards. The title box
+   above is only used when a single quiz is created with no file at all. */
+const stripExt = (name) => String(name).replace(/\.[^.]+$/, '').trim();
+const fileTitle = (file, base) => stripExt(file?.name || '') || base || 'Untitled quiz';
 
 /* Question banks are named with bare numbers ("Section Quiz 2", "...10"), and
    a plain string sort puts 10 immediately after 1. */
@@ -150,8 +152,8 @@ export default function LmsQuizzes() {
      that fails does not stop the ones after it; its row carries the reason. */
   const runBatch = async () => {
     const base = draft.title.trim();
-    const rows = files.map((f, i) => ({
-      file: f.name, title: batchTitle(base, i), state: 'wait', note: '',
+    const rows = files.map(f => ({
+      file: f.name, title: fileTitle(f, base), state: 'wait', note: '',
     }));
     setBatch(rows);
     setSaving(true);
@@ -194,8 +196,10 @@ export default function LmsQuizzes() {
   };
 
   const save = async () => {
-    if (!draft.title.trim()) return toast.error('Quiz title is required');
+    /* With files picked the titles come from the file names, so the box above
+       is allowed to be empty — it is only the name of a hand-built quiz. */
     if (!draft.id && files.length) return runBatch();
+    if (!draft.title.trim()) return toast.error('Quiz title is required');
     setSaving(true);
     try {
       const payload = quizPayload();
@@ -366,9 +370,17 @@ export default function LmsQuizzes() {
         {draft && (
           <>
             <div className="lms-field">
-              <label className="lms-label">Quiz title<span className="req">*</span></label>
+              <label className="lms-label">
+                Quiz title{!(!draft.id && files.length) && <span className="req">*</span>}
+              </label>
               <input className="lms-input" autoFocus placeholder="e.g. Module 1 — Python Basics"
                 value={draft.title} onChange={e => setDraft(d => ({ ...d, title: e.target.value }))} />
+              {!draft.id && files.length > 0 && (
+                <p className="lms-help">
+                  Not used — each quiz below is named after its own file. Remove the files to
+                  create one quiz with this title instead.
+                </p>
+              )}
             </div>
             <div className="lms-field">
               <label className="lms-label">Description</label>
@@ -411,16 +423,17 @@ export default function LmsQuizzes() {
                   <Upload size={15} /> {files.length ? 'Add more files' : 'Choose files'}
                 </button>
                 <p className="lms-help">
-                  Optional — one spreadsheet per quiz. Every file becomes its own quiz, numbered
-                  from the title above, and all of them get the rules, course and status set here.
+                  Optional — one spreadsheet per quiz. Pick as many as you like (ctrl-click):
+                  every file becomes its own quiz <b>named exactly after the file</b> (without
+                  the .xlsx / .csv), and all of them get the rules, course and status set here.
                   Leave this empty to create a single quiz and add questions by hand.
                 </p>
 
                 {(batch || files).length > 0 && (
                   <div className="lms-batch" style={{ marginTop: 12 }}>
-                    {(batch || files.map((f, i) => ({
+                    {(batch || files.map(f => ({
                       file: f.name,
-                      title: batchTitle(draft.title.trim() || 'Untitled quiz', i),
+                      title: fileTitle(f, draft.title.trim()),
                       state: 'wait',
                       note: '',
                     }))).map((r, i) => (

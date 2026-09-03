@@ -112,6 +112,7 @@ export default function VideoPlayer({
   onEnded,
   title,
   autoPlay = false,   // start on its own once the source is playable
+  replayToken = 0,    // bumped by "Revise This Lesson" — back to 0:00 and play
 }) {
   const kind = video?.kind || 'none';
   const native = kind === 'file' || kind === 'hls';
@@ -390,6 +391,124 @@ export default function VideoPlayer({
 
   useEffect(() => () => clearTimeout(hideAt.current), []);
 
+  /* ── the reconciler ───────────────────────────────────────────────────────
+     Every reading below already arrives as a media event, and for most people
+     that is enough. It is not enough for everyone, and the failure is ugly:
+     the lecture plays while the stage shows a big play button over it and the
+     control bar is gone. That is `playing` stuck at false — the bar hides
+     itself off `el.paused`, which is true to the element, while the button
+     renders off React state, which is not.
+
+     An event can go missing for reasons this component cannot prevent:
+
+       a warm cache      the file is already local, so `loadeddata` and
+                         `canplay` can fire before this element is listening
+                         at all — which is exactly why the same lesson behaves
+                         in a fresh incognito window and misbehaves in the
+                         profile that has watched it before
+       an extension      video-downloader add-ons re-wrap the element and eat
+                         events on the way past
+       bfcache / restore a tab coming back from the back-forward cache resumes
+                         a playing video without replaying its event history
+
+     So the element is polled, and it is the element — never our own state —
+     that wins. Any desync corrects itself inside 400ms instead of lasting the
+     whole lesson. It costs one cheap property read a few times a second.
+
+     It doubles as a floor under progress reporting: `advance` is fed here too,
+     so a lesson whose `timeupdate` events are being swallowed still records
+     what was watched. advance() measures gaps between readings, so being
+     called twice with the same playhead adds nothing. */
+  const armed = useRef(false);            // has THIS source been attached yet
+  useEffect(() => { armed.current = false; }, [sourceKey]);
+
+  useEffect(() => {
+    if (!native) return undefined;
+    const since = Date.now();
+
+    const sync = () => {
+      const el = videoRef.current;
+      if (!el || !armed.current) return;
+
+      /* Ready means there is a frame to show (HAVE_CURRENT_DATA), not merely
+         that the duration is known — a bar reading 0:00 over a black box is
+         furniture. The one exception is a source that has given us metadata
+         and then stalled: after seven seconds the controls appear anyway,
+         because an endless spinner the learner cannot press play on is worse
+         than a player that has to buffer. */
+      const enough = el.readyState >= 2 || (el.readyState >= 1 && Date.now() - since > 7000);
+      /* `el.error` and not our own state, so a source that recovers — a retry,
+         a network blip that resolved — comes back on its own instead of
+         leaving the learner on a failure screen over a working video. */
+      if (enough && !el.error) {
+        setState('ready');
+        tryAutoPlay();
+      }
+      /* Only a genuinely buffered element clears the buffering spinner —
+         "not paused" is exactly what a stalled video looks like. */
+      if (el.readyState >= 3) setWaiting(false);
+
+      const live = !el.paused && !el.ended;
+      setPlaying((p) => (p === live ? p : live));
+      /* A paused video must never be left with its controls hidden — that is
+         the state the learner is stuck in when they cannot find play. */
+      if (!live) setUiOn(true);
+
+      if (Number.isFinite(el.duration) && el.duration > 0) {
+        dur.current = el.duration;
+        setLen((l) => (Math.abs(l - el.duration) < 0.01 ? l : el.duration));
+      }
+      setCur((c) => (Math.abs(c - el.currentTime) < 0.05 ? c : el.currentTime));
+      setVol((v) => (v === el.volume ? v : el.volume));
+      setMuted((m) => (m === el.muted ? m : el.muted));
+      setRate((r) => (r === el.playbackRate ? r : el.playbackRate));
+
+      if (live) advance(el.currentTime, el.duration);
+    };
+
+    sync();                                   // catch up on whatever we missed
+    const id = setInterval(sync, 400);
+    return () => clearInterval(id);
+  }, [native, sourceKey, advance, tryAutoPlay]);
+
+  /* ── "Revise This Lesson" ─────────────────────────────────────────────────
+     Back to the top and play, without remounting the player: the file is
+     already buffered, so a rewatch starts instantly instead of reloading the
+     whole source. The end-of-lesson one-shot is re-armed too, so finishing it
+     a second time asks a second time. */
+  useEffect(() => {
+    if (!replayToken) return;
+    seeded.current = true;             // do not seek back to `startAt` this time
+    tick.current = 0;                  // a jump to 0 is not −23 minutes watched
+    pos.current = 0;
+    sentPos.current = -1;
+    /* The one-shot re-arms itself: maybeEnded() clears it as soon as the
+       playhead is back inside the video, which is what seeking to 0 does. */
+
+    if (native) {
+      const el = videoRef.current;
+      if (el) {
+        el.currentTime = 0;
+        el.play().catch(() => setBlocked(true));
+      }
+    } else if (drivable) {
+      postToFrame('setCurrentTime', 0);
+      postToFrame('play');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replayToken]);
+
+  /* The same guarantee for an embed, which has no readyState to poll: its
+     `load` event is the only thing that clears the spinner, and a frame served
+     from cache can fire that before React is listening. Eight seconds is far
+     longer than any embed takes and far shorter than a learner will sit in
+     front of a spinner wondering whether the course is broken. */
+  useEffect(() => {
+    if (!IFRAME_KINDS.has(kind)) return undefined;
+    const t = setTimeout(() => setState((s) => (s === 'loading' ? 'ready' : s)), 8000);
+    return () => clearTimeout(t);
+  }, [kind, sourceKey]);
+
   /* ── native <video>: MP4/WebM directly, .m3u8 through hls.js ─────────── */
   useEffect(() => {
     if (!native) return;
@@ -400,10 +519,18 @@ export default function VideoPlayer({
     let hls = null;
 
     const attach = async () => {
-      if (kind === 'file') { el.src = video.src; return; }
+      /* `armed` gates the reconciler above: until the new source is on the
+         element, its readyState still describes the PREVIOUS lesson, and
+         reading it would flip the stage to "ready" over the last frame of a
+         video the learner has already left. */
+      if (kind === 'file') { el.src = video.src; armed.current = true; return; }
 
       /* Safari/iOS ship HLS in the element; everyone else needs hls.js. */
-      if (el.canPlayType('application/vnd.apple.mpegurl')) { el.src = video.src; return; }
+      if (el.canPlayType('application/vnd.apple.mpegurl')) {
+        el.src = video.src;
+        armed.current = true;
+        return;
+      }
 
       try {
         const Hls = await loadHls();
@@ -413,6 +540,7 @@ export default function VideoPlayer({
         hlsRef.current = hls;
         hls.loadSource(video.src);
         hls.attachMedia(el);
+        armed.current = true;
         hls.on(Hls.Events.ERROR, (_e, data) => {
           if (data?.fatal && !cancelled) setState('error');
         });
@@ -424,6 +552,7 @@ export default function VideoPlayer({
 
     return () => {
       cancelled = true;
+      armed.current = false;
       if (hls) { hls.destroy(); hlsRef.current = null; }
       el.removeAttribute('src');
       el.load();
@@ -827,6 +956,21 @@ export default function VideoPlayer({
                 <Back5 size={19} />
               </button>
 
+              {/* A pause of our own. The embed draws its own bar, but that bar
+                  belongs to a third party and sits underneath whatever a
+                  browser extension decides to overlay on it — a learner who
+                  cannot pause the lecture has no way out at all. This one
+                  speaks to the player directly and always answers. */}
+              <button
+                type="button"
+                className="vp-embed-btn vp-embed-play"
+                onClick={togglePlay}
+                aria-label={playing ? 'Pause' : 'Play'}
+                title={playing ? 'Pause' : 'Play'}
+              >
+                {playing ? <Pause size={19} /> : <Play size={19} fill="currentColor" stroke="none" />}
+              </button>
+
               {len > 0 && (
                 <span className="vp-embed-time">{clock(cur)} <em>/</em> {clock(len)}</span>
               )}
@@ -851,7 +995,12 @@ export default function VideoPlayer({
           className="vp-video"
           poster={poster || undefined}
           playsInline
-          preload="metadata"
+          /* `metadata` fetched the duration and then stopped, so pressing play
+             was where the buffering started and the first seconds stuttered.
+             The learner opened this lesson to watch it: start pulling the
+             video the moment the stage appears, which is what makes the
+             picture arrive with the play button rather than after it. */
+          preload="auto"
           onContextMenu={(e) => e.preventDefault()}
           onClick={() => {
             /* On a phone the first tap means "show me the controls" — playing
@@ -861,7 +1010,11 @@ export default function VideoPlayer({
           }}
           onDoubleClick={() => { if (!isTouchScreen()) toggleFullscreen(); }}
           onLoadedMetadata={(e) => {
-            setState('ready');
+            /* Metadata is the duration and the dimensions — NOT a picture.
+               Calling the stage ready here is what put a play button over a
+               black frame that then had to buffer before anything happened.
+               `loadeddata` below is the first moment there is really something
+               to show. */
             const el = e.currentTarget;
             if (Number.isFinite(el.duration) && el.duration > 0) {
               dur.current = el.duration;
@@ -884,9 +1037,12 @@ export default function VideoPlayer({
               setTimeout(() => setResumed(0), 4200);
             }
           }}
+          /* The first frame is decoded and on screen: that is "loaded". */
+          onLoadedData={() => { setState('ready'); setWaiting(false); tryAutoPlay(); }}
           onCanPlay={() => { setState('ready'); setWaiting(false); tryAutoPlay(); }}
           onWaiting={() => setWaiting(true)}
-          onPlaying={() => { setWaiting(false); setPlaying(true); }}
+          onStalled={() => { if (!videoRef.current?.paused) setWaiting(true); }}
+          onPlaying={() => { setWaiting(false); setPlaying(true); setState('ready'); }}
           onPlay={() => { setPlaying(true); setBlocked(false); bumpUi(); }}
           onDurationChange={(e) => {
             const d = e.currentTarget.duration;
@@ -914,7 +1070,13 @@ export default function VideoPlayer({
             flush(true);
             onEnded?.();
           }}
-          onError={() => setState('error')}
+          /* Switching lessons tears the old source down with
+             `removeAttribute('src'); load()`, and an element asked to load
+             nothing raises an error of its own. Reporting that as "this video
+             would not load" put a failure screen over a lesson that was about
+             to play perfectly well, so an error only counts once a source has
+             actually been attached. */
+          onError={() => { if (armed.current) setState('error'); }}
         />
       )}
 

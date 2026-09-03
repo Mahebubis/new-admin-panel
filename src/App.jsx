@@ -315,6 +315,8 @@ import LmsReports from './pages/lms/LmsReports';
 import LmsSupport from './pages/lms/LmsSupport';
 import LmsSettings from './pages/lms/LmsSettings';
 import Monitoring from './pages/Monitoring/Monitoring';
+import Freshdesk from './pages/freshdesk/Freshdesk';
+import EnrollmentAudit from './pages/enrollment-audit/EnrollmentAudit';
 
 // Helper to keep the route table readable
 const G = (perm, Element) => (
@@ -547,6 +549,12 @@ export default function App() {
 
         {/* Monitoring — synthetic checks, run history & incidents */}
         <Route path="monitoring" element={G('monitoring', <Monitoring />)} />
+
+        {/* Freshdesk */}
+        <Route path="freshdesk" element={G('freshdesk', <Freshdesk />)} />
+
+        {/* Enrollment Audit — upload an enrollment export, check it against users + store orders */}
+        <Route path="enrollment-audit" element={G('enrollment_audit', <EnrollmentAudit />)} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

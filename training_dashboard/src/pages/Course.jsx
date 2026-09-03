@@ -32,7 +32,7 @@ import QuizStage from '../components/QuizStage';
 import DocStage from '../components/DocStage';
 import Syllabus from '../components/Syllabus';
 import { EmptyState, PageLoader } from '../components/Layout';
-import { Bookmark, Check, CheckCircle, ChevronLeft, Hourglass, Kebab, SkipNext } from '../components/icons';
+import { Bookmark, Check, CheckCircle, ChevronLeft, Hourglass, Kebab, Replay, SkipNext } from '../components/icons';
 import './course.css';
 
 const TABS = [
@@ -40,6 +40,12 @@ const TABS = [
   { key: 'recent', label: 'Recently Added' },
   { key: 'notes',  label: 'Bookmarks' },
 ];
+
+/* Seconds the end-of-lesson card waits before it ticks the lesson off and
+   starts the next one. Long enough to be caught by someone who wants to
+   rewatch, short enough that a learner going through a course back to back is
+   not asked to confirm every single video. */
+const AUTO_NEXT = 5;
 
 /* Lessons added in the last week feed the "Recently Added" tab. The API does
    not send created_at per lesson, so this is derived from the order the course
@@ -61,9 +67,13 @@ export default function Course() {
   const [fav, setFav] = useState(false);
   const [toast, setToast] = useState('');
   /* The card that drops in when a video finishes. Held here rather than in the
-     player because the two choices it offers — complete, and move on — are
-     course-level facts the player knows nothing about. */
+     player because the choices it offers — complete, and move on — are
+     course-level facts the player knows nothing about.
+     `left` is the auto-advance clock; `replayToken` is bumped to send the
+     player back to 0:00 for another watch. */
   const [finished, setFinished] = useState(false);
+  const [left, setLeft] = useState(AUTO_NEXT);
+  const [replayToken, setReplayToken] = useState(0);
   /* Autoplay is earned: the first lesson of a page load is whatever the link
      asked for and the browser may refuse to start it unprompted, but every
      lesson opened by CLICKING (the syllabus, Up next, "play next") follows a
@@ -71,6 +81,8 @@ export default function Course() {
   const [autoPlay, setAutoPlay] = useState(false);
 
   const stageRef = useRef(null);
+  /* The lesson we have already warned about a failed save on — see onProgress. */
+  const warnedFor = useRef(0);
 
   /* ── load the course ─────────────────────────────────────────────────── */
   /* Navigating between two courses without unmounting has to show the loader
@@ -127,12 +139,41 @@ export default function Course() {
      array identity on each render. */
   const lessons = useMemo(() => data?.lessons || [], [data?.lessons]);
   const active = useMemo(() => lessons.find((l) => l.id === activeId) || null, [lessons, activeId]);
-  const activeIndex = useMemo(() => lessons.findIndex((l) => l.id === activeId), [lessons, activeId]);
+
+  /* ── the order the learner actually sees ──────────────────────────────────
+     "Next" has to mean the next row down the syllabus, so it is read off the
+     SECTIONS rather than off the flat list. The two used to disagree:
+     lms_lessons.sort_order restarts inside every module, so a flat list sorted
+     by it alone interleaved them and finishing module 1 lesson 1 jumped
+     straight into module 2. catalog.php now sorts by module first — this is
+     the belt to that braces, and it costs one pass over a list of at most a
+     few hundred rows.
+
+     The objects come from `lessons`, not from the section copies, so the rest
+     of the screen keeps reading one set of statuses. */
+  const ordered = useMemo(() => {
+    const secs = data?.sections || [];
+    if (!secs.length) return lessons;
+
+    const byId = new Map(lessons.map((l) => [l.id, l]));
+    const out = [];
+    const seen = new Set();
+    secs.forEach((s) => (s.lessons || []).forEach((row) => {
+      const item = byId.get(row.id);
+      if (item && !seen.has(row.id)) { seen.add(row.id); out.push(item); }
+    }));
+    /* A lesson whose module was deleted or deactivated still belongs to the
+       course; it goes last rather than disappearing out of the queue. */
+    lessons.forEach((l) => { if (!seen.has(l.id)) out.push(l); });
+    return out;
+  }, [data?.sections, lessons]);
+
+  const activeIndex = useMemo(() => ordered.findIndex((l) => l.id === activeId), [ordered, activeId]);
   /* The next lesson they can actually watch — "Up next" pointing at a locked
      row, and "Mark complete & play next" walking into one, both dead-end. */
   const next = useMemo(
-    () => (activeIndex >= 0 ? lessons.slice(activeIndex + 1).find((l) => !l.coming_soon) || null : null),
-    [lessons, activeIndex]
+    () => (activeIndex >= 0 ? ordered.slice(activeIndex + 1).find((l) => !l.coming_soon) || null : null),
+    [ordered, activeIndex]
   );
 
   /**
@@ -228,11 +269,27 @@ export default function Course() {
           };
         });
       })
-      .catch(() => {/* a dropped heartbeat is not worth interrupting a video */});
-  }, [activeId]);
+      .catch((e) => {
+        /* A dropped heartbeat is not worth interrupting a video for — but a
+           heartbeat the SERVER refused is, and it used to be swallowed in the
+           same breath. That is how a learner ended up watching a whole course
+           whose progress was never being written and only finding out days
+           later. Said once per lesson: a message that repeats every ten
+           seconds over a video is its own kind of broken.
+
+           `status 0` is the offline case, which is genuinely not worth a
+           toast — the next heartbeat carries the same position anyway. */
+        if (!e?.status || warnedFor.current === lessonId) return;
+        warnedFor.current = lessonId;
+        flash('Your progress is not being saved. Please reload the page.');
+      });
+  }, [activeId, flash]);
+
+  const [saving, setSaving] = useState(false);
 
   const setComplete = useCallback(async (done) => {
     if (!active?.id) return;
+    setSaving(true);
     try {
       const d = await api.markComplete(active.id, done);
       setData((prev) => prev && {
@@ -244,9 +301,13 @@ export default function Course() {
           lessons: s.lessons.map((l) => (l.id === active.id ? { ...l, status: d.status } : l)),
         })),
       });
-      flash(done ? 'Marked as complete' : 'Marked as not complete');
+      /* The server reports the status it actually stored, so a write it
+         refused cannot leave a tick on screen. */
+      flash(d.status === 'completed' ? 'Marked as complete' : 'Marked as not complete');
     } catch (e) {
       flash(e.message);
+    } finally {
+      setSaving(false);
     }
   }, [active, flash]);
 
@@ -268,7 +329,7 @@ export default function Course() {
      silently was wrong in both directions: it ticked lessons off for someone
      who had walked away from a playing tab, and it gave a learner who really
      had finished no obvious way onward except hunting the syllabus. */
-  const onEnded = useCallback(() => setFinished(true), []);
+  const onEnded = useCallback(() => { setFinished(true); setLeft(AUTO_NEXT); }, []);
 
   /** "Mark as completed & play next" — both halves, in that order. */
   const completeAndNext = useCallback(async () => {
@@ -281,6 +342,33 @@ export default function Course() {
       flash('That was the last lesson — course complete!');
     }
   }, [active, next, setComplete, openLesson, flash]);
+
+  /** "Revise This Lesson" — the same video, from the top, nothing recorded. */
+  const revise = useCallback(() => {
+    setFinished(false);
+    setReplayToken((n) => n + 1);
+  }, []);
+
+  /* ── the five-second clock on the end-of-lesson card ──────────────────────
+     A learner working through a course back to back should not have to
+     confirm every video, so doing nothing is an answer: the lesson is ticked
+     off and the next one starts. Anything they DO press cancels it, which is
+     what makes the automatic path safe to have at all. */
+  useEffect(() => {
+    if (!finished) return undefined;
+    const id = setInterval(() => setLeft((s) => s - 1), 1000);
+    return () => clearInterval(id);
+  }, [finished]);
+
+  /* Latched: `completeAndNext` awaits the network, and the tick that takes
+     `left` below zero would otherwise fire it a second time underneath. */
+  const advanced = useRef(false);
+  useEffect(() => { if (!finished) advanced.current = false; }, [finished]);
+  useEffect(() => {
+    if (!finished || left > 0 || advanced.current) return;
+    advanced.current = true;
+    completeAndNext();
+  }, [finished, left, completeAndNext]);
 
   const toggleFav = async () => {
     if (!course?.id) return;
@@ -389,44 +477,81 @@ export default function Course() {
                  scrubbed back to re-watch a step wants that step again. */
               startAt={active?.resume_secs || active?.watched_secs || 0}
               autoPlay={autoPlay}
+              replayToken={replayToken}
               onProgress={onProgress}
               onEnded={onEnded}
             />
           )}
 
           {/* ── the end-of-lesson card ──────────────────────────────────
-              Drops in from the top of the stage the moment the video runs
-              out. Two ways forward and no third: carry on to the next
-              lesson with this one ticked off, or dismiss and stay exactly
-              where you are with nothing recorded. */}
+              Over the frozen last frame the moment the video runs out, with
+              a five-second ring draining around a replay button.
+
+              Doing nothing is a real answer, and the common one: the lesson
+              is ticked off and the next starts, which is what someone working
+              through a course back to back wants and what they used to have
+              to click twice for on every single video. Pressing the ring
+              plays this lesson again from 0:00 and records nothing new;
+              pressing the button does the automatic thing immediately; the ×
+              in the corner cancels the clock for someone who wants to sit
+              here and read. */}
           {finished && (
             <div className="stage-done" role="dialog" aria-label="Lesson finished">
+              {/* The way out of the clock for someone who wants to sit on this
+                  lesson and read the notes under it. Anchored to the stage, not
+                  to the card, so it stays in the corner at every size. */}
+              <button
+                type="button"
+                className="stage-done-x"
+                onClick={() => setFinished(false)}
+                aria-label="Stay on this lesson"
+              >
+                ×
+              </button>
+
               <div className="stage-done-card">
-                <span className="stage-done-ico"><CheckCircle size={22} /></span>
-                <div className="stage-done-text">
-                  <div className="stage-done-title">Finished this lesson</div>
-                  <div className="stage-done-sub">
-                    {next ? <>Up next — {next.title}</> : 'This was the last lesson in the course.'}
-                  </div>
-                </div>
-                <div className="stage-done-btns">
-                  <button type="button" className="stage-done-cancel" onClick={() => setFinished(false)}>
-                    Cancel
-                  </button>
-                  <button type="button" className="stage-done-go" onClick={completeAndNext}>
-                    <Check size={16} />
-                    {next ? 'Mark as completed & play next' : 'Mark as completed'}
-                  </button>
-                </div>
+                {/* The ring IS the timer: it empties over five seconds, and
+                    pressing it plays the lesson again from the top. */}
+                <button
+                  type="button"
+                  className="stage-done-ring"
+                  onClick={revise}
+                  aria-label="Revise this lesson — play it again from the start"
+                >
+                  <svg className="stage-done-ring-svg" viewBox="0 0 100 100" aria-hidden="true">
+                    <circle className="stage-done-ring-bg" cx="50" cy="50" r="45" />
+                    <circle className="stage-done-ring-fill" cx="50" cy="50" r="45" />
+                  </svg>
+                  <span className="stage-done-ring-ico"><Replay size={30} /></span>
+                </button>
+
+                <div className="stage-done-title">Revise This Lesson</div>
+
+                <button type="button" className="stage-done-go" onClick={completeAndNext}>
+                  <Check size={17} />
+                  {next ? 'Mark as complete and next' : 'Mark as complete'}
+                </button>
+
+                <p className="stage-done-count" role="status" aria-live="polite">
+                  {next
+                    ? <>Up next — <b>{next.title}</b> in {Math.max(0, left)}s</>
+                    : <>Marking this course complete in {Math.max(0, left)}s</>}
+                </p>
               </div>
             </div>
           )}
 
-          {/* Bookmark and the kebab only. Fullscreen used to live here too,
-              directly over the player's own fullscreen button — two of them in
-              one corner. It now belongs to the player, which is the thing that
-              can also turn a phone landscape when it opens. These sit at the
-              TOP of the stage so they clear the control bar underneath. */}
+          {/* Bookmark and the kebab, and nothing else over the picture.
+              Fullscreen used to live here too, directly over the player's own
+              fullscreen button — two of them in one corner. It now belongs to
+              the player, which is the thing that can also turn a phone
+              landscape when it opens. These sit at the TOP of the stage so
+              they clear the control bar underneath.
+
+              Completion is not here either: the end-of-lesson card asks at the
+              one moment the answer is obvious, and the kebab keeps the manual
+              route for a lesson somebody wants to tick off without sitting
+              through it. */}
           <div className="stage-controls">
             <button className="stage-btn" onClick={toggleFav} aria-label="Bookmark this course">
               <Bookmark size={19} />
@@ -451,9 +576,10 @@ export default function Course() {
                     </button>
                     <button
                       role="menuitem"
+                      disabled={saving}
                       onClick={() => { setMenuOpen(false); setComplete(active?.status !== 'completed'); }}
                     >
-                      <Check size={18} />
+                      {active?.status === 'completed' ? <CheckCircle size={18} /> : <Check size={18} />}
                       {active?.status === 'completed' ? 'Mark As Incomplete' : 'Mark As Complete'}
                     </button>
                   </div>

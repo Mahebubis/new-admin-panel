@@ -344,13 +344,19 @@ function learn_watch_columns($conn) {
         'last_played_at'     => '`last_played_at` DATETIME NULL DEFAULT NULL',
         'completed_at'       => '`completed_at` DATETIME NULL DEFAULT NULL',
     ];
+    $complete = true;
     foreach ($want as $name => $ddl) {
         if (isset($cols[$name])) continue;
         if ($conn->query("ALTER TABLE lms_progress ADD COLUMN $ddl")) $cols[$name] = true;
-        else learn_log('SCHEMA', "could not add lms_progress.$name: " . $conn->error);
+        else { $complete = false; learn_log('SCHEMA', "could not add lms_progress.$name: " . $conn->error); }
     }
 
-    @file_put_contents($marker, json_encode($cols));
+    /* Only a COMPLETE set is worth remembering for an hour. Caching a partial
+       one pinned every reader to the degraded shape until the marker expired,
+       even after the admin API had added the columns a minute later — and the
+       writers that depend on them (progress.php) would keep working around
+       columns that were, by then, really there. */
+    if ($complete) @file_put_contents($marker, json_encode($cols));
     return $cols;
 }
 
