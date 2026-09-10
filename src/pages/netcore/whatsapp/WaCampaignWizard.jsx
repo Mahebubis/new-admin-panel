@@ -30,7 +30,7 @@ const DEFAULT_DRAFT = {
   send_provider: '',
   goal_enabled: false, goal_event_name: '', goal_window_days: 2,
   dedup_enabled: false, dedup_window_hours: 24, dedup_scope: 'all_campaigns',
-  audience_type: 'segments', segment_ids: [], list_ids: [], exclude_enabled: false, exclude_segment_ids: [],
+  audience_type: 'segments', segment_ids: [], list_ids: [], exclude_enabled: false, exclude_segment_ids: [], exclude_list_ids: [],
   reachable_count: 0,
   audience_stats: { raw_count: 0, unreachable: 0, duplicates: 0, opted_out: 0, dedup_skipped: 0 },
   message_type: 'template',
@@ -90,8 +90,8 @@ export default function WaCampaignWizard() {
           dedup_scope: c.dedup_scope || 'all_campaigns',
           audience_type: c.audience_type || 'segments',
           segment_ids: c.segment_ids || [], list_ids: c.list_ids || [],
-          exclude_segment_ids: c.exclude_segment_ids || [],
-          exclude_enabled: (c.exclude_segment_ids || []).length > 0,
+          exclude_segment_ids: c.exclude_segment_ids || [], exclude_list_ids: c.exclude_list_ids || [],
+          exclude_enabled: (c.exclude_segment_ids || []).length > 0 || (c.exclude_list_ids || []).length > 0,
           reachable_count: Number(c.reachable_count) || 0,
           message_type: c.message_type || 'template',
           template_id: c.template_id ? Number(c.template_id) : null,
@@ -182,6 +182,7 @@ export default function WaCampaignWizard() {
     segment_ids: JSON.stringify(d.segment_ids || []),
     list_ids: JSON.stringify(d.list_ids || []),
     exclude_segment_ids: JSON.stringify(d.exclude_enabled ? (d.exclude_segment_ids || []) : []),
+    exclude_list_ids: JSON.stringify(d.exclude_enabled ? (d.exclude_list_ids || []) : []),
     // Already computed live by the Audience step's debounced count — sent as a plain value so
     // every "Next step" click doesn't redo that heavy resolve.
     reachable_count: d.reachable_count || 0,

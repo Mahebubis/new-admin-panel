@@ -8,6 +8,14 @@ const API = '/api/attributes/attributes.php';
 const FORM = { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } };
 const PER_PAGE_OPTS = [10, 25, 50, 100];
 
+// system = one mapped column, linked = a multi-step lookup chain, custom = no database
+// source at all (a default value, or per-contact data from a CSV import).
+const CATEGORY_STYLE = {
+  system: { color: '#1d4ed8', background: '#dbeafe' },
+  linked: { color: '#0f766e', background: '#ccfbf1' },
+  custom: { color: '#7c3aed', background: '#ede9fe' },
+};
+
 function fmtDt(s) {
   if (!s) return '';
   const d = new Date(s.replace(' ', 'T'));
@@ -166,15 +174,23 @@ export default function NetcoreAttributes() {
                         <td style={{ padding: '14px 18px', borderBottom: '1px solid #f1f5f9' }}>
                           <span style={{
                             fontSize: 10.5, fontWeight: 700, padding: '3px 10px', borderRadius: 999,
-                            color: r.category === 'system' ? '#1d4ed8' : '#7c3aed',
-                            background: r.category === 'system' ? '#dbeafe' : '#ede9fe',
+                            ...(CATEGORY_STYLE[r.category] || CATEGORY_STYLE.custom),
                           }}>{r.category.toUpperCase()}</span>
                         </td>
-                        <td style={{ padding: '14px 18px', borderBottom: '1px solid #f1f5f9', color: '#475569' }}>{r.data_type}</td>
+                        <td style={{ padding: '14px 18px', borderBottom: '1px solid #f1f5f9', color: '#475569' }}>
+                          {r.data_type}
+                          {r.data_type === 'date' && r.date_format && (
+                            <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 2 }}>formatted</div>
+                          )}
+                        </td>
                         <td style={{ padding: '14px 18px', borderBottom: '1px solid #f1f5f9', color: '#475569', fontSize: 12 }}>
                           {r.category === 'system'
                             ? <span title={`joined via ${r.mapped_join_col}`}>{r.mapped_db}.{r.mapped_table}.{r.mapped_column}</span>
-                            : <span style={{ color: '#cbd5e1' }}>— custom per-contact value —</span>}
+                            : r.category === 'linked'
+                              ? <span style={{ fontSize: 11.5 }}>{r.chain_summary || '— multi-step lookup —'}</span>
+                              : r.default_value
+                                ? <span style={{ color: '#94a3b8' }}>always “{r.default_value}”</span>
+                                : <span style={{ color: '#cbd5e1' }}>— custom per-contact value —</span>}
                         </td>
                         <td style={{ padding: '14px 18px', borderBottom: '1px solid #f1f5f9', color: '#475569' }}>{fmtDt(r.created_at)}</td>
                         <td style={{ padding: '14px 18px', borderBottom: '1px solid #f1f5f9' }}>

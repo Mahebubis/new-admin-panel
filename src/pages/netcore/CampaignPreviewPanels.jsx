@@ -74,7 +74,16 @@ function asList(v) {
   if (v == null || v === '') return [];
   if (Array.isArray(v)) return v.filter(x => x !== null && x !== '');
   if (typeof v === 'object') return Object.values(v).filter(x => x !== null && x !== '');
-  return String(v).split(',').map(s => s.trim()).filter(Boolean);
+  // action=report hands these columns back as the RAW stored JSON (only action=get decodes
+  // them), so "[3,4]" has to be parsed here or the comma split below renders it as "[3, 4]".
+  const str = String(v).trim();
+  if (str.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(str);
+      if (Array.isArray(parsed)) return parsed.filter(x => x !== null && x !== '');
+    } catch { /* not valid JSON after all — fall through to the comma split */ }
+  }
+  return str.split(',').map(s => s.trim()).filter(Boolean);
 }
 
 /** Renders nothing at all when there is no value — no empty labels. */
@@ -156,7 +165,8 @@ export default function CampaignPreviewPanels({ channel, row, full, loading }) {
                 <Row k="Audience type">{full?.audience_type}</Row>
                 <Row k="Segments / lists" mono>{asList(full?.segment_ids).join(', ') || null}</Row>
                 <Row k="Lists" mono>{asList(full?.list_ids).join(', ') || null}</Row>
-                <Row k="Excluded" mono>{asList(full?.exclude_segment_ids).join(', ') || null}</Row>
+                <Row k="Excluded segments" mono>{asList(full?.exclude_segment_ids).join(', ') || null}</Row>
+                <Row k="Excluded lists" mono>{asList(full?.exclude_list_ids).join(', ') || null}</Row>
                 <Row k="Domain filter">{full?.domain_filter}</Row>
                 <Row k="Total published" mono>{n0(row.published)}</Row>
                 {isWa && <Row k="Skipped as duplicate" mono>{n0(full?.skipped_dedup_count)}</Row>}

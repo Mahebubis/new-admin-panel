@@ -53,7 +53,10 @@ export default function WaStepSchedule({ draft, setField, onValidChange, segment
       ].filter(Boolean).join(', ') || 'None selected';
   const segNames = (draft.segment_ids || []).map(id => segmentNames?.[id] || `ID ${id}`).join(', ');
   const lstNames = (draft.list_ids || []).map(id => listNames?.[id] || `ID ${id}`).join(', ');
-  const excNames = (draft.exclude_segment_ids || []).map(id => segmentNames?.[id] || `ID ${id}`).join(', ');
+  const excNames = [
+    ...(draft.exclude_segment_ids || []).map(id => segmentNames?.[id] || `ID ${id}`),
+    ...(draft.exclude_list_ids || []).map(id => listNames?.[id] || `ID ${id}`),
+  ].join(', ');
 
   const willReceive = Number(draft.reachable_count) || 0;
   const capped = draft.contact_limit_enabled && parseInt(draft.contact_limit, 10) > 0

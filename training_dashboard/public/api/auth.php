@@ -50,6 +50,12 @@ function learn_profile($conn, $uid) {
         'phone'   => (string)$u['phone'],
         'photo'   => (string)$u['photo'],
         'initial' => strtoupper(mb_substr($name, 0, 1)),
+        /* Rides on the profile rather than on one endpoint, because every way
+           into the portal — password, Google, store, the dashboard handoff and
+           a plain session check — returns this same shape. See
+           learn_batch_before() in _bootstrap.php. */
+        'reset_notice' => LEARN_RESET_NOTICE
+            && learn_batch_before($conn, (int)$u['user_id'], LEARN_RESET_NOTICE_BEFORE),
     ];
 }
 

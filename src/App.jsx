@@ -551,7 +551,9 @@ export default function App() {
         <Route path="monitoring" element={G('monitoring', <Monitoring />)} />
 
         {/* Freshdesk */}
-        <Route path="freshdesk" element={G('freshdesk', <Freshdesk />)} />
+        {/* /* wildcard: the helpdesk owns its own sub-routes (/freshdesk/tickets/336966
+            etc.) so every screen is linkable and survives a refresh. */}
+        <Route path="freshdesk/*" element={G('freshdesk', <Freshdesk />)} />
 
         {/* Enrollment Audit — upload an enrollment export, check it against users + store orders */}
         <Route path="enrollment-audit" element={G('enrollment_audit', <EnrollmentAudit />)} />

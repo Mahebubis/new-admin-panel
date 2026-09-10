@@ -6,6 +6,7 @@ import { Outlet } from 'react-router-dom';
 import Header from './Header';
 import Footer from './Footer';
 import SupportFab from './SupportFab';
+import ResetNotice from './ResetNotice';
 import { EmptyFigure } from './icons';
 
 export default function Layout({ bare = false }) {
@@ -17,8 +18,10 @@ export default function Layout({ bare = false }) {
       </main>
       {!bare && <Footer />}
       {/* Every signed-in screen hangs off this layout, so one mount here is
-          the support door on all of them. */}
+          the support door on all of them — and the one place the progress
+          announcement has to be seen from, whichever page they land on. */}
       <SupportFab />
+      <ResetNotice />
     </div>
   );
 }

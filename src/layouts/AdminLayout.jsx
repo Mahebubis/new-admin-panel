@@ -1234,6 +1234,14 @@ const sidebarMenu = [
 // would arrive before the listener below is subscribed.
 const AUTO_COLLAPSE_ROUTES = ['/reports/meta-old', '/reports/agency-2', '/freshdesk'];
 
+/*
+ * Routes that draw their own top chrome and so must not get the panel's.
+ * The helpdesk carries search, New, notifications, theme and the account in
+ * its own right-hand rail; stacking this navbar above it duplicated every one
+ * of those and ate 62px of a screen that is already split three ways.
+ */
+const OWN_CHROME_ROUTES = ['/freshdesk'];
+
 export default function AdminLayout() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebarCollapsed') === '1');
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -1246,6 +1254,9 @@ export default function AdminLayout() {
   const { user, logout, hasPermission, isAdmin, isSuperadmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
+  /* The helpdesk supplies its own top chrome; see OWN_CHROME_ROUTES. */
+  const ownsChrome = OWN_CHROME_ROUTES.some(p => location.pathname.startsWith(p));
 
   // Auto-collapse sidebar when entering wide-table routes. Does not touch
   // localStorage, so user's saved preference is preserved for other pages.
@@ -1509,6 +1520,7 @@ export default function AdminLayout() {
         style={{ marginLeft: collapsed ? 56 : 268 }}>
 
         {/* ══════ NAVBAR ══════ */}
+        {!ownsChrome && (
         <header
           className="sticky top-0 z-[400] flex items-center gap-4 px-5"
           style={{ height: 62, background: '#fff', boxShadow: '0 1px 0 0 #e2e8f0', fontFamily: "'Inter', 'Segoe UI', sans-serif" }}>
@@ -1645,6 +1657,7 @@ export default function AdminLayout() {
             </div>
           </div>
         </header>
+        )}
 
         {/* Page content */}
         <main style={{ padding: '16px 20px', minHeight: 'calc(100vh - 62px)' }}>

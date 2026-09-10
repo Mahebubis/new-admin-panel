@@ -42,8 +42,11 @@ export default function CampaignSummaryPanel({ draft, segmentNames, listNames })
           <Row label="Lists" value={draft.list_ids.map(id => listNames?.[id] || `ID ${id}`).join(', ')} />
         )}
         <Row label="Reachable contacts" value={Number(draft.reachable_count || 0).toLocaleString()} />
-        {draft.exclude_enabled && draft.exclude_segment_ids.length > 0 && (
-          <Row label="Excluded" value={draft.exclude_segment_ids.map(id => segmentNames?.[id] || `ID ${id}`).join(', ')} />
+        {draft.exclude_enabled && (draft.exclude_segment_ids.length > 0 || (draft.exclude_list_ids || []).length > 0) && (
+          <Row label="Excluded" value={[
+            ...draft.exclude_segment_ids.map(id => segmentNames?.[id] || `ID ${id}`),
+            ...(draft.exclude_list_ids || []).map(id => listNames?.[id] || `ID ${id}`),
+          ].join(', ')} />
         )}
       </Section>
 

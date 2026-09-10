@@ -157,6 +157,11 @@ export default function CampaignStepAudience({ draft, setField, onValidChange, o
   const [lists, setLists] = useState([]);
   const [loadingSegs, setLoadingSegs] = useState(true);
   const [countLoading, setCountLoading] = useState(false);
+  // matched/excluded ride along with the reachable count. Kept in local state rather than on the
+  // draft: they are derived figures, and putting them on the draft would have the wizard warning
+  // about unsaved changes every time the count refreshes.
+  const [stats, setStats] = useState({ matched: 0, excluded: 0 });
+  const [exporting, setExporting] = useState(false);
   const abortRef = useRef(null);
   const toastedForRef = useRef(''); // dedupe: only toast once per distinct overlap set
 
@@ -191,11 +196,14 @@ export default function CampaignStepAudience({ draft, setField, onValidChange, o
     ...(draft.segment_ids || []).map(id => ckey('segment', id)),
     ...(draft.list_ids || []).map(id => ckey('list', id)),
   ];
-  // Exclude stays SEGMENTS-ONLY — the backend's exclude_segment_ids only ever subtracts
-  // from the segment-sourced (users-table) half of the audience (see AudienceResolver.php's
-  // audience_base_sql()); there's no equivalent "exclude from a list" concept server-side,
-  // so the exclude picker below is given segments-only options, not the unified list.
-  const excludeComposite = (draft.exclude_segment_ids || []).map(id => ckey('segment', id));
+  // Exclude takes Segments AND Lists, saved to draft.exclude_segment_ids /
+  // draft.exclude_list_ids exactly like the audience pair above. Server-side the two are
+  // merged into one set of emails and subtracted from the whole audience — segment-sourced
+  // and list-sourced alike (see AudienceResolver.php's audience_exclude_emails_sql()).
+  const excludeComposite = [
+    ...(draft.exclude_segment_ids || []).map(id => ckey('segment', id)),
+    ...(draft.exclude_list_ids || []).map(id => ckey('list', id)),
+  ];
   const splitComposite = keys => {
     const segIds = [], listIds = [];
     keys.forEach(k => {
@@ -209,8 +217,8 @@ export default function CampaignStepAudience({ draft, setField, onValidChange, o
     setField('segment_ids', segIds); setField('list_ids', listIds);
   };
   const onExcludeChange = keys => {
-    const { segIds } = splitComposite(keys);
-    setField('exclude_segment_ids', segIds);
+    const { segIds, listIds } = splitComposite(keys);
+    setField('exclude_segment_ids', segIds); setField('exclude_list_ids', listIds);
   };
 
   const overlapKeys = draft.exclude_enabled ? selectedComposite.filter(k => keyIn(excludeComposite, k)) : [];
@@ -230,6 +238,34 @@ export default function CampaignStepAudience({ draft, setField, onValidChange, o
     }
   }, [hasOverlap, overlapKeys.join(','), options.length]); // eslint-disable-line
 
+  /* The audience as the server needs it, built once. Shared by the live count and the CSV
+     export so the file can never describe a different audience than the number on screen. */
+  const audienceParams = () => ({
+    audience_type: draft.audience_type,
+    segment_ids: JSON.stringify(draft.segment_ids || []),
+    list_ids: JSON.stringify(draft.list_ids || []),
+    exclude_segment_ids: JSON.stringify(draft.exclude_enabled ? (draft.exclude_segment_ids || []) : []),
+    exclude_list_ids: JSON.stringify(draft.exclude_enabled ? (draft.exclude_list_ids || []) : []),
+    domain_filter: draft.domain_enabled ? (draft.domain_filter || '') : '',
+  });
+
+  const downloadAudience = async () => {
+    setExporting(true);
+    const t = toast.loading('Preparing your file…');
+    try {
+      const body = new URLSearchParams({ action: 'audience_export', name: draft.name || 'audience', ...audienceParams() });
+      const res = await api.post(CAMP_API, body, { ...FORM, responseType: 'blob' });
+      const slug = (draft.name || 'audience').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'audience';
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url; a.download = slug + '-audience.csv';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success('Downloaded', { id: t });
+    } catch { toast.error('Could not prepare the file', { id: t }); }
+    finally { setExporting(false); }
+  };
+
   const depsKey = JSON.stringify([draft.audience_type, draft.segment_ids, draft.list_ids, draft.exclude_enabled, draft.exclude_segment_ids, draft.exclude_list_ids, draft.domain_enabled, draft.domain_filter]);
   useEffect(() => {
     if (abortRef.current) abortRef.current.abort();
@@ -237,16 +273,13 @@ export default function CampaignStepAudience({ draft, setField, onValidChange, o
     const t = setTimeout(async () => {
       setCountLoading(true);
       try {
-        const body = new URLSearchParams({
-          action: 'audience_count',
-          audience_type: draft.audience_type,
-          segment_ids: JSON.stringify(draft.segment_ids || []),
-          exclude_segment_ids: JSON.stringify(draft.exclude_enabled ? (draft.exclude_segment_ids || []) : []),
-          list_ids: JSON.stringify(draft.list_ids || []),
-          domain_filter: draft.domain_enabled ? (draft.domain_filter || '') : '',
-        });
+        const body = new URLSearchParams({ action: 'audience_count', ...audienceParams() });
         const res = await api.post(CAMP_API, body, { ...FORM, signal: ctrl.signal });
-        if (res.data.success) setField('reachable_count', res.data.data.count);
+        if (res.data.success) {
+          const d = res.data.data;
+          setField('reachable_count', d.count);
+          setStats({ matched: d.matched ?? d.count, excluded: d.excluded || 0 });
+        }
       } catch { /* aborted or failed — ignore, next debounce will retry */ }
       finally { setCountLoading(false); }
     }, 450);
@@ -261,9 +294,26 @@ export default function CampaignStepAudience({ draft, setField, onValidChange, o
             <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>Target audience</div>
             <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 2 }}>Create a target audience for your campaign.</div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#eef2ff', color: '#1e3a8a', padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700 }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /></svg>
-            {countLoading ? '…' : Number(draft.reachable_count || 0).toLocaleString()} reachable
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#eef2ff', color: '#1e3a8a', padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /></svg>
+              {countLoading ? '…' : Number(draft.reachable_count || 0).toLocaleString()} reachable
+            </div>
+            {/* The audience exactly as it stands — exclusions and Blocklist already taken out,
+                which is the list someone wants to eyeball before a send goes out. */}
+            <button type="button" onClick={downloadAudience}
+              disabled={exporting || countLoading || !Number(draft.reachable_count || 0)}
+              title="Download this audience as a CSV (opens in Excel)"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 999,
+                border: '1.5px solid #e2e8f0', background: '#fff', color: '#334155', fontSize: 12,
+                fontWeight: 700, fontFamily: 'inherit',
+                cursor: exporting || countLoading || !Number(draft.reachable_count || 0) ? 'not-allowed' : 'pointer',
+                opacity: exporting || countLoading || !Number(draft.reachable_count || 0) ? 0.55 : 1,
+              }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+              {exporting ? 'Preparing…' : 'Download CSV'}
+            </button>
           </div>
         </div>
 
@@ -303,8 +353,19 @@ export default function CampaignStepAudience({ draft, setField, onValidChange, o
         {draft.exclude_enabled && (
           <div style={{ marginTop: 14 }}>
             <label style={label}>List / Segment <span style={{ fontWeight: 500, color: '#94a3b8' }}>(up to 15)</span></label>
-            <AudiencePicker options={segmentOptions} selected={excludeComposite} onChange={onExcludeChange} max={15}
+            <AudiencePicker options={options} selected={excludeComposite} onChange={onExcludeChange} max={15}
               blockedIds={selectedComposite} blockedLabel="already in audience" />
+            {/* What the exclusion actually cost, in contacts — a number that only shrinks with
+                no stated reason is the thing people end up not trusting. */}
+            {excludeComposite.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 12, padding: '10px 12px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12, color: '#475569' }}>
+                <span><b style={{ color: '#0f172a' }}>{countLoading ? '…' : stats.matched.toLocaleString()}</b> matched</span>
+                <span style={{ color: '#cbd5e1' }}>−</span>
+                <span><b style={{ color: '#dc2626' }}>{countLoading ? '…' : stats.excluded.toLocaleString()}</b> excluded</span>
+                <span style={{ color: '#cbd5e1' }}>=</span>
+                <span><b style={{ color: '#15803d' }}>{countLoading ? '…' : Number(draft.reachable_count || 0).toLocaleString()}</b> reachable</span>
+              </div>
+            )}
           </div>
         )}
       </div>

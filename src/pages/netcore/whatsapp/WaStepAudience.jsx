@@ -151,8 +151,34 @@ export default function WaStepAudience({ draft, setField, onValidChange, onSegme
   const [lists, setLists] = useState([]);
   const [loadingOpts, setLoadingOpts] = useState(true);
   const [countLoading, setCountLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const abortRef = useRef(null);
   const toastedForRef = useRef('');
+
+  const downloadAudience = async () => {
+    setExporting(true);
+    const t = toast.loading('Preparing your file…');
+    try {
+      const body = new URLSearchParams({
+        action: 'audience_export',
+        name: draft.name || 'audience',
+        audience_type: draft.audience_type,
+        segment_ids: JSON.stringify(draft.segment_ids || []),
+        list_ids: JSON.stringify(draft.list_ids || []),
+        exclude_segment_ids: JSON.stringify(draft.exclude_enabled ? (draft.exclude_segment_ids || []) : []),
+        exclude_list_ids: JSON.stringify(draft.exclude_enabled ? (draft.exclude_list_ids || []) : []),
+      });
+      const res = await api.post(WA_API, body, { ...FORM, responseType: 'blob' });
+      const slug = (draft.name || 'audience').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'audience';
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url; a.download = slug + '-audience.csv';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success('Downloaded', { id: t });
+    } catch { toast.error('Could not prepare the file', { id: t }); }
+    finally { setExporting(false); }
+  };
 
   useEffect(() => {
     (async () => {
@@ -183,10 +209,13 @@ export default function WaStepAudience({ draft, setField, onValidChange, onSegme
     ...(draft.segment_ids || []).map(id => ckey('segment', id)),
     ...(draft.list_ids || []).map(id => ckey('list', id)),
   ];
-  // Exclude stays SEGMENTS-ONLY: the backend's exclude_segment_ids only subtracts from the
-  // segment-sourced half of the audience (see AudienceResolver.php's audience_base_sql) —
-  // there is no server-side "exclude from a list" concept to expose here.
-  const excludeComposite = (draft.exclude_segment_ids || []).map(id => ckey('segment', id));
+  // Exclude takes Segments AND Lists, kept in draft.exclude_segment_ids / draft.exclude_list_ids
+  // just like the audience pair above. Both are subtracted by email server-side, before phone
+  // normalization (see campaigns/lib/AudienceResolver.php's audience_exclude_emails_sql()).
+  const excludeComposite = [
+    ...(draft.exclude_segment_ids || []).map(id => ckey('segment', id)),
+    ...(draft.exclude_list_ids || []).map(id => ckey('list', id)),
+  ];
 
   const splitComposite = keys => {
     const segIds = [], listIds = [];
@@ -200,7 +229,10 @@ export default function WaStepAudience({ draft, setField, onValidChange, onSegme
     const { segIds, listIds } = splitComposite(keys);
     setField('segment_ids', segIds); setField('list_ids', listIds);
   };
-  const onExcludeChange = keys => setField('exclude_segment_ids', splitComposite(keys).segIds);
+  const onExcludeChange = keys => {
+    const { segIds, listIds } = splitComposite(keys);
+    setField('exclude_segment_ids', segIds); setField('exclude_list_ids', listIds);
+  };
 
   const overlapKeys = draft.exclude_enabled ? selectedComposite.filter(k => keyIn(excludeComposite, k)) : [];
   const hasOverlap = overlapKeys.length > 0;
@@ -221,7 +253,8 @@ export default function WaStepAudience({ draft, setField, onValidChange, onSegme
      not a plain COUNT(*) — the server has to normalize every stored phone string before it can
      tell which are real numbers and which two rows are the same person. */
   const depsKey = JSON.stringify([
-    draft.audience_type, draft.segment_ids, draft.list_ids, draft.exclude_enabled, draft.exclude_segment_ids,
+    draft.audience_type, draft.segment_ids, draft.list_ids, draft.exclude_enabled,
+    draft.exclude_segment_ids, draft.exclude_list_ids,
     draft.dedup_enabled, draft.dedup_window_hours, draft.dedup_scope, draft.template_name,
   ]);
   useEffect(() => {
@@ -237,6 +270,7 @@ export default function WaStepAudience({ draft, setField, onValidChange, onSegme
           segment_ids: JSON.stringify(draft.segment_ids || []),
           list_ids: JSON.stringify(draft.list_ids || []),
           exclude_segment_ids: JSON.stringify(draft.exclude_enabled ? (draft.exclude_segment_ids || []) : []),
+          exclude_list_ids: JSON.stringify(draft.exclude_enabled ? (draft.exclude_list_ids || []) : []),
           dedup_enabled: draft.dedup_enabled ? 1 : 0,
           dedup_window_hours: draft.dedup_window_hours || 24,
           dedup_scope: draft.dedup_scope || 'all_campaigns',
@@ -249,6 +283,7 @@ export default function WaStepAudience({ draft, setField, onValidChange, onSegme
           setField('audience_stats', {
             raw_count: d.raw_count, unreachable: d.unreachable, duplicates: d.duplicates,
             opted_out: d.opted_out, dedup_skipped: d.dedup_skipped,
+            matched: d.matched, excluded: d.excluded,
           });
         }
       } catch { /* aborted or failed — the next debounce retries */ }
@@ -270,9 +305,26 @@ export default function WaStepAudience({ draft, setField, onValidChange, onSegme
                 The same segments and lists your email campaigns use — reachability here means a valid WhatsApp number.
               </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f0fdf4', color: '#15803d', padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /></svg>
-              {countLoading ? '…' : n0(draft.reachable_count)} reachable
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f0fdf4', color: '#15803d', padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /></svg>
+                {countLoading ? '…' : n0(draft.reachable_count)} reachable
+              </div>
+              {/* The audience as it stands, exclusions already taken out — the list someone
+                  wants to eyeball before a send goes out. */}
+              <button type="button" onClick={downloadAudience}
+                disabled={exporting || countLoading || !Number(draft.reachable_count || 0)}
+                title="Download this audience as a CSV (opens in Excel)"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 999,
+                  border: '1.5px solid #e2e8f0', background: '#fff', color: '#334155', fontSize: 12,
+                  fontWeight: 700, fontFamily: 'inherit', whiteSpace: 'nowrap',
+                  cursor: exporting || countLoading || !Number(draft.reachable_count || 0) ? 'not-allowed' : 'pointer',
+                  opacity: exporting || countLoading || !Number(draft.reachable_count || 0) ? 0.55 : 1,
+                }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                {exporting ? 'Preparing…' : 'Download CSV'}
+              </button>
             </div>
           </div>
 
@@ -297,7 +349,7 @@ export default function WaStepAudience({ draft, setField, onValidChange, onSegme
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Exclude contacts</div>
-              <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 2 }}>Remove contacts belonging to the selected segment(s) from the audience above.</div>
+              <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 2 }}>Remove contacts belonging to the selected segment(s)/list(s) from the audience above.</div>
             </div>
             <Toggle on={draft.exclude_enabled} onClick={() => setField('exclude_enabled', !draft.exclude_enabled)} />
           </div>
@@ -312,8 +364,8 @@ export default function WaStepAudience({ draft, setField, onValidChange, onSegme
           )}
           {draft.exclude_enabled && (
             <div style={{ marginTop: 14 }}>
-              <label style={label}>Segment <span style={{ fontWeight: 500, color: '#94a3b8' }}>(up to 15)</span></label>
-              <AudiencePicker options={segmentOptions} selected={excludeComposite} onChange={onExcludeChange} max={15}
+              <label style={label}>List / Segment <span style={{ fontWeight: 500, color: '#94a3b8' }}>(up to 15)</span></label>
+              <AudiencePicker options={options} selected={excludeComposite} onChange={onExcludeChange} max={15}
                 blockedIds={selectedComposite} blockedLabel="already in audience" />
             </div>
           )}
@@ -329,6 +381,10 @@ export default function WaStepAudience({ draft, setField, onValidChange, onSegme
           </div>
 
           <StatRow label="Contacts matched" value={n0(stats.raw_count ?? 0)} hint="After merging duplicate numbers" />
+          {Number(stats.excluded) > 0 && (
+            <StatRow label="Excluded by you" value={`−${n0(stats.excluded)}`} tone="warn"
+              hint="In the segment(s)/list(s) you excluded" />
+          )}
           {Number(stats.duplicates) > 0 && (
             <StatRow label="Duplicate numbers merged" value={`−${n0(stats.duplicates)}`} tone="good"
               hint="Same person in several segments/lists" />

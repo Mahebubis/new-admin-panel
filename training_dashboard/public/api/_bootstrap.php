@@ -418,6 +418,71 @@ function learn_soon_columns($conn) {
 /* ── 6. the logged-in learner ──────────────────────────────────────────── */
 function learn_user() { return (int)($_SESSION['learn_user_id'] ?? 0); }
 
+/* ── the "your progress may have been reset" notice ──────────────────────
+   A one-off announcement for the learners who were on the portal when video
+   progress was lost. It is shown to a learner whose batch STARTED before the
+   cutoff and to nobody else: someone joining on the 1st of September has no
+   history to have lost, and telling them their progress was reset would only
+   worry them about a course they have not started.
+
+   Two switches, both here so this can be turned off without touching the app:
+   set LEARN_RESET_NOTICE to false when the announcement has run its course. */
+define('LEARN_RESET_NOTICE', true);
+define('LEARN_RESET_NOTICE_BEFORE', '2026-09-01');
+
+/**
+ * Did any batch this learner paid for begin before $before?
+ *
+ * Batches are stored as prose ("24th August, 2026"), in three different
+ * tables, by three different checkout flows — see learn_store_purchases() and
+ * learn_batch_started() in catalog.php, which read the same columns the same
+ * way. Only the dates that PARSE are compared; a batch nobody can read is not
+ * evidence of anything on its own.
+ *
+ * A learner with purchases but not one readable batch between them does get
+ * the notice: unreadable rows are the old hand-typed ones, never the current
+ * checkout's, so they are far likelier to be the people this is for.
+ */
+function learn_batch_before($conn, $uid, $before) {
+    $uid = (int)$uid;
+    if (!$uid) return false;
+
+    $batches = [];
+    $collect = function ($sql, $col) use ($conn, &$batches) {
+        $r = @$conn->query($sql);
+        while ($r && ($row = $r->fetch_assoc())) {
+            $b = trim((string)($row[$col] ?? ''));
+            if ($b !== '') $batches[] = $b;
+        }
+    };
+
+    $collect("SELECT DISTINCT batch FROM internship_payment WHERE user_id = $uid", 'batch');
+    $collect("SELECT DISTINCT batch_date FROM payment_status
+               WHERE user_id = $uid AND status = 'success'", 'batch_date');
+
+    /* The ₹99 store is a later addition and is not on every deployment. */
+    $has = @$conn->query("SELECT 1 FROM information_schema.TABLES
+                           WHERE TABLE_SCHEMA = DATABASE()
+                             AND TABLE_NAME = 'ninety_nine_store_orders' LIMIT 1");
+    if ($has && $has->num_rows) {
+        $collect("SELECT DISTINCT batch FROM ninety_nine_store_orders
+                   WHERE status = 'success' AND user_id = $uid", 'batch');
+    }
+
+    if (!$batches) return false;                  // nothing bought: nothing lost
+
+    $cut    = strtotime($before);
+    $readAny = false;
+    foreach ($batches as $b) {
+        $ts = strtotime(preg_replace('/(\d+)(st|nd|rd|th)/i', '$1', $b));
+        if ($ts === false) continue;
+        $readAny = true;
+        if ($ts < $cut) return true;              // one old batch is enough
+    }
+    /* Every batch they have is unreadable — see the note above. */
+    return !$readAny;
+}
+
 /** Guard for endpoints that need a learner; never returns when signed out. */
 function learn_require_user() {
     $uid = learn_user();

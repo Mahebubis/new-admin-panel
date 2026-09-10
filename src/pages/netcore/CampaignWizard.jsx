@@ -23,7 +23,7 @@ const DEFAULT_DRAFT = {
   id: null, name: '', tags: [],
   ga_enabled: true, ga_source: 'Netcore', ga_medium: 'Email', ga_campaign: '', ga_content: '', ga_term: 'Campaign',
   goal_enabled: false, goal_event_name: '', goal_window_days: 2, goal_revenue_param: '',
-  audience_type: 'segments', segment_ids: [], list_ids: [], exclude_enabled: false, exclude_segment_ids: [], domain_enabled: false, domain_filter: '',
+  audience_type: 'segments', segment_ids: [], list_ids: [], exclude_enabled: false, exclude_segment_ids: [], exclude_list_ids: [], domain_enabled: false, domain_filter: '',
   reachable_count: 0,
   sender_name: '', sender_email: '', sending_domain: '', subject: '', preheader: '', reply_to: '',
   template_id: null, template_name: '', content_html: '', attachments: [],
@@ -73,8 +73,9 @@ export default function CampaignWizard() {
             ga_enabled: !!(c.ga_source || c.ga_medium), ga_source: c.ga_source || 'Netcore', ga_medium: c.ga_medium || 'Email',
             ga_campaign: c.ga_campaign || '', ga_content: c.ga_content || '', ga_term: c.ga_term || 'Campaign',
             goal_enabled: !!c.goal_event_name, goal_event_name: c.goal_event_name || '', goal_window_days: c.goal_window_days || 2, goal_revenue_param: c.goal_revenue_param || '',
-            audience_type: c.audience_type || 'segments', segment_ids: c.segment_ids || [], list_ids: c.list_ids || [], exclude_segment_ids: c.exclude_segment_ids || [],
-            exclude_enabled: (c.exclude_segment_ids || []).length > 0, domain_filter: c.domain_filter || '', domain_enabled: !!c.domain_filter,
+            audience_type: c.audience_type || 'segments', segment_ids: c.segment_ids || [], list_ids: c.list_ids || [], exclude_segment_ids: c.exclude_segment_ids || [], exclude_list_ids: c.exclude_list_ids || [],
+            exclude_enabled: (c.exclude_segment_ids || []).length > 0 || (c.exclude_list_ids || []).length > 0,
+            domain_filter: c.domain_filter || '', domain_enabled: !!c.domain_filter,
             reachable_count: c.reachable_count || 0,
             sender_name: c.sender_name || '', sender_email: c.sender_email || '', sending_domain: c.sending_domain || '',
             subject: c.subject || '', preheader: c.preheader || '', reply_to: c.reply_to || '',
@@ -90,8 +91,12 @@ export default function CampaignWizard() {
           // ever half-filled-in (e.g. Setup done, Content never touched) must not let you
           // jump straight to Schedule just because the campaign already has an id.
           const setupOk = !!(c.name && c.name.trim());
-          const excludeIds = c.exclude_segment_ids || [];
-          const hasOverlap = excludeIds.length > 0 && (c.segment_ids || []).some(id => excludeIds.map(String).includes(String(id)));
+          // Segments and Lists are separate id sequences, so an overlap only counts within
+          // the same kind — segment #7 excluded says nothing about list #7 being in the audience.
+          const excSeg = (c.exclude_segment_ids || []).map(String);
+          const excList = (c.exclude_list_ids || []).map(String);
+          const hasOverlap = (c.segment_ids || []).some(id => excSeg.includes(String(id)))
+                          || (c.list_ids || []).some(id => excList.includes(String(id)));
           const audienceOk = (c.audience_type === 'all_contacts' || (c.segment_ids || []).length > 0 || (c.list_ids || []).length > 0) && !hasOverlap;
           const contentOk = !!(c.subject && c.subject.trim() && c.sender_email && c.sender_email.trim() && c.sending_domain && c.template_id);
 
@@ -132,6 +137,7 @@ export default function CampaignWizard() {
     audience_type: d.audience_type, segment_ids: JSON.stringify(d.segment_ids || []),
     list_ids: JSON.stringify(d.list_ids || []),
     exclude_segment_ids: JSON.stringify(d.exclude_enabled ? (d.exclude_segment_ids || []) : []),
+    exclude_list_ids: JSON.stringify(d.exclude_enabled ? (d.exclude_list_ids || []) : []),
     domain_filter: d.domain_enabled ? d.domain_filter : '',
     // Already computed live by the Audience step's own debounced audience_count call — sent
     // as a plain value so "save" doesn't redo that same heavy query on every step's Next click.

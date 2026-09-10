@@ -322,6 +322,8 @@ const Ico = {
   pencil: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>,
   copy:   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>,
   trash:  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>,
+  pause:  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M9 4v16M15 4v16" /></svg>,
+  play:   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M6 3.5v17l14-8.5z" /></svg>,
   mail:   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="2.8" y="5" width="18.4" height="14" rx="2.2" /><path d="m3.4 7 8.6 6 8.6-6" /></svg>,
   wa:     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.47 14.38c-.3-.15-1.75-.86-2.02-.96-.27-.1-.47-.15-.67.15-.2.3-.77.96-.94 1.16-.17.2-.35.22-.64.08-.3-.15-1.25-.46-2.38-1.47-.88-.78-1.47-1.75-1.65-2.05-.17-.3-.02-.46.13-.6.13-.14.3-.35.45-.53.15-.17.2-.3.3-.5.1-.2.05-.37-.03-.52-.07-.15-.67-1.6-.92-2.2-.24-.58-.48-.5-.67-.5h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.22 3.08c.15.2 2.1 3.2 5.08 4.49.71.3 1.26.49 1.7.63.71.23 1.36.2 1.87.12.57-.09 1.75-.72 2-1.41.25-.7.25-1.29.17-1.41-.07-.13-.27-.2-.57-.35M12.05 21.8h-.02a9.8 9.8 0 0 1-4.99-1.37l-.36-.21-3.71.97.99-3.62-.23-.37a9.79 9.79 0 0 1-1.5-5.22c0-5.41 4.4-9.81 9.82-9.81a9.75 9.75 0 0 1 6.94 2.88 9.74 9.74 0 0 1 2.87 6.94c0 5.41-4.4 9.81-9.81 9.81M20.52 3.45A11.66 11.66 0 0 0 12.05 0C5.6 0 .35 5.25.35 11.7c0 2.06.54 4.08 1.56 5.85L.25 24l6.59-1.73a11.66 11.66 0 0 0 5.2 1.24h.01c6.45 0 11.7-5.25 11.7-11.7 0-3.13-1.22-6.07-3.43-8.28" /></svg>,
 };
@@ -582,6 +584,48 @@ export default function CampaignsUnified() {
   /* Both channels open the same detail screen — Performance and Preview as tabs — including
      drafts, which have a preview worth reading even with no results yet. */
   const openCampaign = r => nav(`/netcore/campaigns/${r.channel}/${r.id}`);
+
+  /*
+   * Pause / Resume, for both channels.
+   *
+   * The endpoints have existed on both APIs since the workers were written (action=pause /
+   * action=resume); only the menu entry was missing, which made a mid-flight campaign
+   * unstoppable from the UI — the exact moment you most want a stop button.
+   *
+   * Worth being precise about what pausing does, because it is easy to expect more of it:
+   * suspending flips the campaign out of 'running', so the worker stops CLAIMING new recipients
+   * on its next round. Messages already handed to the provider are gone and cannot be recalled,
+   * and delivery receipts for them keep arriving afterwards — a paused campaign's Delivered
+   * count still moves. Recipients mid-round finish that round; the rest stay 'pending' until
+   * Resume, which picks up exactly where it stopped.
+   */
+  const CAN_PAUSE  = ['draft', 'scheduled', 'running'];
+
+  const setRunState = async (r, act) => {
+    const url = r.channel === 'whatsapp' ? WA_API : EMAIL_API;
+    const key = `${r.channel}-${r.id}`;
+    // 'resume' lands on 'scheduled' when the campaign is still waiting for a future send time,
+    // and 'running' otherwise — the same branch both APIs take server-side.
+    const next = act === 'pause'
+      ? 'suspended'
+      : (r.schedule_type === 'later' && r.scheduled_at && new Date(r.scheduled_at) > new Date() ? 'scheduled' : 'running');
+    try {
+      const res = await api.post(url, new URLSearchParams({ action: act, id: String(r.id) }), FORM);
+      if (!res.data?.success) { toast.error(res.data?.message || `Could not ${act} this campaign`); return; }
+      toast.success(act === 'pause'
+        ? 'Campaign paused — no new recipients will be picked up'
+        : 'Campaign resumed');
+      // Reflect it on the row now rather than after the refetch, so the status pill and the tab
+      // counts agree on the same frame. The next load overwrites both with the server's truth.
+      setRows(rs => rs.map(x => (`${x.channel}-${x.id}` === key ? { ...x, status: next } : x)));
+      setPinned(p => p.map(x => (`${x.channel}-${x.id}` === key ? { ...x, status: next } : x)));
+      bumpCounts(r.status, -1, r.channel);
+      bumpCounts(next, 1, r.channel);
+      load({ silent: true });
+    } catch (err) {
+      toast.error(err?.response?.data?.message || `Could not ${act} this campaign`);
+    }
+  };
 
   const duplicate = async r => {
     const url = r.channel === 'whatsapp' ? WA_API : EMAIL_API;
@@ -1055,6 +1099,22 @@ export default function CampaignsUnified() {
             <button role="menuitem" onClick={() => { const r = menuFor.row; setMenuFor(null); setReportFor(r); }}>
               {Ico.down} Download detailed report
             </button>
+            {/* Pause is only meaningful while there are recipients still waiting to be claimed.
+                A campaign that has already finished has nothing left to stop — its Delivered
+                count is still moving only because receipts are arriving, and no button here can
+                pause the provider. */}
+            {CAN_PAUSE.includes(menuFor.row.status) && (
+              <button role="menuitem"
+                      onClick={() => { const r = menuFor.row; setMenuFor(null); setRunState(r, 'pause'); }}>
+                {Ico.pause} Pause sending
+              </button>
+            )}
+            {menuFor.row.status === 'suspended' && (
+              <button role="menuitem"
+                      onClick={() => { const r = menuFor.row; setMenuFor(null); setRunState(r, 'resume'); }}>
+                {Ico.play} Resume sending
+              </button>
+            )}
             {/* Delete is offered for drafts only. A sent campaign is a record of something that
                 reached real people; removing it silently rewrites every total built from it. */}
             {menuFor.row.status === 'draft' && (

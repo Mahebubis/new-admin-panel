@@ -59,7 +59,10 @@ export default function CampaignStepSchedule({ draft, setField, onValidChange, s
       ].filter(Boolean).join(', ') || 'None selected';
   const segmentNamesList = (draft.segment_ids || []).map(id => segmentNames?.[id] || `ID ${id}`).join(', ');
   const listNamesList = (draft.list_ids || []).map(id => listNames?.[id] || `ID ${id}`).join(', ');
-  const excludeNamesList = (draft.exclude_segment_ids || []).map(id => segmentNames?.[id] || `ID ${id}`).join(', ');
+  const excludeNamesList = [
+    ...(draft.exclude_segment_ids || []).map(id => segmentNames?.[id] || `ID ${id}`),
+    ...(draft.exclude_list_ids || []).map(id => listNames?.[id] || `ID ${id}`),
+  ].join(', ');
   const totalAttachedBytes = (draft.attachments || []).reduce((sum, a) => sum + (a.size || 0), 0);
 
   return (

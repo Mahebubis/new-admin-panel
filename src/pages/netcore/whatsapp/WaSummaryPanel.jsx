@@ -55,8 +55,11 @@ export default function WaSummaryPanel({ draft, segmentNames, listNames }) {
         )}
         <Row label="Reachable numbers" value={n0(draft.reachable_count)} />
         {Number(stats.unreachable) > 0 && <Row label="No phone number" value={`${n0(stats.unreachable)} skipped`} />}
-        {draft.exclude_enabled && (draft.exclude_segment_ids || []).length > 0 && (
-          <Row label="Excluded" value={draft.exclude_segment_ids.map(id => segmentNames?.[id] || `ID ${id}`).join(', ')} />
+        {draft.exclude_enabled && ((draft.exclude_segment_ids || []).length > 0 || (draft.exclude_list_ids || []).length > 0) && (
+          <Row label="Excluded" value={[
+            ...(draft.exclude_segment_ids || []).map(id => segmentNames?.[id] || `ID ${id}`),
+            ...(draft.exclude_list_ids || []).map(id => listNames?.[id] || `ID ${id}`),
+          ].join(', ')} />
         )}
       </Section>
 
