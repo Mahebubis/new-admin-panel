@@ -205,6 +205,31 @@ export default function CampaignDetail() {
       { k: 'CTOR', v: uOpen ? Number(((uClick / uOpen) * 100).toFixed(2)) : 0, suffix: '%' },
       { k: 'Bounce', v: Number(c.bounce_count || 0), p: rate(c.bounce_count, sent) },
       { k: 'Unsubscribed', v: Number(c.unsubscribe_count || 0), p: rate(c.unsubscribe_count, delivered) },
+      /*
+        Addresses verification removed before a single message was queued.
+
+        ALWAYS PRESENT, and NA rather than hidden when this campaign never ran the check.
+
+        It was hidden on a zero, reasoning that "0 removed" on an unverified campaign reads as "we
+        looked and everything was fine". That reasoning was right about the number and wrong about
+        the outcome: the tile then vanished entirely, and the only thing anybody could conclude was
+        that the feature did not exist. NA is the honest third answer, and it is the convention this
+        strip already uses for a metric the channel does not report.
+
+        The percentage is a share of the audience BEFORE the removal — published plus the removed —
+        because that is the list they were taken out of. Against published alone it would divide by
+        a number this very count has already reduced, reading smallest exactly when the removal was
+        largest.
+      */
+      (() => {
+        const skipped = Number(c.verification_skipped || 0);
+        // A real measurement only when the campaign actually verified. verify_before_send is 1 when
+        // it did, 0 when it was switched off, and null for a campaign that predates the setting.
+        const verified = Number(c.verify_before_send) === 1 || skipped > 0;
+        return verified
+          ? { k: 'Invalid skipped', v: skipped, p: rate(skipped, published + skipped) }
+          : { k: 'Invalid skipped', v: null };
+      })(),
       { k: 'Conversions', v: Number(c.conversion_count || 0), p: rate(c.conversion_count, sent) },
     ];
   }, [c, isWa]);

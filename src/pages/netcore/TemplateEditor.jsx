@@ -111,6 +111,8 @@ export default function TemplateEditor() {
       const body = new URLSearchParams({ action: 'save', id: id || '', name, category, subject_default: subject, body_html: html });
       const res = await api.post(API, body, FORM);
       if (res.data.success) {
+        // Nothing to adopt here: this page navigates straight back to the list, which re-reads
+        // every template from the server — so the stored copy, footer and all, is what it shows.
         toast.success('Template saved');
         setDirty(false);
         nav('/netcore/templates');

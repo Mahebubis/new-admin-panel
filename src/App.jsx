@@ -213,6 +213,7 @@ import JourneyBuilder from './pages/netcore/journey/JourneyBuilder';
 import JourneyReport from './pages/netcore/journey/JourneyReport';
 import DndSettings from './pages/netcore/journey/DndSettings';
 import JourneyOutbox from './pages/netcore/journey/JourneyOutbox';
+import MessagingAnalytics from './pages/netcore/analytics/MessagingAnalytics';
 import ImportContactsWizard from './pages/netcore/ImportContactsWizard';
 import ContactLogs from './pages/netcore/ContactLogs';
 import { NetcoreBlocklist, BlocklistLogs, BlocklistImport } from './pages/netcore/NetcoreBlocklist';
@@ -317,6 +318,7 @@ import LmsSettings from './pages/lms/LmsSettings';
 import Monitoring from './pages/Monitoring/Monitoring';
 import Freshdesk from './pages/freshdesk/Freshdesk';
 import EnrollmentAudit from './pages/enrollment-audit/EnrollmentAudit';
+import ProfileMetrics from './pages/profile-metrics/ProfileMetrics';
 
 // Helper to keep the route table readable
 const G = (perm, Element) => (
@@ -417,6 +419,8 @@ export default function App() {
           {/* The engine's queue — overdue steps, quiet-hours holds, retries and failures.
               Static like journeys/dnd, so it outranks journeys/:id/report. */}
           <Route path="journeys/outbox" element={<JourneyOutbox />} />
+          {/* Email + WhatsApp send analytics across campaigns and journeys. */}
+          <Route path="analytics" element={G('netcore_analytics', <MessagingAnalytics />)} />
           {/* Static paths, so they outrank the full-screen /netcore/whatsapp/:id route above
               (React Router v6 ranks by specificity, not declaration order). */}
           {/* Retired — the merged Campaigns list covers both channels. Kept as a redirect so
@@ -555,7 +559,12 @@ export default function App() {
             etc.) so every screen is linkable and survives a refresh. */}
         <Route path="freshdesk/*" element={G('freshdesk', <Freshdesk />)} />
 
-        {/* Enrollment Audit — upload an enrollment export, check it against users + store orders */}
+        {/* Resume / Profile Metrics — profile, resume and hiring-portal activity, day by day */}
+        <Route path="profile-metrics" element={G('profile_metrics', <ProfileMetrics />)} />
+
+        {/* Enrollment Audit — upload an enrollment export, check it against users + store orders.
+            Off the sidebar as of Sep 2026 (its slot went to Resume/Profile Metrics); the route
+            stays so existing bookmarks keep working and putting it back is a one-line change. */}
         <Route path="enrollment-audit" element={G('enrollment_audit', <EnrollmentAudit />)} />
 
         <Route path="*" element={<Navigate to="/" replace />} />

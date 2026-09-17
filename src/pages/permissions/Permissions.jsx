@@ -64,8 +64,16 @@ const EXTRA_SECTION_PERMISSIONS = {
   'Freshdesk': {
     freshdesk: 'Freshdesk',
   },
-  'Enrollment Audit': {
-    enrollment_audit: 'Enrollment Audit (upload & cross-check enrollments)',
+  /* Replaced the Enrollment Audit entry in Sep 2026 when that page came off the
+     sidebar. Anyone still holding an `enrollment_audit` grant keeps it — the
+     route and its API check the same key as before; it is simply no longer
+     offered here. */
+  /* The API (campaigns/messaging_analytics.php) checks the same key. */
+  'Netcore': {
+    netcore_analytics: 'Messaging Analytics (email & WhatsApp sends, campaigns & journeys)',
+  },
+  'Resume/Profile Metrics': {
+    profile_metrics: 'Resume/Profile Metrics (profile, resume & hiring-portal activity)',
   },
 };
 
@@ -96,6 +104,7 @@ const SECTION_ICONS = {
   'Monitoring': '📡',
   'Freshdesk': '🎫',
   'Enrollment Audit': '📋',
+  'Resume/Profile Metrics': '📈',
 };
 
 /* ─── helpers ─── */

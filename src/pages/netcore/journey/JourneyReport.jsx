@@ -6,7 +6,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
 import toast from 'react-hot-toast';
-import { getReport, setCap } from './journeyStore';
+import { getReport, setCap, stepPeople } from './journeyStore';
 import JourneyDiagram from './JourneyDiagram';
 
 /*
@@ -35,6 +35,7 @@ const SUPPRESS_LABEL = {
   dnd_hold:       'Quiet hours',
   no_address:     'No email / phone on file',
   blocklisted:    'On the blocklist',
+  unverified:     'Address does not exist (verification)',
   not_configured: 'No provider configured',
   already_messaged: 'Already messaged once by this journey',
   duplicate:      'Already sent (duplicate guard)',
@@ -52,6 +53,42 @@ const STATUS_TONE = {
   failed:     ['#b42318', '#fee2e2'],
   error:      ['#b42318', '#fee2e2'],
 };
+/*
+ * The report's date range.
+ *
+ * "Did this journey work" and "did it work last week" are different questions, and a journey that
+ * has been live for months answers the first one with numbers nobody can act on. Every preset is
+ * anchored on TODAY and inclusive of it, because the question is always asked from now backwards.
+ *
+ * Days are plain local YYYY-MM-DD rather than timestamps: the server widens the first to 00:00:00
+ * and the last to 23:59:59, so "Today" means all of today and not "up to the moment you clicked".
+ */
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d; };
+
+const RANGE_PRESETS = [
+  { key: 'all',   label: 'All time',      days: null },
+  { key: 'today', label: 'Today',         days: 0 },
+  // "Last day" in the sense the request used it: yesterday on its own, so a daily check reads one
+  // completed day rather than a part-finished one.
+  { key: 'yday',  label: 'Last day',      days: 'yesterday' },
+  { key: '7d',    label: 'Last 7 days',   days: 6 },
+  { key: '15d',   label: 'Last 15 days',  days: 14 },
+  { key: '30d',   label: 'Last 30 days',  days: 29 },
+  { key: 'custom', label: 'Custom',       days: 'custom' },
+];
+
+/** A preset key (plus the two custom boxes) resolved to the {from,to} the API takes, or null. */
+function resolveRange(key, customFrom, customTo) {
+  if (key === 'custom') {
+    return customFrom && customTo ? { from: customFrom, to: customTo } : null;
+  }
+  const preset = RANGE_PRESETS.find(p => p.key === key);
+  if (!preset || preset.days === null) return null;
+  if (preset.days === 'yesterday') { const d = ymd(daysAgo(1)); return { from: d, to: d }; }
+  return { from: ymd(daysAgo(preset.days)), to: ymd(new Date()) };
+}
+
 function StatusPill({ status }) {
   const [fg, bg] = STATUS_TONE[status] || ['#475569', '#e2e8f0'];
   return (
@@ -112,7 +149,10 @@ function JrTip({ active, payload, label }) {
 }
 
 const TAB_CSS = `
+.jr-tabbar{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;flex-wrap:wrap;
+  border-bottom:1px solid #e2e8f0;margin-bottom:16px;padding-bottom:7px}
 .jr-tabs{display:flex;gap:2px;border-bottom:1px solid #e2e8f0;margin-bottom:20px}
+.jr-tabbar .jr-tabs{border-bottom:0;margin-bottom:-8px}
 .jr-tab{position:relative;padding:10px 16px;border:0;background:none;cursor:pointer;font-family:inherit;
   font-size:13.5px;font-weight:600;color:#64748b;border-radius:8px 8px 0 0;
   transition:color .16s cubic-bezier(.4,0,.2,1),background .16s}
@@ -137,7 +177,220 @@ const TAB_CSS = `
 .jr-ch .msg b{font-weight:650;color:#0f172a}
 .jr-ch .msg small{display:block;font-size:11px;color:#94a3b8;font-weight:400}
 .jr-na{color:#cbd5e1}
+
+/* The detail drawer. Bottom to top, because the row it belongs to is in a table the reader is
+   already looking down — coming up from under it reads as "this row, expanded", where a panel
+   sliding in from the side reads as a different screen. */
+@keyframes jrSheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+@keyframes jrFadeIn{from{opacity:0}to{opacity:1}}
+.jr-sheet-back{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:1200;
+  animation:jrFadeIn .22s cubic-bezier(.4,0,.2,1) both}
+.jr-sheet{position:fixed;inset:0;z-index:1201;display:flex;flex-direction:column;background:#f6f7fb;
+  animation:jrSheetUp .34s cubic-bezier(.22,1,.36,1) both;will-change:transform}
+/* Respecting a reduced-motion preference is not decoration: a full-screen slide is exactly the
+   kind of movement that triggers nausea for people who have asked the OS to stop it. */
+@media (prefers-reduced-motion:reduce){
+  .jr-sheet{animation:jrFadeIn .01s both}
+  .jr-sheet-back{animation:none}
+}
+.jr-sheet-head{flex:none;background:#fff;border-bottom:1px solid #e2e8f0;padding:16px 22px}
+.jr-sheet-body{flex:1;min-height:0;overflow:auto;padding:18px 22px 40px}
+.jr-pill{padding:7px 13px;border-radius:999px;font-size:12.5px;font-weight:650;cursor:pointer;
+  font-family:inherit;border:1px solid #e2e8f0;background:#fff;color:#64748b;white-space:nowrap;
+  transition:background .14s,color .14s,border-color .14s}
+.jr-pill:hover{background:#f8fafc;color:#334155}
+.jr-pill[aria-selected="true"]{background:#eef2ff;border-color:#4f46e5;color:#1e3a8a}
+.jr-pill[disabled]{opacity:.45;cursor:not-allowed}
+.jr-who{width:100%;border-collapse:collapse;font-size:13px;min-width:760px}
+.jr-who th{text-align:left;color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.4px;
+  padding:10px 12px;border-bottom:1px solid #e2e8f0;white-space:nowrap;background:#fff;
+  position:sticky;top:0;z-index:1}
+.jr-who td{padding:12px;border-bottom:1px solid #f1f5f9;color:#334155;vertical-align:top}
+.jr-who tbody tr:hover{background:#fafbff}
+.jr-detail-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border-radius:7px;
+  border:1px solid #dbe1ea;background:#fff;color:#1e3a8a;font-size:11.5px;font-weight:700;
+  cursor:pointer;font-family:inherit;white-space:nowrap;transition:background .14s,border-color .14s}
+.jr-detail-btn:hover{background:#eef2ff;border-color:#a5b4fc}
 `;
+
+/*
+  The buckets the drawer can show, in the order they happen.
+
+  Named for what the reader asked — "who opened this" — rather than for the column they come from,
+  and kept in one list so the tab, its count and the table's columns cannot disagree about what
+  the tab means.
+*/
+const PEOPLE_BUCKETS = [
+  { key: 'sent',      label: 'Sent' },
+  { key: 'delivered', label: 'Delivered' },
+  { key: 'opened',    label: 'Opened / read' },
+  { key: 'clicked',   label: 'Clicked' },
+  { key: 'converted', label: 'Converted' },
+  { key: 'not_sent',  label: 'Not sent' },
+  // Its own tab rather than folded into "Not sent": an address that does not exist is a data
+  // problem, while everything else in that bucket is the journey deliberately holding back.
+  { key: 'unverified', label: 'Invalid address' },
+  { key: 'failed',    label: 'Rejected' },
+];
+
+/*
+  A timestamp exactly as every other table on this report prints it, or an em dash.
+
+  Deliberately NOT reformatted into the browser's locale: these come back as the server's own
+  'YYYY-MM-DD HH:MM:SS' and the message log, the activity log and the engaged list all show them
+  that way. Rendering the same instant in two different shapes on one screen is how somebody ends
+  up believing they are two different events.
+*/
+const whenText = (v) => (v ? String(v) : '—');
+
+/*
+  WHO IS BEHIND ONE STEP'S NUMBERS.
+
+  Every figure on the Channel-wise table stands for a list of real people, and the number on its
+  own is not actionable: you follow up the student who clicked and you check the number of the one
+  the message never reached. This is that list, opened from the row it belongs to.
+
+  Full screen rather than a side panel because the useful view is wide — name, email, phone and
+  three timestamps — and a 420px drawer would have shown two of those six.
+*/
+function StepPeopleSheet({ journeyId, step, range, convGoal, onClose }) {
+  const [bucket, setBucket] = useState('clicked');
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+
+  // Escape closes, and the page underneath must not scroll while a full-screen sheet is over it —
+  // without the lock the background slides away under the reader's fingers on a trackpad.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
+  }, [onClose]);
+
+  useEffect(() => { setPage(1); }, [bucket]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true);
+      const d = await stepPeople(journeyId, step.id, { bucket, page, perPage: 50, range });
+      if (alive) { setData(d); setLoading(false); }
+    })();
+    return () => { alive = false; };
+  }, [journeyId, step.id, bucket, page, range?.from, range?.to]); // eslint-disable-line
+
+  const counts = data?.counts || {};
+  const rows = data?.rows || [];
+  const total = data?.total || 0;
+  const pages = Math.max(1, Math.ceil(total / (data?.perPage || 50)));
+
+  return (
+    <>
+      <div className="jr-sheet-back" onClick={onClose} />
+      <div className="jr-sheet" role="dialog" aria-modal="true" aria-label={`Who for ${step.name}`}>
+        <div className="jr-sheet-head">
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, letterSpacing: '.4px', textTransform: 'uppercase' }}>
+                {step.channel} · {step.id}
+              </div>
+              <h2 style={{ margin: '3px 0 0', fontSize: 19, fontWeight: 700, color: '#0f172a' }}>{step.name}</h2>
+              <div style={{ fontSize: 12, color: '#64748b', marginTop: 3 }}>
+                {range ? <>Measured over <b>{range.from === range.to ? range.from : `${range.from} to ${range.to}`}</b>.</> : 'All time.'}
+                {' '}Same window as the table behind this.
+              </div>
+            </div>
+            <button type="button" onClick={onClose}
+              style={{ border: '1px solid #e2e8f0', background: '#fff', borderRadius: 9, padding: '8px 14px',
+                       fontSize: 12.5, fontWeight: 700, color: '#334155', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
+              Close
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', gap: 7, marginTop: 14, flexWrap: 'wrap' }}>
+            {PEOPLE_BUCKETS.map(b => {
+              // Converted is meaningless without a goal on the journey, and a tab reading "0"
+              // there would be read as "nobody converted" rather than "nothing is being measured".
+              if (b.key === 'converted' && !convGoal) return null;
+              const n = counts[b.key];
+              return (
+                <button key={b.key} type="button" className="jr-pill" aria-selected={bucket === b.key}
+                        disabled={n === 0} onClick={() => setBucket(b.key)}>
+                  {b.label}{n === undefined ? '' : ` · ${nUS(n)}`}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="jr-sheet-body">
+          {loading ? (
+            <div style={{ padding: 40, textAlign: 'center', color: '#64748b', fontSize: 13 }}>Loading…</div>
+          ) : !rows.length ? (
+            <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
+              Nobody in this group for the window shown.
+            </div>
+          ) : (
+            <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden' }}>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="jr-who">
+                  <thead>
+                    <tr>
+                      <th>Student</th><th>Email</th><th>Phone</th>
+                      <th>Delivered</th><th>Opened / read</th><th>Clicked</th>
+                      {bucket === 'converted' && <th>Converted</th>}
+                      {(bucket === 'failed' || bucket === 'not_sent' || bucket === 'unverified') && <th>Why</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((p, i) => (
+                      <tr key={i}>
+                        <td>
+                          <b style={{ color: '#0f172a' }}>{p.name || (p.userId ? `User #${p.userId}` : 'Unknown')}</b>
+                          {p.isControl && (
+                            <span style={{ marginLeft: 7, fontSize: 10, fontWeight: 800, color: '#7c3aed',
+                                           background: '#f5f3ff', borderRadius: 4, padding: '1px 5px' }}>CONTROL</span>
+                          )}
+                        </td>
+                        <td style={{ color: '#475569' }}>{p.email || '—'}</td>
+                        <td style={{ color: '#475569', fontVariantNumeric: 'tabular-nums' }}>{p.phone || p.to || '—'}</td>
+                        <td style={{ fontVariantNumeric: 'tabular-nums', color: p.deliveredAt ? '#334155' : '#cbd5e1' }}>{whenText(p.deliveredAt)}</td>
+                        <td style={{ fontVariantNumeric: 'tabular-nums', color: p.openedAt ? '#334155' : '#cbd5e1' }}>{whenText(p.openedAt)}</td>
+                        <td style={{ fontVariantNumeric: 'tabular-nums', color: p.clickedAt ? '#15803d' : '#cbd5e1', fontWeight: p.clickedAt ? 650 : 400 }}>
+                          {whenText(p.clickedAt)}
+                          {p.clicks > 1 && <span style={{ color: '#94a3b8', fontWeight: 400 }}> · {p.clicks} taps</span>}
+                        </td>
+                        {bucket === 'converted' && (
+                          <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            {whenText(p.convertedAt)}
+                            {p.eventKey && <span style={{ color: '#94a3b8' }}> · {p.eventKey}</span>}
+                          </td>
+                        )}
+                        {(bucket === 'failed' || bucket === 'not_sent' || bucket === 'unverified') && (
+                          <td style={{ color: '#b91c1c', whiteSpace: 'normal', maxWidth: 380 }}>{p.error || p.reason || '—'}</td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {pages > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 16 }}>
+              <button type="button" className="jr-pill" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Previous</button>
+              <span style={{ fontSize: 12.5, color: '#64748b' }}>Page {page} of {pages} · {nUS(total)} people</span>
+              <button type="button" className="jr-pill" disabled={page >= pages} onClick={() => setPage(p => p + 1)}>Next</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
 
 /*
   Channel wise — one row per MESSAGE STEP, which is how anyone actually asks the question.
@@ -150,7 +403,8 @@ const TAB_CSS = `
   NA rather than 0 wherever the channel does not report a metric — the same rule the campaign
   list follows, and for the same reason: a zero reads as a measurement.
 */
-function ChannelWise({ report, j, derived }) {
+function ChannelWise({ report, j, derived, journeyId, range }) {
+  const [openStep, setOpenStep] = useState(null);
   // The report returns node stats keyed by node id under `nodes` (see journeys.php action=report).
   const stats = report?.nodes || {};
   const CH = {
@@ -221,6 +475,7 @@ function ChannelWise({ report, j, derived }) {
                   <th className="l">Message name</th>
                   <th>Sent</th><th>Not sent</th><th>Delivered</th>
                   <th>Opened / read</th><th>Clicked</th><th>Conversions</th>
+                  <th>Detail</th>
                 </tr>
               </thead>
               <tbody>
@@ -242,6 +497,12 @@ function ChannelWise({ report, j, derived }) {
                       <td>{nUS(r.opened)} <span style={{ color: '#94a3b8' }}>· {pct(r.opened, r.delivered)}%</span></td>
                       <td>{nUS(r.clicked)} <span style={{ color: '#94a3b8' }}>· {pct(r.clicked, r.delivered)}%</span></td>
                       <td>{j.convGoal ? nUS(r.conversions) : <span className="jr-na">NA</span>}</td>
+                      <td>
+                        {/* The row's numbers each stand for a list of people; this opens it. */}
+                        <button type="button" className="jr-detail-btn" onClick={() => setOpenStep(r)}>
+                          See full detail
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -250,6 +511,11 @@ function ChannelWise({ report, j, derived }) {
           </div>
         )}
       </Section>
+
+      {openStep && (
+        <StepPeopleSheet journeyId={journeyId} step={openStep} range={range}
+                         convGoal={!!j.convGoal} onClose={() => setOpenStep(null)} />
+      )}
     </>
   );
 }
@@ -264,17 +530,39 @@ export default function JourneyReport() {
 
   const tabParam = params.get('tab');
   const tab = tabParam === 'channel' || tabParam === 'node' ? tabParam : 'overall';
-  const setTab = t => setParams(t === 'overall' ? {} : { tab: t }, { replace: true });
+
+  const rangeParam = params.get('range');
+  const rangeKey = RANGE_PRESETS.some(p => p.key === rangeParam) ? rangeParam : 'all';
+  const customFrom = params.get('from') || '';
+  const customTo = params.get('to') || '';
+  const range = resolveRange(rangeKey, customFrom, customTo);
+
+  /*
+   * The view AND the window both live in the URL, so a particular report can be linked to and
+   * survives a reload. They are written through one helper because setParams replaces the whole
+   * query string — changing the tab used to wipe the date range with it.
+   */
+  const writeParams = (next) => {
+    const merged = { tab, range: rangeKey, from: customFrom, to: customTo, ...next };
+    const out = {};
+    if (merged.tab && merged.tab !== 'overall') out.tab = merged.tab;
+    if (merged.range && merged.range !== 'all') out.range = merged.range;
+    if (merged.range === 'custom') { if (merged.from) out.from = merged.from; if (merged.to) out.to = merged.to; }
+    setParams(out, { replace: true });
+  };
+  const setTab = t => writeParams({ tab: t });
 
   useEffect(() => {
     let alive = true;
     (async () => {
       setLoading(true);
-      const r = await getReport(id);
+      const r = await getReport(id, range);
       if (alive) { setReport(r); setLoading(false); }
     })();
     return () => { alive = false; };
-  }, [id]);
+    // Re-fetched on the resolved days, not on the preset key: "Custom" with only one box filled in
+    // resolves to null and must not throw away the numbers already on screen.
+  }, [id, range?.from, range?.to]); // eslint-disable-line
 
   const derived = useMemo(() => {
     if (!j) return null;
@@ -386,12 +674,60 @@ export default function JourneyReport() {
 
         The tab is in the URL so a particular view can be linked to and survives a reload.
       */}
-      <div className="jr-tabs" role="tablist" aria-label="Report view">
-        {[['overall', 'Overall'], ['channel', 'Channel wise'], ['node', 'Node wise']].map(([k, label]) => (
-          <button key={k} role="tab" aria-selected={tab === k} className="jr-tab"
-                  onClick={() => setTab(k)}>{label}</button>
-        ))}
+      <div className="jr-tabbar">
+        <div className="jr-tabs" role="tablist" aria-label="Report view">
+          {[['overall', 'Overall'], ['channel', 'Channel wise'], ['node', 'Node wise']].map(([k, label]) => (
+            <button key={k} role="tab" aria-selected={tab === k} className="jr-tab"
+                    onClick={() => setTab(k)}>{label}</button>
+          ))}
+        </div>
+
+        {/*
+          Beside the tabs rather than inside one of them: every view below reads the same window,
+          so a range chosen on Overall is still in force after switching to Channel wise. Splitting
+          it per tab would have meant the two views could quietly disagree about the period.
+        */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          {RANGE_PRESETS.map(p => (
+            <button key={p.key} type="button" onClick={() => writeParams({ range: p.key })}
+              style={{
+                padding: '6px 11px', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                fontFamily: 'inherit',
+                border: rangeKey === p.key ? '1px solid #4f46e5' : '1px solid #e2e8f0',
+                background: rangeKey === p.key ? '#eef2ff' : '#fff',
+                color: rangeKey === p.key ? '#1e3a8a' : '#64748b',
+              }}>{p.label}</button>
+          ))}
+          {rangeKey === 'custom' && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <input type="date" value={customFrom} max={customTo || undefined}
+                onChange={e => writeParams({ range: 'custom', from: e.target.value })}
+                style={{ padding: '5px 8px', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 12, fontFamily: 'inherit', color: '#334155' }} />
+              <span style={{ fontSize: 12, color: '#94a3b8' }}>to</span>
+              <input type="date" value={customTo} min={customFrom || undefined}
+                onChange={e => writeParams({ range: 'custom', to: e.target.value })}
+                style={{ padding: '5px 8px', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 12, fontFamily: 'inherit', color: '#334155' }} />
+            </span>
+          )}
+        </div>
       </div>
+
+      {/*
+        Said out loud, because every number on the page is a share of it. A funnel measured over
+        seven days next to a journey that has run for three months is unreadable otherwise — and
+        the commonest reading of a small number is "it stopped working", not "you narrowed it".
+      */}
+      {range && (
+        <div style={{ margin: '0 0 18px', fontSize: 12, color: '#64748b' }}>
+          Showing <b style={{ color: '#334155' }}>{range.from === range.to ? range.from : `${range.from} to ${range.to}`}</b>.
+          Messages count by when they were sent, conversions by when the goal fired.
+        </div>
+      )}
+      {rangeKey === 'custom' && !range && (
+        <div style={{ margin: '0 0 18px', fontSize: 12, color: '#b45309' }}>
+          Pick both dates to apply a custom range — showing all time until then.
+        </div>
+      )}
 
       {/* KPI cards.
           Students and Messages are separate tiles on purpose: one student can pass
@@ -411,6 +747,9 @@ export default function JourneyReport() {
             sub: [
               j.recipients ? `to ${nUS(j.recipients)} student${j.recipients === 1 ? '' : 's'}` : null,
               j.suppressed ? `${nUS(j.suppressed)} held back` : null,
+              // Said on the tile as well as in the strip above: a reader who scrolls straight to
+              // the numbers must not be able to miss that some sends never landed.
+              j.failed ? `${nUS(j.failed)} rejected` : null,
             ].filter(Boolean).join(' · ') || undefined,
           },
           { l: 'Delivered', v: j.delivered, r: pct(j.delivered, j.sent) },
@@ -447,6 +786,44 @@ export default function JourneyReport() {
           delay from the outside, so a live journey the worker has not touched in five
           minutes says so.
       */}
+      {/*
+          THE PROVIDER REFUSED THESE — the loudest thing on the page when it happens.
+
+          A journey whose every message WhatsApp declined used to look exactly like one that never
+          ran: every tile zero and no explanation anywhere above the message log. The two need
+          completely different responses, so the count and the reasons are stated here, before any
+          of the numbers they explain.
+
+          The reason is Meta's own text, verbatim and with its code, because that code is what an
+          admin searches for and what support asks for. 131049 is a per-person marketing cap and
+          the journey is working; 131026 means the number cannot receive WhatsApp at all.
+      */}
+      {(report.failures || []).length > 0 && (
+        <div style={{
+          background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10,
+          padding: '12px 14px', marginBottom: 20, fontSize: 13, color: '#991b1b',
+        }}>
+          <b>
+            {nUS(j.failed || (report.failures || []).reduce((n, f) => n + f.count, 0))} message
+            {(j.failed || 0) === 1 ? ' was' : 's were'} rejected by the provider after this journey handed
+            {(j.failed || 0) === 1 ? ' it' : ' them'} over.
+          </b>
+          <div style={{ marginTop: 7, display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {report.failures.map((f, i) => (
+              <div key={i} style={{ fontSize: 12.5, lineHeight: 1.5 }}>
+                <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{nUS(f.count)}×</span>{' '}
+                <span style={{ color: '#7f1d1d' }}>{f.reason}</span>
+                {f.channel ? <span style={{ color: '#b91c1c', opacity: .75 }}> · {f.channel}</span> : null}
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 8, fontSize: 11.5, color: '#b91c1c' }}>
+            Rejected sends are not counted as sent, which is why the tiles below can read zero while the
+            message log shows every attempt.
+          </div>
+        </div>
+      )}
+
       {j.status === 'ongoing' && (j.workerAge === null || j.workerAge > 300) && (
         <div style={{
           background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10,
@@ -713,7 +1090,7 @@ export default function JourneyReport() {
 
       </>)}
 
-      {tab === "channel" && <ChannelWise report={report} j={j} derived={derived} />}
+      {tab === "channel" && <ChannelWise report={report} j={j} derived={derived} journeyId={id} range={range} />}
 
       {tab === "node" && (<>
       {/* The journey as it was drawn, with what each step actually did printed on it. A table of

@@ -1,4 +1,4 @@
-import { WA } from './waShared';
+import { WA, buttonDestination } from './waShared';
 
 /*
  * A compact message preview for list/grid cards.
@@ -40,6 +40,9 @@ function fill(text, values = []) {
 export default function WaMessageCard({
   headerType = 'none', headerText = '', headerValues = [],
   bodyText = '', bodyValues = [], footerText = '', buttons = [], lines = 4,
+  // The template's own per-contact destination and tracked link, so the hover can name the
+  // attribute a dynamic button resolves rather than describing it as "a link".
+  destinationAttr = '', trackedUrl = '',
 }) {
   const header = headerType === 'text' ? fill(headerText, headerValues) : '';
   const body = fill(bodyText, bodyValues);
@@ -81,11 +84,11 @@ export default function WaMessageCard({
       {(buttons || []).length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 7 }}>
           {buttons.map((b, i) => (
-            <span key={i} style={{
+            <span key={i} title={buttonDestination(b, { destinationAttr, trackedUrl })} style={{
               display: 'inline-flex', alignItems: 'center', gap: 4,
               border: '1px solid #dbeafe', background: '#f8fbff', color: '#1d4ed8',
               borderRadius: 6, padding: '4px 9px', fontSize: 10.5, fontWeight: 600,
-              maxWidth: '100%', overflow: 'hidden',
+              maxWidth: '100%', overflow: 'hidden', cursor: 'help',
             }}>
               {b.type === 'url' && (
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}>

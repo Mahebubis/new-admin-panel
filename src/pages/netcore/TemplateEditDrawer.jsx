@@ -110,7 +110,11 @@ export default function TemplateEditDrawer({ templateId, onClose, onSaved }) {
       if (res.data.success) {
         toast.success('Template saved');
         setDirty(false);
-        animateCloseThen(() => onSaved({ id: templateId, name, category, subject_default: subject, body_html: html }));
+        // What the server stored, which is not always what was sent — it adds the unsubscribe
+        // footer to a template that has none. Falling back to the local copy keeps this working
+        // against an older backend that only returns the id.
+        const saved = res.data.data?.body_html ?? html;
+        animateCloseThen(() => onSaved({ id: templateId, name, category, subject_default: subject, body_html: saved }));
       } else toast.error(res.data.message || 'Failed to save');
     } catch (e) { toast.error(e?.response?.data?.message || 'Network error'); }
     finally { setSaving(false); }

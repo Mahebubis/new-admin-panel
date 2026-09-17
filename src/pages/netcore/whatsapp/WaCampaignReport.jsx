@@ -535,6 +535,8 @@ export default function WaCampaignReport() {
               bodyValues={vars.body || []}
               footerText={c.message_type === 'template' ? c.footer_text : ''}
               buttons={c.message_type === 'template' ? c.buttons : []}
+              destinationAttr={vars.button_destination_attr || ''}
+              trackedUrl={c.click_target_url || ''}
               plainText={c.message_type === 'text' ? c.text_content : null}
               height={420}
             />

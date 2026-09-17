@@ -36,7 +36,7 @@ const DEFAULT_DRAFT = {
   message_type: 'template',
   template_id: null, template_name: '', template_language: 'en', template_category: '',
   header_type: 'none', header_text: '', header_media_url: '', body_text: '', footer_text: '', buttons: [],
-  variables: { header: [], body: [], button_url_suffix: '' },
+  variables: { header: [], body: [], button_url_suffix: '', button_destination_attr: '' },
   text_content: '', preview_url: 1,
   schedule_type: 'now', scheduled_at: '',
   contact_limit_enabled: false, contact_limit: '', retry_enabled: true,
@@ -100,7 +100,9 @@ export default function WaCampaignWizard() {
           header_type: c.header_type || 'none', header_text: c.header_text || '',
           header_media_url: c.header_media_url || '', body_text: c.body_text || '',
           footer_text: c.footer_text || '', buttons: c.buttons || [],
-          variables: { header: vars.header || [], body: vars.body || [], button_url_suffix: vars.button_url_suffix || '' },
+          // Spread first: reloading a saved campaign must not drop a key this list forgot —
+          // button_destination_attr was lost exactly that way.
+          variables: { ...vars, header: vars.header || [], body: vars.body || [], button_url_suffix: vars.button_url_suffix || '' },
           text_content: c.text_content || '', preview_url: Number(c.preview_url) === 1 ? 1 : 0,
           schedule_type: c.schedule_type || 'now',
           scheduled_at: c.scheduled_at ? String(c.scheduled_at).replace(' ', 'T').slice(0, 16) : '',
@@ -159,8 +161,31 @@ export default function WaCampaignWizard() {
         // Existing values are preserved positionally when switching between templates with the
         // same variable count — retyping "iCAT 174" for every template revision is needless.
         header: resize(d.variables?.header, headerVars),
-        body: resize(d.variables?.body, bodyVars),
-        button_url_suffix: d.variables?.button_url_suffix || '',
+        /*
+         * The TEMPLATE's answer wins over anything carried across from the last one.
+         *
+         * Values are kept positionally when two templates have the same variable count, which is
+         * handy while revising one template and actively wrong when swapping to another: slot 3
+         * meant "last name" in the old copy and "email" in the new, so the carried value lands one
+         * place out and every line below it shifts with it. Campaign #66 went out that way —
+         * "Email: Khan", "Mobile: maheboob.istudio@gmail.com" — and PC_LINK, which only the new
+         * template has a slot for, was never sent at all.
+         *
+         * A template that states what fills each slot is the authority on its own copy, so that
+         * wins here. A carried value is only kept where the new template says nothing, and any
+         * campaign-specific wording is still editable afterwards in the Content step.
+         */
+        body: resize(d.variables?.body, bodyVars).map((v, i) =>
+          ((t.var_defaults || {})[String(i + 1)] || v || '')),
+        // Same rule as the body variables: the template's recorded choice fills a blank slot only.
+        button_url_suffix: d.variables?.button_url_suffix
+          || (t.var_defaults || {}).button_url_suffix || '',
+        /*
+         * Which attribute this campaign's button taps should land on, carried through from the
+         * template. Not a variable Meta ever sees — the send worker resolves it per recipient and
+         * stores the answer on the recipient's row, where c.php reads it when the tap arrives.
+         */
+        button_destination_attr: (t.var_defaults || {}).button_destination_attr || '',
       },
     }));
   };

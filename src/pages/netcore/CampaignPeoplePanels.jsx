@@ -254,7 +254,28 @@ function PeopleTable({ kind, channel, campaignId, goalEvent }) {
                   <td><a className="cp-url" href={r.url || '#'} target="_blank" rel="noreferrer">{r.url || '—'}</a></td>
                 )}
                 {!isClicks && <td>{r.event_key || r.goal_event || goalEvent || '—'}</td>}
-                <td className="cp-num">{fmt(r.clicked_at || r.converted_at || r.attributed_at || r.created_at)}</td>
+                {/*
+                    WHEN THEY CONVERTED, not when they clicked.
+
+                    This read clicked_at first, so a panel headed "Who converted" printed the time
+                    of the click that earned the credit. The two are usually minutes apart and
+                    nobody notices — until the click time is one the attribution cookie carried
+                    over from earlier in the day, and the column shows a conversion happening
+                    hours BEFORE the campaign was sent. Three rows on campaign 96 read 07:37 pm,
+                    04:39 pm and 03:26 pm against a send that started at 20:00, and every one of
+                    those figures was a clicked_at.
+
+                    The click is still worth seeing, so it sits underneath in small type rather
+                    than standing in for the thing the column is named after.
+                */}
+                <td className="cp-num">
+                  {fmt(r.converted_at || r.attributed_at || r.created_at || r.clicked_at)}
+                  {r.clicked_at && (r.converted_at || r.attributed_at) && (
+                    <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 2 }}>
+                      clicked {fmt(r.clicked_at)}
+                    </div>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

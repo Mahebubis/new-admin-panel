@@ -66,6 +66,12 @@ export default function CreateAttributeModal({ editRow, onClose, onSaved }) {
   const [name, setName] = useState(editRow?.name || '');
   const [dataType, setDataType] = useState(editRow?.data_type || '');
   const [defaultValue, setDefaultValue] = useState(editRow?.default_value || '');
+  /* Editing a custom attribute's default value changes what every template renders, so the field
+     starts locked and has to be deliberately unlocked with its Edit button. */
+  const lockDefault = isEdit && editRow.category === 'custom';
+  const [defaultUnlocked, setDefaultUnlocked] = useState(false);
+  const defaultRef = useRef(null);
+  const defaultLocked = lockDefault && !defaultUnlocked;
   const [dateFormat, setDateFormat] = useState(editRow?.date_format || '');
   const [chain, setChain] = useState(() => {
     if (!editRow?.resolver_json) return EMPTY_CHAIN;
@@ -206,7 +212,28 @@ export default function CreateAttributeModal({ editRow, onClose, onSaved }) {
             ...(tab !== 'chain' && picked ? { mapped_db: picked.db, mapped_table: picked.table, mapped_column: picked.column } : {}),
           });
       const res = await api.post(API, body, FORM);
-      if (res.data.success) { toast.success(isEdit ? 'Saved' : 'Attribute created', { id: t }); animateCloseThen(onSaved); }
+      if (res.data.success) {
+        toast.success(isEdit ? 'Saved' : 'Attribute created', { id: t });
+        /*
+          A changed value is pushed to every WhatsApp template whose Call button uses it. That
+          outcome used to be thrown away here, so the attribute read "saved" while the templates
+          went on dialling the old number — sometimes for a day, because Meta takes one edit of an
+          approved template per 24 hours. Each template's result is said out loud instead.
+        */
+        const pushed = (res.data.data && res.data.data.resubmitted) || [];
+        pushed.forEach((r) => {
+          if (r.ok) {
+            toast.success('"' + r.name + '" sent to Meta with the new number — it takes effect once Meta approves it.', { duration: 9000 });
+          } else if (r.retry_at) {
+            toast('"' + r.name + '" still dials its old number. Meta allows one edit of an approved template every 24 hours, '
+              + 'so the new number is applied automatically at ' + r.retry_at + ' and then needs Meta\'s approval. '
+              + 'Campaigns sent before then use the old number.', { duration: 20000, icon: '⏳' });
+          } else if (r.error) {
+            toast.error('"' + (r.name || 'A template') + '" was not updated: ' + r.error, { duration: 15000 });
+          }
+        });
+        animateCloseThen(onSaved);
+      }
       else { toast.error(res.data.message || 'Could not save', { id: t }); setSaving(false); }
     } catch (e) {
       toast.error(e?.response?.data?.message || 'Network error', { id: t });
@@ -392,8 +419,31 @@ export default function CreateAttributeModal({ editRow, onClose, onSaved }) {
           <label style={label}>
             Default value {defaultIsRequired ? req : <span style={{ fontWeight: 500, color: '#94a3b8' }}>(optional)</span>}
           </label>
-          <input style={inp} value={defaultValue} onChange={e => setDefaultValue(e.target.value)}
+          <input ref={defaultRef} value={defaultValue} onChange={e => setDefaultValue(e.target.value)}
+            disabled={defaultLocked} aria-disabled={defaultLocked}
+            style={defaultLocked ? { ...inp, background: '#f1f5f9', color: '#64748b', cursor: 'not-allowed' } : inp}
             placeholder={defaultIsRequired ? 'The value every recipient will see' : 'Shown when no value is found for a recipient'} />
+          {lockDefault && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+              {defaultLocked ? (
+                <button type="button"
+                  onClick={() => { setDefaultUnlocked(true); setTimeout(() => { defaultRef.current?.focus(); defaultRef.current?.select(); }, 0); }}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', border: '1.5px solid #1e3a8a', background: '#fff', color: '#1e3a8a', borderRadius: 7, fontWeight: 700, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
+                  Edit
+                </button>
+              ) : (
+                <button type="button"
+                  onClick={() => { setDefaultValue(editRow.default_value || ''); setDefaultUnlocked(false); }}
+                  style={{ padding: '6px 12px', border: '1.5px solid #e2e8f0', background: '#fff', color: '#475569', borderRadius: 7, fontWeight: 600, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  Cancel edit
+                </button>
+              )}
+              <span style={{ fontSize: 10.5, color: '#94a3b8' }}>
+                {defaultLocked ? 'Locked — click Edit to change the default value.' : 'Editing — Save to apply, or Cancel edit to restore the current value.'}
+              </span>
+            </div>
+          )}
           {defaultIsRequired && (
             <div style={hintText}>
               Required, because this attribute reads nothing from the database — the default is the

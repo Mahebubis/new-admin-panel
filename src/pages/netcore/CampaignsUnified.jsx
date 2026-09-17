@@ -77,6 +77,17 @@ const COLUMNS = [
   { key: 'spam',         label: 'Spam',           rateOf: 'delivered' },
   { key: 'undelivered',  label: 'Undelivered',    rateOf: 'sent' },
   { key: 'replied',      label: 'Replied',        rateOf: 'delivered' },
+  /*
+   * Addresses dropped before the campaign was queued because verification said the mailbox does
+   * not exist (Settings → Email settings → Verify addresses before sending).
+   *
+   * A share of PUBLISHED, because that is the audience it was taken out of — and the reason the
+   * column has to exist at all: those people are never written as recipients, so without it the
+   * audience simply comes out smaller than the segment and nothing says why.
+   *
+   * NA on WhatsApp rows, which is accurate rather than tidy: the question does not apply there.
+   */
+  { key: 'verified_skipped', label: 'Invalid skipped', rateOf: 'published' },
 ];
 const DEFAULT_COLS = ['published', 'sent', 'delivered', 'opened', 'clicked', 'conversions',
                       'not_sent', 'unsubscribed', 'bounce', 'undelivered'];
@@ -187,6 +198,9 @@ const CSS = `
    without it you scroll to Bounce and can no longer tell whose bounce it is. */
 .cu-tbl th.sticky, .cu-tbl td.sticky { position:sticky; left:0; z-index:2; background:#fff; }
 .cu-tbl th.sticky { background:#f9fafb; z-index:3; }
+/* A fixed width, so a long name or a long stop reason truncates instead of widening the column
+   and pushing the metric columns off-screen. */
+.cu-tbl th.sticky, .cu-tbl td.sticky { width:330px; min-width:330px; max-width:330px; box-sizing:border-box; }
 .cu-tbl tbody tr:hover td.sticky { background:#f9fafb; }
 .cu-tbl td.sticky::after, .cu-tbl th.sticky::after { content:''; position:absolute; top:0; right:0; bottom:0;
   width:1px; background:#eaecf0; }
@@ -285,7 +299,7 @@ const CSS = `
 /* The name is the only navigation target in the row. Styled as a link, built as a button so it
    is keyboard-reachable and announced correctly. */
 .cu-namebtn { border:0; flex:1; min-width:0; background:none; padding:0; font-family:inherit; font-size:13px; font-weight:650;
-  color:#101828; cursor:pointer; text-align:left; max-width:290px; overflow:hidden; text-overflow:ellipsis;
+  color:#101828; cursor:pointer; text-align:left; overflow:hidden; text-overflow:ellipsis;
   white-space:nowrap; border-bottom:1px solid transparent;
   transition:color 150ms cubic-bezier(.4,0,.2,1), border-color 150ms; }
 .cu-namebtn:hover { color:#4f46e5; border-bottom-color:#a5b4fc; }
@@ -307,6 +321,36 @@ const CSS = `
 .cu-dots[data-open] { background:#eef2ff; border-color:#a5b4fc; color:#3730a3; }
 /* A coarse pointer has no hover at all, so the control would be permanently invisible there. */
 @media (hover: none) { .cu-dots { opacity:1; } }
+
+/* Per-row refresh, beside the ⋮ and revealed the same way. It stays visible while spinning and
+   for its short green "done" tick, so the feedback survives the pointer moving on. */
+.cu-refresh { opacity:0; transition:opacity 140ms cubic-bezier(.4,0,.2,1), background 170ms, border-color 170ms, color 170ms, transform 90ms; }
+.cu-tbl tbody tr:hover .cu-refresh, .cu-refresh:focus-visible, .cu-refresh[data-state] { opacity:1; }
+.cu-refresh[data-state="busy"] { color:#4f46e5; border-color:#c7d2fe; background:#eef2ff; cursor:progress; }
+.cu-refresh[data-state="busy"] svg { animation:cu-rot .8s linear infinite; }
+.cu-refresh[data-state="done"] { color:#067647; border-color:#abefc6; background:#ecfdf3; }
+@keyframes cu-rot { to { transform:rotate(360deg); } }
+@media (hover: none) { .cu-refresh { opacity:1; } }
+@media (prefers-reduced-motion: reduce) { .cu-refresh[data-state="busy"] svg { animation:none; } }
+
+/* Horizontal 3-dot loader shown in every data cell of a row while that row is refreshing —
+   the same treatment as a segment count refresh in Audience → Segments. */
+.cu-dot-load{display:inline-flex;gap:4px;align-items:center;vertical-align:middle}
+.cu-dot-load span{width:6px;height:6px;border-radius:50%;background:#4f46e5;animation:cu_dot_pulse 1.2s infinite ease-in-out}
+.cu-dot-load span:nth-child(2){animation-delay:.15s}
+.cu-dot-load span:nth-child(3){animation-delay:.30s}
+@keyframes cu_dot_pulse{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){.cu-dot-load span{animation:none;opacity:.6}}
+
+/* The stop reason: one line, ellipsised; the full text appears in a floating tooltip on hover. */
+.cu-err { display:block; margin-top:5px; margin-left:34px; padding:5px 9px; background:#fef2f2;
+  border:1px solid #fecaca; border-radius:7px; color:#b42318; font-size:11.5px; line-height:1.45;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:help; }
+.cu-errtip { position:fixed; z-index:1950; max-width:420px; padding:10px 12px; border-radius:9px;
+  background:#101828; color:#fff; font-size:12px; line-height:1.5; white-space:normal;
+  box-shadow:0 12px 32px rgba(16,24,40,.28); pointer-events:none; animation:cu-tipin 120ms ease-out; }
+.cu-errtip b { display:block; color:#fda29b; font-size:10.5px; letter-spacing:.05em; text-transform:uppercase; margin-bottom:3px; }
+@keyframes cu-tipin { from { opacity:0; } to { opacity:1; } }
 `;
 
 const Ico = {
@@ -323,6 +367,8 @@ const Ico = {
   copy:   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>,
   trash:  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>,
   pause:  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M9 4v16M15 4v16" /></svg>,
+  refresh: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8" /><path d="M21 3v5h-5" /></svg>,
+  tick:   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>,
   play:   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M6 3.5v17l14-8.5z" /></svg>,
   mail:   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="2.8" y="5" width="18.4" height="14" rx="2.2" /><path d="m3.4 7 8.6 6 8.6-6" /></svg>,
   wa:     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.47 14.38c-.3-.15-1.75-.86-2.02-.96-.27-.1-.47-.15-.67.15-.2.3-.77.96-.94 1.16-.17.2-.35.22-.64.08-.3-.15-1.25-.46-2.38-1.47-.88-.78-1.47-1.75-1.65-2.05-.17-.3-.02-.46.13-.6.13-.14.3-.35.45-.53.15-.17.2-.3.3-.5.1-.2.05-.37-.03-.52-.07-.15-.67-1.6-.92-2.2-.24-.58-.48-.5-.67-.5h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.22 3.08c.15.2 2.1 3.2 5.08 4.49.71.3 1.26.49 1.7.63.71.23 1.36.2 1.87.12.57-.09 1.75-.72 2-1.41.25-.7.25-1.29.17-1.41-.07-.13-.27-.2-.57-.35M12.05 21.8h-.02a9.8 9.8 0 0 1-4.99-1.37l-.36-.21-3.71.97.99-3.62-.23-.37a9.79 9.79 0 0 1-1.5-5.22c0-5.41 4.4-9.81 9.82-9.81a9.75 9.75 0 0 1 6.94 2.88 9.74 9.74 0 0 1 2.87 6.94c0 5.41-4.4 9.81-9.81 9.81M20.52 3.45A11.66 11.66 0 0 0 12.05 0C5.6 0 .35 5.25.35 11.7c0 2.06.54 4.08 1.56 5.85L.25 24l6.59-1.73a11.66 11.66 0 0 0 5.2 1.24h.01c6.45 0 11.7-5.25 11.7-11.7 0-3.13-1.22-6.07-3.43-8.28" /></svg>,
@@ -343,6 +389,8 @@ function ChartTip({ active, payload, label, suffix = '' }) {
     </div>
   );
 }
+
+const DotLoad = () => <span className="cu-dot-load" role="status" aria-label="Refreshing"><span /><span /><span /></span>;
 
 export default function CampaignsUnified() {
   const nav = useNavigate();
@@ -398,6 +446,8 @@ export default function CampaignsUnified() {
   const [createOpen, setCreateOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [menuFor, setMenuFor] = useState(null);
+  const [rowRefresh, setRowRefresh] = useState({}); // "channel-id" -> 'busy' | 'done'
+  const [errTip, setErrTip] = useState(null);       // { text, x, y, below }
   const [reportFor, setReportFor] = useState(null);
 
   const status = params.get('status') || 'all';
@@ -507,6 +557,27 @@ export default function CampaignsUnified() {
       .then(r => { if (r.data?.success) setAllTags(r.data.data.tags || []); })
       .catch(() => { /* the tag filter degrades to empty; nothing else depends on it */ });
   }, []);
+
+  /* One row's refresh. There is no single-campaign stats call on the list API, so this reruns the
+     same quiet list fetch the poll uses — the table updates in place, never blanks — and the row's
+     icon shows spin → tick so the click is visibly answered. */
+  const refreshRow = async key => {
+    if (rowRefresh[key] === 'busy') return;
+    setRowRefresh(m => ({ ...m, [key]: 'busy' }));
+    const started = Date.now();
+    await load({ silent: true });
+    await new Promise(r => setTimeout(r, Math.max(0, 450 - (Date.now() - started))));
+    setRowRefresh(m => ({ ...m, [key]: 'done' }));
+    setTimeout(() => setRowRefresh(m => { const n = { ...m }; if (n[key] === 'done') delete n[key]; return n; }), 1200);
+  };
+
+  const showErrTip = (e, text) => {
+    const b = e.currentTarget.getBoundingClientRect();
+    // Only worth a tooltip when the line is actually cut off.
+    if (e.currentTarget.scrollWidth <= e.currentTarget.clientWidth) return;
+    const below = b.bottom + 120 < window.innerHeight;
+    setErrTip({ text, x: Math.min(b.left, window.innerWidth - 436), y: below ? b.bottom + 6 : b.top - 6, below });
+  };
 
   const setStatus = s => { setParams(s === 'all' ? {} : { status: s }, { replace: true }); setPage(1); };
 
@@ -954,6 +1025,7 @@ export default function CampaignsUnified() {
               {viewRows.map(r => {
                 const b = STATUS_BADGE[r.status] || STATUS_BADGE.draft;
                 const ch = CHANNEL[r.channel] || CHANNEL.email;
+                const rowBusy = rowRefresh[`${r.channel}-${r.id}`] === 'busy';
                 return (
                   /* The row is NOT clickable. A whole-row target makes every stray click a
                      navigation — including one meant for the menu — so only the name is a link. */
@@ -1003,6 +1075,16 @@ export default function CampaignsUnified() {
                                 }}>
                           {Ico.dots}
                         </button>
+                        <button className="cu-icon-btn cu-refresh"
+                                style={{ width: 28, height: 28 }}
+                                title={rowRefresh[`${r.channel}-${r.id}`] === 'busy' ? 'Refreshing…'
+                                  : rowRefresh[`${r.channel}-${r.id}`] === 'done' ? 'Up to date' : 'Refresh stats'}
+                                aria-label={`Refresh stats for ${r.name}`}
+                                aria-busy={rowRefresh[`${r.channel}-${r.id}`] === 'busy'}
+                                data-state={rowRefresh[`${r.channel}-${r.id}`]}
+                                onClick={() => refreshRow(`${r.channel}-${r.id}`)}>
+                          {rowRefresh[`${r.channel}-${r.id}`] === 'done' ? Ico.tick : Ico.refresh}
+                        </button>
                       </span>
 
                       <span style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, paddingLeft: 34 }}>
@@ -1018,15 +1100,16 @@ export default function CampaignsUnified() {
                           in a per-recipient error whose text names the recipient's phone, which is
                           the one number that is definitely not at fault. */}
                       {r.last_error && (
-                        <span style={{
-                          display: 'block', marginTop: 5, marginLeft: 34, padding: '6px 9px',
-                          background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 7,
-                          color: '#b42318', fontSize: 11.5, lineHeight: 1.45, maxWidth: 560,
-                        }}>{r.last_error}</span>
+                        <span className="cu-err" tabIndex={0} aria-label={r.last_error}
+                              onMouseEnter={e => showErrTip(e, r.last_error)}
+                              onFocus={e => showErrTip(e, r.last_error)}
+                              onMouseLeave={() => setErrTip(null)} onBlur={() => setErrTip(null)}>
+                          {r.last_error}
+                        </span>
                       )}
                     </td>
-                    <td className="l" style={{ color: '#667085' }}>{fmtDt(r.sent_on)}</td>
-                    {visibleCols.map(c => <td key={c.key}>{cell(r, c)}</td>)}
+                    <td className="l" style={{ color: '#667085' }}>{rowBusy ? <DotLoad /> : fmtDt(r.sent_on)}</td>
+                    {visibleCols.map(c => <td key={c.key}>{rowBusy ? <DotLoad /> : cell(r, c)}</td>)}
                   </tr>
                 );
               })}
@@ -1074,6 +1157,14 @@ export default function CampaignsUnified() {
         CSS clip the vertical axis as well, and every sticky cell is its own stacking context —
         either one on its own is enough to slice the menu in half.
       */}
+      {/* Portalled for the same reason as the menu: the sticky cell would clip it. */}
+      {errTip && createPortal(
+        <div className="cu-errtip" role="tooltip"
+             style={{ left: Math.max(8, errTip.x), top: errTip.y, transform: errTip.below ? undefined : 'translateY(-100%)' }}>
+          <b>Why sending stopped</b>{errTip.text}
+        </div>,
+        document.body,
+      )}
       {menuFor && createPortal(
         <>
           {/* A transparent full-screen layer, so the next click anywhere closes the menu without

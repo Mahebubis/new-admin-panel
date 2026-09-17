@@ -71,6 +71,60 @@ const API_BASE = import.meta.env.VITE_API_URL || 'https://cit3.internshipstudio.
 const inp = { width: '100%', padding: '10px 12px', border: '1.5px solid #e2e8f0', borderRadius: 8, fontSize: 12.5, fontFamily: 'inherit', color: '#1e293b', outline: 'none', boxSizing: 'border-box' };
 const label = { display: 'block', fontSize: 12, fontWeight: 700, color: '#0f172a', marginBottom: 6 };
 const hintStyle = { fontSize: 10.5, color: '#94a3b8', marginTop: 5, lineHeight: 1.5 };
+
+/*
+  A switch, rather than a checkbox.
+
+  Both are a boolean, so this is not decoration: a checkbox reads as "tick this to submit it with
+  the form", which is what every other box on this page does. This one is not that. It sets a
+  behaviour for everything created from here on, and a switch is the control that says "this is in
+  force now", which is what it is.
+
+  Built as a real <input type="checkbox"> under a visually-hidden style rather than a <div> with a
+  click handler, so it keeps everything that comes free with the native control: focus, the space
+  bar, the label association, and a screen reader that calls it a switch and reads its state.
+*/
+function Toggle({ checked, onChange, disabled = false, label, hint }) {
+  return (
+    <label style={{
+      display: 'flex', gap: 12, alignItems: 'flex-start',
+      cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.55 : 1,
+    }}>
+      <span style={{ position: 'relative', flexShrink: 0, marginTop: 1, display: 'inline-flex' }}>
+        <input
+          type="checkbox" role="switch" checked={checked} disabled={disabled}
+          onChange={e => onChange(e.target.checked)}
+          style={{
+            // Invisible but still the thing being clicked and focused, so the whole control is
+            // one hit target and the browser's own keyboard handling is untouched.
+            position: 'absolute', inset: 0, width: '100%', height: '100%',
+            margin: 0, opacity: 0, cursor: 'inherit', zIndex: 1,
+          }}
+        />
+        <span aria-hidden="true" style={{
+          width: 38, height: 22, borderRadius: 999, display: 'block',
+          background: checked ? '#4f46e5' : '#cbd5e1',
+          boxShadow: checked ? 'inset 0 0 0 1px #4338ca' : 'inset 0 0 0 1px #b8c2d0',
+          transition: 'background .18s cubic-bezier(.4,0,.2,1), box-shadow .18s',
+        }} />
+        <span aria-hidden="true" style={{
+          position: 'absolute', top: 3, left: 3, width: 16, height: 16, borderRadius: '50%',
+          background: '#fff', boxShadow: '0 1px 3px rgba(15,23,42,.35)',
+          transform: `translateX(${checked ? 16 : 0}px)`,
+          transition: 'transform .18s cubic-bezier(.4,0,.2,1)',
+        }} />
+      </span>
+      <span style={{ minWidth: 0 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 650, color: '#334155' }}>{label}</span>
+        {hint && (
+          <span style={{ display: 'block', fontSize: 10.5, color: '#94a3b8', lineHeight: 1.55, marginTop: 3 }}>
+            {hint}
+          </span>
+        )}
+      </span>
+    </label>
+  );
+}
 const card = { background: '#fff', borderRadius: 12, padding: 22, marginBottom: 18 };
 const Radio = ({ on }) => (
   <span style={{ width: 16, height: 16, borderRadius: '50%', border: `2px solid ${on ? '#1e3a8a' : '#cbd5e1'}`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -159,6 +213,22 @@ function ProviderCard({ row, isActive, onSave, onActivate }) {
     api_base_url: row.api_base_url || '', list_uid: row.list_uid || '',
     default_sender_name: row.default_sender_name || '', default_sender_email: row.default_sender_email || '',
     default_sending_domain: row.default_sending_domain || '',
+    /*
+      Every OTHER domain verified with this provider, one per line.
+
+      A textarea rather than a chip editor because this is edited about twice a year, and the
+      provider's own dashboard lists verified domains in exactly this shape — so the useful gesture
+      is paste, not click-add-click-add. The server reduces each line to a bare hostname and drops
+      anything that is not one, so a pasted "https://mailer.example.com/" still lands correctly.
+
+      The default domain above is NOT repeated here; it is always part of the list the campaign
+      wizard offers, and listing it twice would invite somebody to "fix" the duplicate by removing
+      it from the wrong place.
+    */
+    sending_domains: (row.sending_domains || []).filter(d => d && d !== row.default_sending_domain).join('\n'),
+    // The DEFAULT for a NEW campaign or journey. Each one carries its own switch from then on,
+    // so changing this never reaches anything that already exists.
+    verify_before_send: Number(row.verify_before_send || 0),
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -178,7 +248,9 @@ function ProviderCard({ row, isActive, onSave, onActivate }) {
     setSaving(true);
     try {
       const keys = ['api_key', 'api_base_url', 'list_uid', 'default_sender_name',
-                    'default_sender_email', 'default_sending_domain', ...extras.map(f => f.key)];
+                    'default_sender_email', 'default_sending_domain', 'sending_domains',
+                    ...(row.provider === 'elasticemail' ? ['verify_before_send'] : []),
+                    ...extras.map(f => f.key)];
       const payload = {};
       for (const k of keys) if (form[k] !== undefined) payload[k] = form[k];
       await onSave(row.provider, payload);
@@ -226,6 +298,101 @@ function ProviderCard({ row, isActive, onSave, onActivate }) {
         <div><label style={label}>Default sender name</label><input style={inp} value={form.default_sender_name} onChange={e => set('default_sender_name', e.target.value)} /></div>
         <div><label style={label}>Default sender email</label><input style={inp} value={form.default_sender_email} onChange={e => set('default_sender_email', e.target.value)} /></div>
         <div><label style={label}>Default sending domain</label><input style={inp} value={form.default_sending_domain} onChange={e => set('default_sending_domain', e.target.value)} /></div>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <label style={label}>Other sending domains</label>
+          <textarea
+            style={{ ...inp, minHeight: 68, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+            value={form.sending_domains}
+            onChange={e => set('sending_domains', e.target.value)}
+            placeholder={'One per line, e.g.\nnews.internshipstudio.com'}
+          />
+          <div style={hintStyle}>
+            Domains verified with {meta.label} besides the default above. A campaign sending through
+            {' '}{meta.label} can only be addressed from these, because a domain verified with one
+            provider is rejected by the others.
+          </div>
+        </div>
+
+        {/*
+          VERIFY BEFORE SENDING — on the Elastic Email card because it is Elastic Email's API and
+          Elastic Email's key that does the work, but it guards every sender. A mailbox that does
+          not exist does not exist whoever is delivering to it, and the bounce it produces damages
+          the sending domain's reputation the same way.
+
+          Off by default, and deliberately so: it spends verification credits and it removes people
+          from audiences. Neither is something to start doing to a live account because a file was
+          deployed.
+        */}
+        {row.provider === 'elasticemail' && (
+          <div style={{ gridColumn: '1 / -1', marginTop: 4, padding: '13px 15px', borderRadius: 10,
+                        border: '1px solid #e2e8f0', background: '#f8fafc' }}>
+            <div style={{ fontSize: 12.5, fontWeight: 800, color: '#0f172a', marginBottom: 2 }}>
+              Verify addresses before sending
+            </div>
+            <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.55, marginBottom: 12 }}>
+              Checked through Elastic Email's verification API, whichever provider is actually
+              delivering — a dead mailbox is dead through <b>SendGrid</b> and <b>Amazon SES</b> too. It
+              lives on this card because it uses the Elastic Email API key above, which therefore has to
+              be filled in for any of it to run.
+              <br /><br />
+              This is only the <b>starting value for new campaigns and journeys</b>. Each one carries its
+              own switch after that: a campaign to a freshly imported list wants every address checked,
+              and one to students you have been mailing for a year has nothing to gain from spending
+              credits on them.
+            </div>
+
+            <Toggle
+              checked={!!form.verify_before_send}
+              onChange={v => set('verify_before_send', v ? 1 : 0)}
+              label="New campaigns and journeys start with verification on"
+              hint={'Anything already created keeps its own setting. Turning this on does not start verifying '
+                  + 'existing campaigns.'}
+            />
+
+            {/*
+              The rule itself, stated rather than offered.
+
+              It used to be a second toggle for "also block risky", off by default. That was the wrong
+              call: high risk is where most of the bounces that are not outright invalid come from, and a
+              bounce is what costs a sending domain its reputation. Making it optional meant the common
+              setup was the one that still damaged deliverability.
+            */}
+            <div style={{ marginTop: 13, paddingTop: 11, borderTop: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: '#334155', marginBottom: 7 }}>
+                What each verdict does
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                {[
+                  ['Invalid',   'Blocklisted', 'The mailbox does not exist.', '#b42318', '#fef3f2'],
+                  ['High risk', 'Blocklisted', 'Disposable address, role account, or a domain that accepts everything and delivers what it likes.', '#b42318', '#fef3f2'],
+                  ['Low risk',  'Sent',        'Probably fine. Blocking these would quietly remove a real slice of the audience.', '#3f6212', '#f2fbf5'],
+                  ['Valid',     'Sent',        'Confirmed deliverable.', '#3f6212', '#f2fbf5'],
+                  ['Unknown',   'Sent',        'The provider could not reach a conclusion. Gmail never confirms mailboxes, so a good address lands here too.', '#3f6212', '#f2fbf5'],
+                ].map(([verdict, action, why, colour, bg]) => (
+                  <div key={verdict} style={{ display: 'flex', gap: 9, alignItems: 'flex-start', fontSize: 10.5, lineHeight: 1.5 }}>
+                    <span style={{ flex: '0 0 62px', fontWeight: 700, color: '#334155' }}>{verdict}</span>
+                    <span style={{ flex: '0 0 74px', fontWeight: 800, color: colour, background: bg,
+                                   borderRadius: 4, padding: '1px 6px', textAlign: 'center' }}>{action}</span>
+                    <span style={{ color: '#94a3b8', minWidth: 0 }}>{why}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ fontSize: 10.5, color: '#94a3b8', lineHeight: 1.55, marginTop: 11 }}>
+              <b>Every address is checked once, ever.</b> The verdict is stored against the address, so the
+              next campaign that contains that person spends nothing on them. Re-importing the same list,
+              or overlapping segments, cost nothing extra.
+            </div>
+
+            <div style={{ fontSize: 10.5, color: '#94a3b8', lineHeight: 1.55, marginTop: 11,
+                          borderTop: '1px solid #e2e8f0', paddingTop: 9 }}>
+              A failed check never blocks a send. If the key is missing, the API is down, or a check
+              times out, the address stays in the audience and goes out as before — an outage here must
+              not be able to empty an audience.
+            </div>
+          </div>
+        )}
       </div>
 
       <div style={{ marginTop: 14, padding: '10px 12px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>

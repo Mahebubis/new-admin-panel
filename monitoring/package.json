@@ -1,0 +1,32 @@
+{
+  "name": "istudio-monitoring",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Synthetic browser monitoring for Internship Studio: registration, exam and payment journeys.",
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "once": "node src/runOnce.js",
+    "once:light": "node src/runOnce.js --group=light",
+    "once:journey": "node src/runOnce.js --group=journey",
+    "check": "node src/runOnce.js --check",
+    "dashboard": "node src/dashboard.js",
+    "install:browser": "playwright install --with-deps chromium",
+    "test:alert": "node src/testAlert.js",
+    "test:slack": "node src/testAlert.js --channel=slack",
+    "test:slack-urgent": "node src/testAlert.js --channel=slack-urgent",
+    "test:ladder": "node src/testAlert.js --ladder"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "mysql2": "^3.24.2",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.16",
+    "playwright": "^1.49.1"
+  }
+}

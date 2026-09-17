@@ -26,7 +26,62 @@ const EVENT_LABELS = {
   project_submission_reminder: 'Project Submission Reminder',
   one_day_before_batch_start: 'One Day Before Batch Start',
   batch_end_reminder: 'Batch End Reminder',
+
+  /*
+    What WE did, as opposed to what they did.
+
+    "Read" on WhatsApp and "Opened" on email are the same column and deliberately different words: a
+    blue tick is not somebody reading an email, and calling both "opened" makes a WhatsApp report
+    read as something it is not.
+  */
+  email_sent: 'Email sent',
+  email_delivered: 'Email delivered',
+  email_opened: 'Email opened',
+  email_clicked: 'Email link clicked',
+  email_bounced: 'Email bounced',
+  email_failed: 'Email failed',
+  email_held_back: 'Email held back',
+  email_unsubscribed: 'Unsubscribed',
+  whatsapp_sent: 'WhatsApp sent',
+  whatsapp_delivered: 'WhatsApp delivered',
+  whatsapp_read: 'WhatsApp read',
+  whatsapp_clicked: 'WhatsApp button tapped',
+  whatsapp_bounced: 'WhatsApp undelivered',
+  whatsapp_failed: 'WhatsApp failed',
+  whatsapp_held_back: 'WhatsApp held back',
 };
+
+/*
+  A messaging event carries its own description — which campaign, which journey step — so it must
+  not be rendered with the activity timeline's "#. <name> activity was done on …" sentence, which
+  would be simply untrue of a message we sent.
+*/
+const isMessageEvent = (ev) => /^(email|whatsapp)_/.test(String(ev || ''));
+
+/*
+  Colour by OUTCOME, not by channel.
+
+  Someone scanning a long timeline is looking for the bad rows, and a failure has to be findable at
+  a glance among two hundred ordinary sends. Channel is already carried by the label.
+*/
+const eventTone = (ev) => {
+  if (/_(bounced|failed|held_back|unsubscribed)$/.test(ev)) return { bg: '#fef3f2', fg: '#b42318' };
+  if (/_(clicked)$/.test(ev)) return { bg: '#f0fdf4', fg: '#15803d' };
+  if (/_(opened|read)$/.test(ev)) return { bg: '#ecfeff', fg: '#0e7490' };
+  if (/_(sent|delivered)$/.test(ev)) return { bg: '#eef2ff', fg: '#4338ca' };
+  return { bg: '#dbeafe', fg: '#1e3a8a' };
+};
+
+const MailIcon = (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="4" width="20" height="16" rx="2" /><path d="m22 7-10 6L2 7" />
+  </svg>
+);
+const ChatIcon = (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 11.5a8.38 8.38 0 0 1-9 8.4 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7A8.38 8.38 0 0 1 4 11.5a8.5 8.5 0 0 1 8.5-8.5 8.38 8.38 0 0 1 8.5 8.5z" />
+  </svg>
+);
 
 /* small dotted circle */
 function CircleLoader() {
@@ -106,6 +161,21 @@ export default function NetcoreUserTimeline() {
   const [toD, setToD]       = useState('');
   const [sortDir, setSortDir] = useState('desc');
 
+  /*
+    HOW MANY ROWS ARE ON SCREEN AT ONCE.
+
+    A busy contact has hundreds of events, and every one of them used to be built into the DOM the
+    moment the page opened — hundreds of rows, each with an icon, a description and a click
+    handler, for a reader who will look at the first ten. It made the page slow to appear and slow
+    to scroll, and the events people actually want are the newest ones, which are already at the
+    top.
+
+    So a page's worth is rendered and the rest arrive as the reader reaches them. Nothing is
+    re-fetched: the whole timeline is already here, this only decides how much of it is drawn.
+  */
+  const PAGE = 15;
+  const [shown, setShown] = useState(PAGE);
+
   const filteredEvents = (() => {
     const qLower = q.trim().toLowerCase();
     const fromTs = fromD ? new Date(fromD + 'T00:00:00').getTime() : null;
@@ -133,6 +203,22 @@ export default function NetcoreUserTimeline() {
 
     return list;
   })();
+
+  /* A new search, a new date range or a flipped sort is a different list — start it at the top
+     with one page shown, rather than carrying the previous scroll depth into it. */
+  useEffect(() => { setShown(PAGE); }, [q, fromD, toD, sortDir, events]);
+
+  const visibleEvents = filteredEvents.slice(0, shown);
+  const moreCount = filteredEvents.length - visibleEvents.length;
+
+  /* Grows the window when the reader gets near the bottom. The margin is deliberately generous:
+     the next rows should already be there by the time the last visible one is read. */
+  const onListScroll = (ev) => {
+    const el = ev.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) {
+      setShown((n) => (n < filteredEvents.length ? n + PAGE : n));
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -164,6 +250,23 @@ export default function NetcoreUserTimeline() {
     setPopMeta({ event: ev.event, label: EVENT_LABELS[ev.event] || ev.event, ts: ev.timestamp });
     setPopData(null);
     setPopOpen(true);
+    /*
+      A messaging event already carries everything there is to say about it — which campaign or
+      journey, which step, how many opens. Asking the server would mean a request that can only come
+      back "unknown event", because event_detail only knows the activity tables.
+    */
+    if (isMessageEvent(ev.event)) {
+      setPopData({
+        Channel: ev.channel === 'whatsapp' ? 'WhatsApp' : 'Email',
+        Source: ev.source === 'journey' ? 'Journey' : ev.source === 'campaign' ? 'Campaign' : '—',
+        Name: ev.title || '—',
+        Details: ev.detail || '—',
+        When: ev.timestamp,
+      });
+      setPopLoading(false);
+      return;
+    }
+
     setPopLoading(true);
     try {
       const res = await api.get(API, { params: { action: 'event_detail', event: ev.event, user_id: ev.user_id, ts: ev.timestamp } });
@@ -329,14 +432,16 @@ export default function NetcoreUserTimeline() {
               </div>
 
               {/* scrollable rows */}
-              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }} onScroll={onListScroll}>
                 {filteredEvents.length === 0
                   ? <div style={{ padding: 32, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
                       {events.length === 0 ? 'No events' : 'No events match the filters'}
                     </div>
-                  : filteredEvents.map((e, i) => {
+                  : visibleEvents.map((e, i) => {
                     const label = EVENT_LABELS[e.event] || e.event;
                     const lower = label.toLowerCase();
+                    const isMsg = isMessageEvent(e.event);
+                    const tone = isMsg ? eventTone(e.event) : { bg: '#dbeafe', fg: '#1e3a8a' };
                     return (
                       <div key={`${e.event}-${e.timestamp}-${i}`} className="nc-tl-row"
                         onClick={() => openEvent(e)}
@@ -347,19 +452,34 @@ export default function NetcoreUserTimeline() {
                         {/* event info */}
                         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
                           <span style={{
-                            width: 32, height: 32, borderRadius: 8, background: '#dbeafe',
+                            width: 32, height: 32, borderRadius: 8, background: tone.bg,
                             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                            color: '#1e3a8a'
+                            color: tone.fg
                           }}>
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
-                              <rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" />
-                            </svg>
+                            {isMsg
+                              ? (e.channel === 'whatsapp' ? ChatIcon : MailIcon)
+                              : (
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                                  <rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" />
+                                </svg>
+                              )}
                           </span>
                           <div style={{ minWidth: 0 }}>
                             <span className="nc-tl-event-link">{label}</span>
-                            <div className="nc-tl-desc">
-                              #. <b>{lower}</b> activity was done on {fmtDt(e.timestamp)}
-                            </div>
+                            {isMsg ? (
+                              /* Which message, and where it came from — the whole reason this row is
+                                 worth more than "an email happened". */
+                              <div className="nc-tl-desc">
+                                <b>{e.title || 'Untitled'}</b>
+                                {e.detail ? <> · {e.detail}</> : null}
+                                {e.source === 'journey' ? ' · journey' : e.source === 'campaign' ? ' · campaign' : ''}
+                                {' · '}{fmtDt(e.timestamp)}
+                              </div>
+                            ) : (
+                              <div className="nc-tl-desc">
+                                #. <b>{lower}</b> activity was done on {fmtDt(e.timestamp)}
+                              </div>
+                            )}
                           </div>
                         </div>
                         {/* platform — empty placeholder */}
@@ -372,6 +492,20 @@ export default function NetcoreUserTimeline() {
                     );
                   })
                 }
+
+                {/* Tells the reader the list continues, and gives the scroll handler something to
+                    reach. Tapping it is the way through for anyone who cannot scroll to it. */}
+                {moreCount > 0 && (
+                  <div
+                    onClick={() => setShown((n) => n + PAGE)}
+                    style={{
+                      padding: '14px 16px', textAlign: 'center', fontSize: 12.5, color: '#64748b',
+                      borderTop: '1px solid #f1f5f9', cursor: 'pointer', userSelect: 'none',
+                    }}
+                  >
+                    {moreCount.toLocaleString()} more {moreCount === 1 ? 'event' : 'events'} — keep scrolling
+                  </div>
+                )}
               </div>
             </section>
           </div>

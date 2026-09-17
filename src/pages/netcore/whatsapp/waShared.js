@@ -141,6 +141,43 @@ export function avatarColor(seed) {
   return AVATAR_COLORS[h % AVATAR_COLORS.length];
 }
 
+/**
+ * WHERE A TEMPLATE BUTTON ACTUALLY GOES, in words.
+ *
+ * The button shows its LABEL — "Join the group", "Check result" — and the label is the one thing
+ * that says nothing about the destination. Two templates whose buttons read identically can point
+ * at different pages, and a button carrying a per-student link looks exactly like a fixed one. So
+ * the destination is only ever discoverable by opening the template and reading its URL field,
+ * which is why a wrong link survives approval and goes out to everybody.
+ *
+ * This is what the hover reveals, in both the grid card and the live preview.
+ *
+ * A DYNAMIC url button is the case worth spelling out: Meta freezes the URL at approval and allows
+ * a variable only at the very end, so every copy carries the same domain and the per-person part
+ * arrives as a token resolved at send time. Naming the attribute that fills it — [PC_LINK] — is
+ * the difference between "this opens a link" and "this opens each student's own group".
+ *
+ * @param b       { type, text, url, dynamic }
+ * @param opts    { destinationAttr, trackedUrl } from the template's var_defaults / click_target_url
+ * @returns {string} one line, safe to put in a title attribute
+ */
+export function buttonDestination(b, opts = {}) {
+  if (!b) return '';
+  const attr = String(opts.destinationAttr || '').trim();
+  const tracked = String(opts.trackedUrl || '').trim();
+  const url = String(b.url || '').trim();
+
+  if (b.type === 'phone') return b.phone_number ? `Calls ${b.phone_number}` : 'Calls your business number';
+  if (b.type !== 'url') return `Sends "${b.text || 'this'}" back as a reply`;
+
+  if (b.dynamic || /\{\{\s*\d+\s*\}\}/.test(url)) {
+    if (attr) return `Opens each contact's ${attr} — tracked, so the tap is counted`;
+    if (tracked) return `Opens ${tracked} — tracked, so the tap is counted`;
+    return url ? `${url} — the last part is filled in per contact` : 'Per-contact link, filled in at send time';
+  }
+  return url || 'No URL set on this button';
+}
+
 export function fmtBytes(n) {
   const b = Number(n) || 0;
   if (b < 1024) return `${b} B`;
@@ -362,3 +399,63 @@ export const WA_INBOX_CSS = `
 
   .wa-typing-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #94a3b8; animation: wa_pulse 1.2s ease-in-out infinite; }
 `;
+
+/*
+  A Call button's number in the form Meta accepts, or '' when it cannot be put in that form.
+
+  The same rule as wa_button_phone_e164() in api/whatsapp/wa_templates.php, repeated here so the
+  editor can tidy the field as it is typed rather than waiting for a save to bounce. The server
+  applies it again on the way in — this copy is a convenience, never the guarantee.
+
+  Meta wants a country code followed by the national number, no spaces, dashes or brackets, and no
+  leading zero. Anything else comes back as "is not a valid phone number" naming an array index,
+  once per business account.
+*/
+export const WA_PHONE_DEFAULT_CC = '91';
+
+export function waPhoneE164(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  let plus = s.startsWith('+');
+  let d = s.replace(/[^0-9]+/g, '');
+  if (!d) return '';
+  // 00 is the other way of writing +, and it is what every dialling guide prints.
+  if (!plus && d.startsWith('00')) { d = d.slice(2); plus = true; }
+  if (!plus) {
+    d = d.replace(/^0+/, '');            // the national trunk prefix is never part of E.164
+    if (d.length === 10) d = WA_PHONE_DEFAULT_CC + d;
+  }
+  if (d.length < 8 || d.length > 15) return '';
+  return '+' + d;
+}
+
+/** True when a Call button's number holds an attribute or a {{n}} placeholder rather than digits.
+ *  Such a value is left exactly as written — normalising it would mangle the token — and Meta is
+ *  told about it as-is, which is what the editor warns about. */
+export function waPhoneHasToken(v) {
+  return /[[{]/.test(String(v || ''));
+}
+
+/*
+  Is this template actually blocked, or is it carrying a flag that no longer has anything behind it?
+
+  The rule that sets auto_disabled is narrow and correct: Meta named a category, it is one of the
+  three real ones, and it differs from the one the template was built as. Only then is the template
+  unusable, because only then does sending it charge and gate the message as something the campaign
+  did not choose.
+
+  The FLAG, though, outlives the reason. Accepting Meta's category rewrites the template's own
+  category so the two agree, and anything still reading the stored flag keeps calling the template
+  disabled until a sweep happens to recompute it. That is how templates whose chip and accounts all
+  read MARKETING ended up under a banner announcing they had been re-filed as MARKETING.
+
+  So the question is answered from the two categories every time, and the flag only decides whether
+  to ask. A template built as what Meta files it as is usable, whatever the column says.
+*/
+export function waTemplateDisabled(t) {
+  if (!t || !t.auto_disabled) return false;
+  const built = String(t.category || '').toLowerCase().trim();
+  const meta = String(t.meta_category || '').toLowerCase().trim();
+  if (!meta || meta === built) return false;              // nothing drifted — the flag is stale
+  return ['marketing', 'utility', 'authentication'].includes(meta);
+}

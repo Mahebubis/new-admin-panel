@@ -213,6 +213,8 @@ export default function WaStepSchedule({ draft, setField, onValidChange, segment
             bodyValues={vars.body || []}
             footerText={draft.message_type === 'template' ? draft.footer_text : ''}
             buttons={draft.message_type === 'template' ? draft.buttons : []}
+            destinationAttr={vars.button_destination_attr || ''}
+            trackedUrl={draft.click_target_url || ''}
             plainText={draft.message_type === 'text' ? draft.text_content : null}
             height={460}
             emptyHint="No message content yet"

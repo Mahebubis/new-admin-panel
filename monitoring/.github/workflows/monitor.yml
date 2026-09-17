@@ -1,0 +1,86 @@
+# GitHub Actions scheduler — the zero-server option from the spec.
+#
+# Trade-offs versus running it on your own box:
+#   • Free for public repos; private repos burn Actions minutes (a journey run
+#     is ~2-4 min, so */15 is roughly 200-400 min/day — check your plan).
+#   • GitHub's cron is best-effort. A "*/5" schedule regularly runs late, and
+#     during busy periods can be delayed 10-15 minutes. That breaks the
+#     "know within 5-10 minutes" goal in the spec.
+#   • Runners come from GitHub's IP ranges, so anything IP-restricted on your
+#     side must allow them.
+#
+# Recommended use: keep this as a *backup* scheduler that runs from outside
+# your AWS account, so an ap-south-1 problem that takes down the monitoring
+# box does not also blind you. Run the primary schedule on your own VPS.
+
+name: Synthetic monitoring
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      group:
+        description: Which group to run
+        type: choice
+        options: [light, journey, all]
+        default: all
+
+concurrency:
+  # Never let two runs overlap — they would register two students and race.
+  group: synthetic-monitoring
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: monitoring/package-lock.json
+
+      - name: Install dependencies
+        working-directory: monitoring
+        run: npm ci --omit=dev
+
+      - name: Install Chromium
+        working-directory: monitoring
+        run: npx playwright install --with-deps chromium
+
+      - name: Run checks
+        working-directory: monitoring
+        env:
+          DASHBOARD_URL: ${{ vars.DASHBOARD_URL }}
+          EXAM_URL: ${{ vars.EXAM_URL }}
+          EXAM_API_URL: ${{ vars.EXAM_API_URL }}
+          PAYMENT_API_URL: ${{ vars.PAYMENT_API_URL }}
+          MONITOR_EMAIL_PATTERN: ${{ vars.MONITOR_EMAIL_PATTERN }}
+          MONITOR_PASSWORD: ${{ secrets.MONITOR_PASSWORD }}
+          MONITOR_EXAM_ID: ${{ vars.MONITOR_EXAM_ID }}
+          ALERT_TO: ${{ vars.ALERT_TO }}
+          ALERT_FROM: ${{ vars.ALERT_FROM }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          # Actions runners are ephemeral, so there is no state file to
+          # remember previous failures — alert on the first failed run.
+          ALERT_AFTER_CONSECUTIVE_FAILURES: '1'
+          DASHBOARD_ENABLED: 'false'
+          HEADLESS: 'true'
+        run: node src/runOnce.js --group=${{ inputs.group || 'all' }}
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitoring-artifacts-${{ github.run_id }}
+          path: monitoring/artifacts/
+          retention-days: 7

@@ -66,7 +66,7 @@ export default function CampaignStepSchedule({ draft, setField, onValidChange, s
   const totalAttachedBytes = (draft.attachments || []).reduce((sum, a) => sum + (a.size || 0), 0);
 
   return (
-    <div style={{ display: 'flex', gap: 24, maxWidth: 1120 }}>
+    <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={card}>
           <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>Review your campaign</div>
@@ -152,7 +152,7 @@ export default function CampaignStepSchedule({ draft, setField, onValidChange, s
         </div>
       </div>
 
-      <div style={{ width: 360, flexShrink: 0 }}>
+      <div style={{ flex: '0 1 620px', minWidth: 360, position: 'sticky', top: 16 }}>
         <div style={{ ...card, position: 'sticky', top: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 12 }}>Email preview</div>
           <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden', height: 460, background: '#f8fafc' }}>

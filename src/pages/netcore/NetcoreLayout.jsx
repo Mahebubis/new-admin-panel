@@ -3,7 +3,10 @@ import { NavLink, Outlet, useLocation, Navigate } from 'react-router-dom';
 /* ── Netcore sub-layout: top navbar + section sub-navbar + outlet ── */
 
 const SECTIONS = {
-  dashboard: { title: 'Dashboards', items: [{ to: '/netcore/behaviour', label: 'Home', icon: 'home' }] },
+  dashboard: { title: 'Dashboards', items: [
+    { to: '/netcore/behaviour', label: 'Home', icon: 'home' },
+    { to: '/netcore/analytics', label: 'Messaging analytics', icon: 'analytics' },
+  ] },
   users:     { title: 'Audience',   items: [
     { to: '/netcore/contacts',   label: 'All contacts', icon: 'contacts' },
     { to: '/netcore/segments',   label: 'Segments',     icon: 'segments' },
@@ -59,6 +62,8 @@ const SECTIONS = {
 const S = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.9, strokeLinecap: 'round', strokeLinejoin: 'round' };
 
 const SUB_ICONS = {
+  // A pie with a slice pulled out: share-of-sends analytics, distinct from the Home dashboard.
+  analytics:  <><path d="M12 3.2a8.8 8.8 0 1 0 8.8 8.8H12z" {...S} /><path d="M15 2.9A6.4 6.4 0 0 1 21.1 9H15z" {...S} /></>,
   home:       <><path d="M3 10.5 12 3l9 7.5" {...S} /><path d="M5.5 9.5V20h13V9.5" {...S} /><path d="M9.5 20v-5.5h5V20" {...S} /></>,
   contacts:   <><circle cx="9" cy="8" r="3.2" {...S} /><path d="M3 20a6 6 0 0 1 12 0" {...S} /><path d="M16.5 5.4a3.2 3.2 0 0 1 0 5.2M17 14.3A5.2 5.2 0 0 1 21 20" {...S} /></>,
   // A funnel: a segment is a rule that narrows the audience, which is what the shape says.

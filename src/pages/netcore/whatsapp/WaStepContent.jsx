@@ -7,7 +7,7 @@ import WaAttributeField from './WaAttributeField';
 import WaPhonePreview from './WaPhonePreview';
 import WaTemplateImportModal from './WaTemplateImportModal';
 import { buildCustomAttributeTags } from '../campaignMergeTags';
-import { WA_API, WA_TPL_API, WA_SET_API, ATTR_API, FORM, WA, inp, label, card, previewNormalizedPhone } from './waShared';
+import { WA_API, WA_TPL_API, WA_SET_API, ATTR_API, FORM, WA, inp, label, card, previewNormalizedPhone, waTemplateDisabled } from './waShared';
 import { ApprovalBadge, CategoryChip, Notice, Radio } from './WaUi';
 
 /** How many {{n}} placeholders a string declares — mirrors wa_placeholder_count() in PHP. */
@@ -130,12 +130,41 @@ export default function WaStepContent({ draft, setField, onValidChange, applyTem
     : !!String(draft.text_content || '').trim();
   useEffect(() => { onValidChange(valid); }, [valid]); // eslint-disable-line
 
-  const templateOptions = useMemo(() => templates.map(t => ({
-    value: t.id,
-    label: t.display_name || t.name,
-    sublabel: `${t.category} · ${t.language}`,
-    meta: t,
-  })), [templates]);
+  /*
+   * Only the templates the WABA chosen in Setup can actually send.
+   *
+   * A template is approved per WhatsApp Business Account, and the row carries its own per-account
+   * approvals in `wabas`. Listing all of them made it possible to pick a template belonging to the
+   * other account, which Meta then rejects at send time with an error naming the template rather
+   * than the account — so the campaign looks broken and the real cause is one dropdown two steps
+   * back. Templates with no recorded account at all are kept, since a legacy row that predates
+   * per-account tracking is not evidence that it belongs elsewhere.
+   */
+  const templateOptions = useMemo(() => {
+    const waba = String(draft.waba_id || '').trim();
+    const visible = !waba ? templates : templates.filter(t => {
+      const list = Array.isArray(t.wabas) ? t.wabas : [];
+      return list.length === 0 || list.some(w => String(w.waba_id || '') === waba);
+    });
+    return visible.map(t => {
+      /* The category Meta files it under, which is what a send is billed and gated as. */
+      const real = String(t.meta_category || '').toLowerCase();
+      const shown = real && real !== t.category ? real : t.category;
+      return {
+        value: t.id,
+        label: t.display_name || t.name,
+        sublabel: `${shown} · ${t.language}`,
+        /*
+          A template Meta has re-filed cannot be chosen at all, rather than chosen and refused on
+          the way out. Sending it would send at a category this campaign was not set up for, and
+          leaving it selectable means the audience, the schedule and every variable get filled in
+          first before anything says so.
+        */
+        disabled: waTemplateDisabled(t),
+        meta: t,
+      };
+    });
+  }, [templates, draft.waba_id]);
 
   const selectedTemplate = templates.find(t => Number(t.id) === Number(draft.template_id));
 
@@ -239,19 +268,32 @@ export default function WaStepContent({ draft, setField, onValidChange, applyTem
                 )}
                 renderRow={(o, isSel) => {
                   const t = o.meta;
+                  const off = waTemplateDisabled(t);
+                  /*
+                    THE CATEGORY META ACTUALLY FILES IT UNDER, not the one it was built as.
+
+                    A template re-filed from UTILITY to MARKETING still reads "utility" in its own
+                    row, because that is what was asked for. Showing that here shows the wrong
+                    number: the send is billed, capped and opt-in gated as MARKETING, and this list
+                    is where somebody decides what to send. Where the two differ, the real one wins.
+                  */
+                  const real = String(t.meta_category || '').toLowerCase();
+                  const shown = real && real !== t.category ? real : t.category;
                   return (
-                    <div>
+                    <div style={off ? { opacity: 0.6 } : undefined}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontWeight: isSel ? 700 : 600, color: isSel ? '#1e3a8a' : '#0f172a', fontSize: 12.5 }}>
                           {t.display_name || t.name}
                         </span>
                         <span style={{ display: 'inline-flex', gap: 6, flexShrink: 0 }}>
-                          <CategoryChip category={t.category} />
-                          <ApprovalBadge status={t.approval_status} />
+                          <CategoryChip category={shown} />
+                          <ApprovalBadge status={t.approval_status} disabled={off} />
                         </span>
                       </div>
-                      <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {t.name} · {t.language} · {String(t.body_text || '').replace(/\s+/g, ' ').slice(0, 70)}
+                      <div style={{ fontSize: 10.5, color: off ? '#b42318' : '#94a3b8', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {off
+                          ? `Cannot be used — Meta files this as ${(real || 'another category').toUpperCase()}, not ${String(t.category).toUpperCase()}`
+                          : `${t.name} · ${t.language} · ${String(t.body_text || '').replace(/\s+/g, ' ').slice(0, 70)}`}
                       </div>
                     </div>
                   );
@@ -342,7 +384,6 @@ export default function WaStepContent({ draft, setField, onValidChange, applyTem
                           onChange={v => setVar('header', i, v)}
                           placeholder="Value or attribute"
                           customTags={customAttrTags}
-                          showExamTags
                         />
                       </div>
                     ))}
@@ -362,7 +403,6 @@ export default function WaStepContent({ draft, setField, onValidChange, applyTem
                           placeholder="Value or attribute"
                           hint={contextFor(draft.body_text, i + 1)}
                           customTags={customAttrTags}
-                          showExamTags
                           showTrackedLink
                         />
                       </div>
@@ -458,7 +498,6 @@ export default function WaStepContent({ draft, setField, onValidChange, applyTem
               onChange={v => setField('text_content', v)}
               placeholder={'Hi XX_USER_FNAME_XX,\n\nYour iCAT exam is still pending…'}
               customTags={customAttrTags}
-              showExamTags
             />
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, cursor: 'pointer' }}>
               <input type="checkbox" checked={!!draft.preview_url} onChange={e => setField('preview_url', e.target.checked ? 1 : 0)} />
@@ -497,6 +536,8 @@ export default function WaStepContent({ draft, setField, onValidChange, applyTem
             bodyValues={vars.body || []}
             footerText={draft.message_type === 'template' ? draft.footer_text : ''}
             buttons={draft.message_type === 'template' ? draft.buttons : []}
+            destinationAttr={vars.button_destination_attr || ''}
+            trackedUrl={draft.click_target_url || ''}
             plainText={draft.message_type === 'text' ? draft.text_content : null}
             height={470}
             emptyHint={draft.message_type === 'template' ? 'Select a template to preview it here' : 'Type your message to preview it here'}

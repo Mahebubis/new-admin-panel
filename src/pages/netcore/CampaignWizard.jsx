@@ -27,8 +27,17 @@ const DEFAULT_DRAFT = {
   reachable_count: 0,
   sender_name: '', sender_email: '', sending_domain: '', subject: '', preheader: '', reply_to: '',
   template_id: null, template_name: '', content_html: '', attachments: [],
-  esp_transport: 'sendgrid',
+  // Left blank on purpose: the Content step's 'Send through' picker fills it from whichever
+  // sender Settings has flagged active, and a hardcoded 'sendgrid' here would have looked like a
+  // deliberate choice and stopped that from happening.
+  esp_transport: '',
   exam_cit_version: '',
+  /*
+    null until the Audience step has asked. NULL on the row means "never chose", which follows the
+    Settings default — so seeding 0 here would silently opt every new campaign OUT of a default
+    somebody deliberately turned on.
+  */
+  verify_before_send: null,
   schedule_type: 'now', scheduled_at: '',
   status: 'draft',
 };
@@ -80,6 +89,8 @@ export default function CampaignWizard() {
             sender_name: c.sender_name || '', sender_email: c.sender_email || '', sending_domain: c.sending_domain || '',
             subject: c.subject || '', preheader: c.preheader || '', reply_to: c.reply_to || '',
             template_id: c.template_id || null, content_html: c.content_html || '', attachments: c.attachments || [], esp_transport: c.esp_transport || 'sendgrid',
+            verify_before_send: c.verify_before_send === null || c.verify_before_send === undefined
+              ? null : Number(c.verify_before_send),
             exam_cit_version: c.exam_cit_version || '',
             schedule_type: c.schedule_type || 'now', scheduled_at: c.scheduled_at ? c.scheduled_at.replace(' ', 'T').slice(0, 16) : '',
             status: c.status || 'draft',
@@ -145,6 +156,9 @@ export default function CampaignWizard() {
     sender_name: d.sender_name, sender_email: d.sender_email, sending_domain: d.sending_domain,
     subject: d.subject, preheader: d.preheader, reply_to: d.reply_to,
     template_id: d.template_id || '', esp_transport: d.esp_transport,
+    // Only sent once the step has resolved it; null would be coerced to 0 by the form encoder.
+    ...(d.verify_before_send === null || d.verify_before_send === undefined
+        ? {} : { verify_before_send: d.verify_before_send ? 1 : 0 }),
     exam_cit_version: d.exam_cit_version || '',
   });
 

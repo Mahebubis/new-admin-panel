@@ -1,0 +1,46 @@
+# /etc/systemd/system/istudio-monitoring.service
+#
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now istudio-monitoring
+#   sudo journalctl -u istudio-monitoring -f
+
+[Unit]
+Description=Internship Studio synthetic monitoring (registration, exam, payment)
+Documentation=file:///opt/istudio-monitoring/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=monitor
+Group=monitor
+WorkingDirectory=/opt/istudio-monitoring
+EnvironmentFile=/opt/istudio-monitoring/.env
+ExecStart=/usr/bin/node src/index.js
+
+# Always come back. A monitor that quietly died is worse than no monitor,
+# because everyone assumes silence means healthy.
+Restart=always
+RestartSec=10
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=istudio-monitoring
+
+# Chromium needs a real /dev/shm and a decent file-descriptor ceiling.
+LimitNOFILE=65535
+PrivateTmp=false
+
+# Modest hardening. NoNewPrivileges and a read-only system tree are safe here;
+# ProtectHome is not, because the browser writes into the monitor user's cache.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectControlGroups=true
+ProtectKernelTunables=true
+
+# If a leaked browser ever runs away with memory, kill the unit rather than
+# letting the OOM killer pick a victim at random.
+MemoryMax=1500M
+
+[Install]
+WantedBy=multi-user.target

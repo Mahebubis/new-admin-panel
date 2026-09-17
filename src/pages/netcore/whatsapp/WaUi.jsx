@@ -53,12 +53,27 @@ const APPROVAL_BADGE = {
   unknown:  { bg: '#f1f5f9', fg: '#64748b', label: 'UNKNOWN' },
 };
 
-export function ApprovalBadge({ status }) {
-  const b = APPROVAL_BADGE[status] || APPROVAL_BADGE.unknown;
+/*
+  DISABLED OUTRANKS THE APPROVAL.
+
+  A template Meta has re-filed into another category is still approved — Meta says so, and the
+  approval is real. It just cannot be used: picking it in a campaign would send at a category this
+  template was not built for, at a different price and under a different opt-in. A card that reads
+  APPROVED in the corner while carrying a red panel underneath saying it has been disabled is
+  telling the reader two things that contradict each other, and the corner is the half people scan.
+
+  So the badge says what you can DO with it, and the approval stays visible per account below.
+*/
+export function ApprovalBadge({ status, disabled }) {
+  const b = disabled
+    ? { bg: '#fee2e2', fg: '#b42318', label: 'DISABLED' }
+    : (APPROVAL_BADGE[status] || APPROVAL_BADGE.unknown);
   return (
-    <span title={status === 'approved'
-      ? 'Meta has approved this template — it can be sent to anyone'
-      : 'WhatsApp only delivers approved templates outside the 24-hour service window'}
+    <span title={disabled
+      ? 'Meta files this under a different category than it was built as, so it cannot be picked for a campaign or a journey'
+      : (status === 'approved'
+        ? 'Meta has approved this template — it can be sent to anyone'
+        : 'WhatsApp only delivers approved templates outside the 24-hour service window')}
       style={{ background: b.bg, color: b.fg, fontSize: 9.5, fontWeight: 800, padding: '3px 8px', borderRadius: 999, letterSpacing: '.3px', whiteSpace: 'nowrap' }}>
       {b.label}
     </span>

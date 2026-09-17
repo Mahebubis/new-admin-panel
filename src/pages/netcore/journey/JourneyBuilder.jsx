@@ -533,6 +533,101 @@ function initBuilder(root, bootOpts = {}) {
   const LISTS = pick(names(OPT.lists), ['(no lists found)']);
   const WA_SENDERS = pick((OPT.waSenders || []).map(s => s.label), ['(no WhatsApp number configured)']);
   const WA_PROVIDERS = ['netcore', 'meta'];
+
+  /* ── The WhatsApp step's three linked pickers: route → account → number ─────
+     Exactly the chain the campaign wizard uses (see WaStepSetup.jsx), and for the same reason.
+     A number's credentials are PER ROUTE — a Netcore API key issued for that number, a Meta phone
+     number id for that number — and most numbers hold only one of the two. A flat "Send through"
+     beside a flat list of every number let a step be pinned to a route its own number cannot
+     carry, which fails at dispatch with nothing in the builder to explain it.
+
+     Choosing the route first and narrowing what follows means every option on screen can send. */
+  const WA_SENDER_ROWS = (OPT.waSenders || []).filter(s => s && s.label);
+  const WA_ROUTE_LABELS = { meta: 'Meta Cloud API', netcore: 'Netcore API' };
+  const waRouteName = r => WA_ROUTE_LABELS[r] || r || '';
+  const waCanCarry = (s, route) => (route === 'netcore' ? !!s.canNetcore : !!s.canMeta);
+  const waRouteOf = cfg => (cfg.provider === 'netcore' ? 'netcore' : 'meta');
+
+  /*
+    The number this business actually uses for a route, rather than the first one that could.
+
+    Driven by which number last COMPLETED a send on that route, so it stays right on its own as
+    numbers are added or repurposed, and a number tried once on the wrong route and rejected never
+    becomes the suggestion. The default flag, then any ready number, are the fallbacks for a fresh
+    install with no history.
+  */
+  const waPreferred = (route, pool = WA_SENDER_ROWS) => {
+    const capable = pool.filter(s => waCanCarry(s, route));
+    const ready = capable.filter(s => s.ready);
+    const list = ready.length ? ready : capable;
+    const stamp = s => (route === 'netcore' ? s.lastSentNetcore : s.lastSentMeta) || '';
+    const used = list.filter(stamp);
+    if (used.length) return used.slice().sort((a, b) => String(stamp(b)).localeCompare(String(stamp(a))))[0];
+    return list.find(s => s.isDefault) || list[0] || null;
+  };
+
+  /*
+    ONE NAME PER ACCOUNT, chosen once here.
+
+    waba_name is stored on each NUMBER, not on the account, so two numbers on the same account can
+    spell it differently — this business has "Internship Studio" on one row and "Internship studio"
+    on another, both under 1229117948963194. Building the label per row and de-duplicating on the
+    result listed that single account twice, which reads as two accounts and makes the number list
+    below it look half empty whichever one is picked.
+
+    Keyed on the id, which is the thing that is actually unique, with the first non-empty name.
+  */
+  const WA_WABAS = (() => {
+    const byId = new Map();
+    WA_SENDER_ROWS.forEach(s => {
+      if (!s.wabaId) return;
+      if (!byId.has(s.wabaId)) byId.set(s.wabaId, s.wabaName || 'WABA');
+    });
+    return [...byId].map(([id, name]) => ({ id, label: `${name} - ${id}` }));
+  })();
+  const waWabaLabel = s => {
+    const w = WA_WABAS.find(x => x.id === (s && s.wabaId));
+    return w ? w.label : '';
+  };
+  const waWabaIdOf = label => (WA_WABAS.find(w => w.label === label) || {}).id || '';
+
+  /* Accounts that can carry the step's route, in the order the senders arrive, so the business's
+     own default account leads. */
+  const waWabaOpts = cfg => {
+    const route = waRouteOf(cfg);
+    const out = WA_WABAS
+      .filter(w => WA_SENDER_ROWS.some(s => s.wabaId === w.id && waCanCarry(s, route)))
+      .map(w => w.label);
+    return out.length ? out : ['(no account can send on this route)'];
+  };
+  const waActiveWaba = cfg => {
+    const opts = waWabaOpts(cfg);
+    if (cfg.waba && opts.includes(cfg.waba)) return cfg.waba;
+    const s = WA_SENDER_ROWS.find(x => x.label === cfg.sender);
+    if (s && s.wabaId && opts.includes(waWabaLabel(s))) return waWabaLabel(s);
+    return opts[0];
+  };
+  /*
+    EVERY number on the chosen account, including ones this route cannot carry.
+
+    Hiding them made an account with two numbers show one, with nothing saying the other existed.
+    They are listed with what picking them does instead, and picking one moves the route with it —
+    the same two-way link the account dropdown has.
+  */
+  const waNumberOpts = cfg => {
+    const id = waWabaIdOf(waActiveWaba(cfg));
+    const rows = WA_SENDER_ROWS.filter(s => s.wabaId === id);
+    return rows.length ? rows.map(s => s.label) : ['(no numbers on this account)'];
+  };
+  const waRouteHint = cfg => {
+    const route = waRouteOf(cfg);
+    const s = WA_SENDER_ROWS.find(x => x.label === cfg.sender);
+    const base = `This step always sends through ${waRouteName(route)}, whatever the number's provider is set to in WhatsApp settings later.`;
+    if (s && !waCanCarry(s, route)) {
+      return `${s.label} has no ${route === 'netcore' ? 'Netcore API key' : 'Meta phone number id'}, so it cannot send on this route. Pick another number, or switch the route.`;
+    }
+    return base;
+  };
   /*
     Sending routes a journey can be PINNED to.
 
@@ -551,6 +646,63 @@ function initBuilder(root, bootOpts = {}) {
   const routeLabel = (v, auto) => (v && v !== 'auto' ? routeName(v) : auto);
   const routeValue = (label, list, auto) => (label === auto ? 'auto' : (list.find(k => routeName(k) === label) || 'auto'));
   const SEND_DOMAINS = pick(OPT.sendingDomains, ['alert.internshipstudio.com']);
+  /*
+    Which ESP sits behind a sender address — per EMAIL STEP, not per journey.
+
+    A sending domain is not a provider. alert.internshipstudio.com is verified with SendGrid
+    AND with Elastic Email, so picking it in the row above says nothing about who delivers the
+    mail, and the step silently followed whatever was active in Settings. espSenders carries
+    one row per provider (see the options endpoint in journeys.php), which is what lets this
+    answer both questions: who CAN send from this domain, and which one this step is pinned to.
+
+    Only configured providers are offered. A step pinned to one that has no credentials would
+    fail at dispatch with nothing here to explain it.
+  */
+  const ESP_SENDERS = (OPT.espSenders || []).filter(s => s.configured);
+  /* Every domain verified with one provider — its default first. A sending domain is verified
+     with ONE provider, so this is the whole list a step pinned to it may be addressed from. */
+  const espDomainsOf = s => (s && s.domains && s.domains.length ? s.domains : (s && s.domain ? [s.domain] : []));
+  const espForDomain = dom => ESP_SENDERS.filter(s => espDomainsOf(s).includes(dom));
+  const EMAIL_ROUTE_AUTO = 'Follow the journey’s route';
+  /*
+    EVERY configured provider, always — the route is now chosen FIRST and the domain follows it,
+    which is the same order the email campaign wizard uses.
+
+    It used to be the other way round: the list was filtered to whichever providers matched the
+    domain already in the row above, so choosing Amazon SES meant first knowing which domain
+    happened to be SES's. That is the question the admin is trying to answer, not one they can be
+    asked on the way in.
+  */
+  const emailRouteOpts = () => [EMAIL_ROUTE_AUTO, ...ESP_SENDERS.map(s => s.label)];
+  /*
+    The domains this step may be addressed from: the pinned provider's own, or — while the step
+    is left on "follow the journey's route" — every configured domain, because which provider
+    delivers it is genuinely not decided yet.
+  */
+  const emailDomainOpts = cfg => {
+    const s = ESP_SENDERS.find(x => x.provider === cfg.provider);
+    const own = espDomainsOf(s);
+    return own.length ? own : (SEND_DOMAINS.length ? SEND_DOMAINS : ['alert.internshipstudio.com']);
+  };
+  const emailRouteLabel = cfg => {
+    const s = ESP_SENDERS.find(x => x.provider === cfg.provider);
+    return s ? s.label : EMAIL_ROUTE_AUTO;
+  };
+  const emailRouteValue = label => (ESP_SENDERS.find(s => s.label === label) || {}).provider || '';
+  /* The sentence under the dropdown. It says what will actually happen, which differs by case:
+     one provider on this domain is a statement of fact, several is a choice you have to make,
+     and none means the domain is not any provider's default. */
+  const emailRouteHint = cfg => {
+    if (cfg.provider) {
+      const s = ESP_SENDERS.find(x => x.provider === cfg.provider);
+      if (s) {
+        const own = espDomainsOf(s);
+        return `This step always sends through ${s.label}, whichever provider is active in Settings and whatever the other email steps in this journey use.`
+          + (own.length ? ` It can only be addressed from ${own.join(' or ')}, the domain${own.length > 1 ? 's' : ''} verified with it.` : '');
+      }
+    }
+    return `Not pinned — this step follows the journey’s own route${OPT.espActive ? ` (${routeName(OPT.espActive)} today)` : ''}, and the domain list stays open because which provider delivers it is not decided yet. Pick a provider to pin it and narrow the domains to the ones verified with it.`;
+  };
   const OTHER_JOURNEYS = pick(names(OPT.journeys), ['(no other journeys)']);
   /*
     Frequency wording is deliberately event-neutral ("First time this happens", not "First time
@@ -619,17 +771,38 @@ function initBuilder(root, bootOpts = {}) {
      selects; the server pulls it back out (journey_engagement_scope_from_cfg). Keeping the name
      in the saved config is what makes a journey readable when it is reopened months later.
 
-     The journey being edited is excluded. On a TRIGGER a self-reference is circular and can
-     never fire — nobody is in the journey until it fires, and it cannot send until they are in.
-     On a condition or a wait it is merely the wrong tool: "did they open what I just sent them"
-     is what the Wait-for-event step is for, and that watches forward from the student's actual
-     position instead of scanning the journey's whole history.
+     THE JOURNEY BEING EDITED IS OFFERED ON A CONDITION OR A WAIT, AND NOT ON A TRIGGER.
+
+     On a trigger a self-reference is genuinely circular and can never fire: nobody is in the
+     journey until it fires, and it cannot send until they are in. Excluding it there is correct.
+
+     Everywhere else it was excluded too, on the argument that Wait-for-event is the better tool
+     for "did they open what I just sent". That argument is defensible and was still wrong to
+     enforce: "send the email, wait thirty minutes, did they open it, branch" is the single most
+     common shape a journey takes, and refusing to offer this journey in its own condition left the
+     step permanently unfinishable — the field is required, so the node sat on "Needs setup" with
+     no way for anyone to clear it.
 
      A config saved before this still displays its value — the dropdown shows the stored label
-     whether or not it is in the list — it just cannot be re-picked. */
-  const JOURNEY_LABELS = (OPT.journeys || [])
-    .filter(j => !currentJourneyId || Number(j.id) !== Number(currentJourneyId))
-    .map(j => `${j.name} #${j.id}`);
+     whether or not it is in the list. */
+  const journeyLabelsFor = (nodeKey) => {
+    const isTrigger = String(nodeKey || '').startsWith('trg_');
+    return (OPT.journeys || [])
+      .filter(j => !(isTrigger && currentJourneyId && Number(j.id) === Number(currentJourneyId)))
+      /*
+        The marker goes BEFORE the id, never after.
+
+        The server pulls the id back out with /#(d+)s*$/, which is anchored to the END of the
+        label (see journey_engagement_scope_from_cfg). A suffix after the number parses as no id at
+        all, and the condition then looks configured and matches nobody — the worst of the three
+        possible outcomes, and silent.
+      */
+      .map(j => (currentJourneyId && Number(j.id) === Number(currentJourneyId)
+        ? `${j.name} (this journey) #${j.id}`
+        : `${j.name} #${j.id}`));
+  };
+  /* Kept for anything still reading a flat list — every journey, this one included. */
+  const JOURNEY_LABELS = (OPT.journeys || []).map(j => `${j.name} #${j.id}`);
 
   /*
     The message steps of the journey currently picked, as labels the server can parse back.
@@ -663,9 +836,12 @@ function initBuilder(root, bootOpts = {}) {
 
     if (!jid) return [ANY_MESSAGE];
 
-    /* The live canvas when the reference is to this journey — only reachable now through a
-       config saved before self-references were removed from the picker, but it still has to
-       render its steps rather than look broken. */
+    /* The live canvas when the reference is to THIS journey.
+
+       Read from the canvas rather than from the options payload because that payload is a snapshot
+       taken when the builder loaded: a step added or renamed in this session exists only on screen,
+       and a picker that could not see it would be missing exactly the step somebody had just built
+       the condition for. */
     let steps;
     if (currentJourneyId && Number(currentJourneyId) === jid) {
       steps = Object.values(nodes)
@@ -691,7 +867,13 @@ function initBuilder(root, bootOpts = {}) {
       hint: 'Narrow this to one campaign or one journey, or leave it on Any message to react to engagement with anything we have sent.' },
     { k: 'campaignId', t: 'select', l: 'Campaign', o: c => campaignsFor(c), req: 1, ph: 'Select a campaign',
       when: c => isEngagement(c) && c.comm === 'Campaign' },
-    { k: 'journeyRefId', t: 'select', l: 'Journey', o: JOURNEY_LABELS.length ? JOURNEY_LABELS : ['(no journeys yet)'],
+    { k: 'journeyRefId', t: 'select', l: 'Journey',
+      // A function of the NODE, not of the config: whether this journey may refer to itself
+      // depends on what kind of step is asking, which the config cannot know.
+      o: (c, nodeKey) => {
+        const list = journeyLabelsFor(nodeKey);
+        return list.length ? list : ['(no journeys yet)'];
+      },
       req: 1, ph: 'Select a journey', when: c => isEngagement(c) && c.comm === 'Journey' },
     /*
       Which send inside that journey. A journey routinely carries four or five emails and
@@ -823,11 +1005,12 @@ function initBuilder(root, bootOpts = {}) {
       g: 'action', ic: I.chat, name: 'WhatsApp', kind: 'Message', desc: 'Send an approved WhatsApp template.',
       out: ['Sent', 'Failed'], test: 1,
       f: [{ k: 'template', t: 'select', l: 'Template', o: WA, req: 1, ph: 'Select a template', preview: 'whatsapp' },
-      { k: 'sender', t: 'select', l: 'Sender number', o: WA_SENDERS, d: WA_SENDERS[0] },
-      // Blank follows WhatsApp Settings for that number. Pinning it here means a step
-      // cannot silently change route the day someone edits Settings.
-      { k: 'provider', t: 'select', l: 'Send through', o: WA_PROVIDERS, ph: 'Use the number’s default',
-        hint: 'Netcore is the working route today — a direct Meta Cloud send needs the Meta app connected to the WABA.' },
+      /* Route first, then the account, then the number — each narrowing the one below it, so
+         nothing on screen is an option that cannot actually send. Pinned to the step: it cannot
+         silently change the day someone edits WhatsApp settings. */
+      { k: 'provider', t: 'waroute', l: 'Send through', hint: waRouteHint },
+      { k: 'waba', t: 'select', l: 'WABA ID', o: waWabaOpts, ph: 'Select a WhatsApp Business Account' },
+      { k: 'sender', t: 'select', l: 'Sender number', o: waNumberOpts, ph: 'Select a number' },
       { k: 'params', t: 'rules', l: 'Template variables', max: 5, keys: 'tvar',
         hint: 'Map {{1}}, {{2}} … to student attributes. Pick TRACKED_LINK to put this student’s own link in the message — it carries their phone and this message’s id, so the tap is logged and credited to them even if they never sign in.' },
       { k: 'buttonUrl', t: 'text', l: 'Button link value', ph: 'Leave blank — the button URL is fixed at approval',
@@ -839,10 +1022,30 @@ function initBuilder(root, bootOpts = {}) {
       out: ['Sent', 'Failed'], test: 1,
       f: [{ k: 'template', t: 'select', l: 'Template', o: EM, req: 1, ph: 'Select a template', preview: 'email' },
       { k: 'senderName', t: 'text', l: 'Sender name', ph: 'iStudio' },
-      { k: 'senderLocal', t: 'addr', l: 'Sender email', domainKey: 'from', domains: SEND_DOMAINS, ph: 'contact' },
+      /* Route first, then the address — the same order as the email campaign wizard, and for the
+         same reason: a domain is verified with one provider, so the provider is what decides which
+         domains may be offered at all. */
+      { k: 'provider', t: 'esproute', l: 'Send through', hint: emailRouteHint },
+      { k: 'senderLocal', t: 'addr', l: 'Sender email', domainKey: 'from', domains: emailDomainOpts, ph: 'contact',
+        hint: cfg => {
+          const matches = espForDomain(cfg.from || emailDomainOpts(cfg)[0]);
+          if (!matches.length) return '';
+          return `Verified with ${matches.map(s => s.label).join(' and ')}.`;
+        } },
       { k: 'subject', t: 'text', l: 'Subject line override', ph: 'Leave blank to use the template subject' },
       { k: 'preheader', t: 'text', l: 'Pre-header', ph: 'Shown next to the subject in most inboxes' },
       { k: 'replyTo', t: 'text', l: 'Reply-to email', ph: 'Optional — replies go to the sender address otherwise' },
+      /*
+        Per STEP, because two email steps in one journey want different answers. The first reaches
+        people who registered minutes ago, where a typo is most likely and a check is worth paying
+        for. A later one reaches people the first step already proved reachable, and re-asking buys
+        nothing.
+      */
+      { k: 'verifyEmail', t: 'toggle', l: 'Verify addresses before sending',
+        hint: 'Check the address really exists before this step emails it. Anything that comes back '
+            + '<b>invalid</b> or <b>high risk</b> goes on the Blocklist and is skipped here and everywhere '
+            + 'else. Each address is checked once ever, so a contact any campaign or another step has '
+            + 'already verified costs nothing.' },
       { k: 'attachments', t: 'files', l: 'Attachments', hint: 'Max 5MB per file, 15MB per step.' }],
       s: c => c.template || 'Pick a template',
     },
@@ -1073,6 +1276,11 @@ function initBuilder(root, bootOpts = {}) {
   function restore(s) {
     const st = JSON.parse(s);
     nodes = st.nodes; edges = st.edges; seq = st.seq;
+    // Same reason as the boot path: a snapshot taken before this fix, or one holding a step that
+    // was empty at the time, brings an array back as a config. See asCfgObject at the boot.
+    Object.values(nodes || {}).forEach(n => {
+      if (!n.cfg || typeof n.cfg !== 'object' || Array.isArray(n.cfg)) n.cfg = {};
+    });
     sel = null; selEdge = null; selSet.clear();
   }
   function undo() {
@@ -1090,7 +1298,9 @@ function initBuilder(root, bootOpts = {}) {
 
   function defaults(t) { const o = {}; (t.f || []).forEach(f => { if (f.d !== undefined) o[f.k] = JSON.parse(JSON.stringify(f.d)); }); return o; }
   function addNode(key, x, y, cfg) {
-    const n = { id: uid('n'), key, cfg: Object.assign(defaults(T[key]), cfg || {}), x: snapv(x), y: snapv(y) };
+    // Object.assign onto a fresh object, never onto whatever was handed in — a pasted or restored
+    // step can carry an array, and an array config silently loses every field on save.
+    const n = { id: uid('n'), key, cfg: Object.assign({}, defaults(T[key]), (cfg && !Array.isArray(cfg)) ? cfg : {}), x: snapv(x), y: snapv(y) };
     nodes[n.id] = n; return n;
   }
   function connect(from, branch, to, wait) {
@@ -1689,13 +1899,101 @@ function initBuilder(root, bootOpts = {}) {
   /* ============================ drawer ============================ */
   const drawer = gid('drawer'), scrim = gid('scrim'),
     drHead = gid('drHead'), drBody = gid('drBody'), drFoot = gid('drFoot');
-  function closeDrawer() { drawer.classList.remove('on'); scrim.classList.remove('on'); drBody.onclick = null; }
-  scrim.onclick = closeDrawer; window.closeDrawer = closeDrawer;
+  /*
+    CLOSING A STEP DRAWER SAVES THE DRAFT.
+
+    It used to only close. A step's fields write straight into the node as you touch them, so the
+    configuration was real on the canvas the moment it was picked — but it lived in the browser and
+    nowhere else until somebody separately pressed Save up in the toolbar. A button that says
+    "Save step" and saves nothing is a trap: you configure the step, press the thing labelled save,
+    leave, and the template you chose was never written down. That is exactly what happened to the
+    email steps in journey 50, whose configs came back empty from the database while the condition
+    step next to them — configured in a session that did press Save — came back intact.
+
+    So the drawer persists on its way out, and every route out of it is covered: the button, the X,
+    the scrim, and Escape. Only when something actually changed, and only for a journey that already
+    exists — opening a step on an unsaved new journey and closing it again must not create a record.
+  */
+  let drawerIsStep = false;
+  let drawerNodeId = null;
+
+  /*
+    READ THE DRAWER, rather than trusting that every field wrote itself into the step.
+
+    Each control also writes to the step as you touch it, and that is still what keeps the canvas
+    card and the dependent dropdowns up to date while the drawer is open. But those writes are one
+    live handler per element, attached after the drawer's HTML is built, and they are not a record
+    of what is on screen — they are a bet that every one of them attached and fired. Lose that bet
+    on a single field and the drawer shows a template while the step holds nothing, which is exactly
+    what came back from the database for journey 50: two email steps saved with empty configs,
+    while the WhatsApp step beside them saved fine.
+
+    So the state that gets saved is taken from the controls themselves, at the moment the drawer
+    closes. What you can see is what is stored, and it no longer depends on any handler having run.
+
+    Blank is not written over a key that is not there. An untouched optional field would otherwise
+    add an empty string to every step it renders, and every open-and-close of any drawer would count
+    as an edit worth saving.
+  */
+  function harvestDrawer() {
+    if (!drawerNodeId) return;
+    const n = nodes[drawerNodeId];
+    if (!n) return;
+    // Belt and braces against the array-config trap described at the boot: writing the harvested
+    // values onto an array would lose them at exactly the moment they are meant to be saved.
+    if (!n.cfg || typeof n.cfg !== 'object' || Array.isArray(n.cfg)) n.cfg = {};
+    const put = (k, v) => {
+      if (!k) return;
+      if (v === '' && !(k in n.cfg)) return;
+      n.cfg[k] = v;
+    };
+    drBody.querySelectorAll('[data-k]').forEach(el => {
+      const k = el.dataset.k;
+      if (el.classList.contains('seg')) {
+        const on = el.querySelector('button.on');
+        if (on) put(k, on.dataset.v);
+      } else if (el.type === 'checkbox') {
+        n.cfg[k] = el.checked;
+      } else if (typeof el.value === 'string') {
+        put(k, el.value);
+      }
+    });
+    // The two dropdowns that show a label and store an id.
+    drBody.querySelectorAll('[data-espk]').forEach(el => {
+      if (typeof el.value === 'string' && el.value !== '') n.cfg[el.dataset.espk] = emailRouteValue(el.value);
+    });
+    drBody.querySelectorAll('[data-wak]').forEach(el => {
+      if (typeof el.value === 'string' && el.value !== '') {
+        n.cfg[el.dataset.wak] = el.value === WA_ROUTE_LABELS.netcore ? 'netcore' : 'meta';
+      }
+    });
+  }
+
+  function closeDrawer(skipSave) {
+    const wasStep = drawerIsStep;
+    drawerIsStep = false;
+    if (wasStep && skipSave !== true) harvestDrawer();
+    drawerNodeId = null;
+    drawer.classList.remove('on'); scrim.classList.remove('on'); drBody.onclick = null;
+    if (wasStep && skipSave !== true) {
+      // The card under the drawer still says "Needs setup" until the canvas is redrawn from the
+      // config that was just harvested.
+      render();
+      if (currentJourneyId && baseline() !== savedBaseline) persist('Step saved.');
+    }
+  }
+  scrim.onclick = () => closeDrawer(); window.closeDrawer = closeDrawer;
   function head(ic, c, bg, t, s) {
+    // Every drawer renders its header through here, so this is the one place that reliably marks
+    // the drawer as "not a step" before a non-step opener claims it.
+    drawerIsStep = false;
     drHead.innerHTML = `<div class="ic" style="--c:${c};--bg:${bg}">${svg(ic, 17)}</div>
      <div><h3>${t}</h3><p>${s}</p></div><button class="dr-x" onclick="closeDrawer()">${svg(I.x, 15)}</button>`;
   }
-  const opts = (f, cfg) => typeof f.o === 'function' ? f.o(cfg) : (f.o || []);
+  /* nodeKey lets an option list depend on the KIND of step asking for it — see journeyRefId,
+     where a trigger and a condition are offered different things. Optional, so every existing
+     field that only cares about the config is untouched. */
+  const opts = (f, cfg, nodeKey) => typeof f.o === 'function' ? f.o(cfg, nodeKey) : (f.o || []);
 
   function ruleRow(fk, i, r, kind) {
     if (kind === 'attr')
@@ -1763,7 +2061,7 @@ function initBuilder(root, bootOpts = {}) {
     </div>`;
   }
 
-  function fieldHtml(f, cfg) {
+  function fieldHtml(f, cfg, nodeKey) {
     const v = cfg[f.k], lab = `<label>${f.l}${f.req ? '<span class="req">*</span>' : ''}</label>`;
     /* hint and note text may be a function of the current cfg, so a field can explain what the
        CHOSEN value means — "stored in istudio_cit.users.fname" is worth far more than a static
@@ -1780,19 +2078,41 @@ function initBuilder(root, bootOpts = {}) {
           ? `<button type="button" class="lnk-btn" data-preview="${f.preview}" ${v ? '' : 'disabled'}>${svg(I.eye, 12)} Preview</button>`
           : '';
         return `<div class="field"><div class="lab-row">${lab}${prev}</div>
-          ${combo(`data-k="${f.k}"`, opts(f, cfg), v, f.ph || 'Select')}${hint}</div>`;
+          ${combo(`data-k="${f.k}"`, opts(f, cfg, nodeKey), v, f.ph || 'Select')}${hint}</div>`;
+      }
+
+      /* Which ESP delivers THIS step. Its own case rather than a plain 'select' because the
+         dropdown shows provider LABELS ("Elastic Email") while the step stores provider IDS
+         ("elasticemail"), and because changing it has to re-render the drawer so the sentence
+         underneath describes the new choice. Bound through data-espk, below. */
+      case 'esproute': {
+        const list = emailRouteOpts(cfg);
+        return `<div class="field">${lab}
+          ${combo(`data-espk="${f.k}"`, list, emailRouteLabel(cfg), EMAIL_ROUTE_AUTO)}${hint}</div>`;
+      }
+
+      /* The WhatsApp delivery route. Its own case for the same reason as esproute: the dropdown
+         shows "Meta Cloud API" while the step stores "meta", and picking one has to re-render the
+         drawer because the two fields under it are lists derived from this choice. */
+      case 'waroute': {
+        const list = WA_ROUTES.filter(r => WA_SENDER_ROWS.some(s => waCanCarry(s, r))).map(waRouteName);
+        return `<div class="field">${lab}
+          ${combo(`data-wak="${f.k}"`, list.length ? list : [waRouteName(waRouteOf(cfg))], waRouteName(waRouteOf(cfg)), 'Select')}${hint}</div>`;
       }
 
       /* Sender address, split the way the campaign wizard splits it: a local part you
          type and a verified domain you pick. Typing a whole address by hand is how
          people end up sending from an unverified domain and land in spam. */
       case 'addr': {
-        const dom = cfg[f.domainKey] || f.domains[0];
+        // The domain list may depend on the rest of the config — an email step's domains are
+        // whichever ones its chosen provider has verified — so it is resolved per render.
+        const domList = typeof f.domains === 'function' ? f.domains(cfg) : f.domains;
+        const dom = domList.includes(cfg[f.domainKey]) ? cfg[f.domainKey] : domList[0];
         return `<div class="field">${lab}
           <div class="addr">
             <input class="ctl" data-k="${f.k}" value="${esc(v)}" placeholder="${esc(f.ph || '')}">
             <span class="at">@</span>
-            ${combo(`data-k="${f.domainKey}"`, f.domains, dom, f.domains[0])}
+            ${combo(`data-k="${f.domainKey}"`, domList, dom, domList[0])}
           </div>${hint}</div>`;
       }
 
@@ -1809,11 +2129,25 @@ function initBuilder(root, bootOpts = {}) {
       }
       case 'seg':
         return `<div class="field">${lab}<div class="seg" data-k="${f.k}">
-          ${opts(f, cfg).map(o => `<button data-v="${esc(o)}" class="${o === v ? 'on' : ''}">${esc(o)}</button>`).join('')}</div>${hint}</div>`;
+          ${opts(f, cfg, nodeKey).map(o => `<button data-v="${esc(o)}" class="${o === v ? 'on' : ''}">${esc(o)}</button>`).join('')}</div>${hint}</div>`;
       case 'check':
         return `<div class="field"><label style="display:flex;gap:9px;align-items:flex-start;cursor:pointer">
           <input type="checkbox" data-k="${f.k}" ${v ? 'checked' : ''} style="margin-top:1px">
           <span style="font-weight:500">${f.l}</span></label>${hint}</div>`;
+
+      /*
+        A switch, for a step setting that turns a behaviour on rather than supplying a value.
+
+        Reuses the .sw markup the Journey settings drawer already uses, so one control does not look
+        like two different things in two panels of the same builder. Bound through data-tg (step
+        config) rather than data-t (journey settings), because the two write to different objects.
+      */
+      case 'toggle':
+        return `<div class="field">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+            <label style="margin:0">${f.l}</label>
+            <span class="sw ${v ? 'on' : ''}" data-tg="${f.k}" role="switch" aria-checked="${!!v}" tabindex="0"></span>
+          </div>${hint}</div>`;
       case 'time':
         return `<div class="field">${lab}<input class="ctl" type="time" data-k="${f.k}" value="${esc(v || '10:00')}">${hint}</div>`;
       case 'date':
@@ -1831,7 +2165,7 @@ function initBuilder(root, bootOpts = {}) {
         const chosen = Array.isArray(v) ? v : [];
         return `<div class="field">${lab}
           ${chosen.map((c, i) => `<div class="rrow r2" style="grid-template-columns:1fr 26px">
-            ${combo(`data-mk="${f.k}:${i}"`, opts(f, cfg), c, 'Select', true)}
+            ${combo(`data-mk="${f.k}:${i}"`, opts(f, cfg, nodeKey), c, 'Select', true)}
             <button class="x" data-mdel="${f.k}:${i}">${svg(I.x, 12)}</button></div>`).join('')}
           <button class="addrow" data-madd="${f.k}" ${chosen.length >= f.max ? 'disabled' : ''}>${svg(I.plus, 12)} Add</button>
           <div class="cap">${chosen.length} / ${f.max} used</div>${hint}</div>`;
@@ -1870,16 +2204,54 @@ function initBuilder(root, bootOpts = {}) {
     let pre = '';
     if (n.key === 'act_hook') pre = `<div class="note warn">${svg(I.warn, 14)}<div>Beyond Netcore parity — Netcore has no generic outbound call node. Ours needs retry and timeout rules on the engine side.</div></div>`;
     if (n.key === 'cnd_reach') pre = `<div class="note">${svg(I.info, 14)}<div>Reachable counts can only be shown when the journey starts from a list or a segment. With an event trigger the engine can't know the population in advance — priority is still honoured.</div></div>`;
-    drBody.innerHTML = pre + (T[n.key].f || []).filter(f => !f.when || f.when(n.cfg)).map(f => fieldHtml(f, n.cfg)).join('') +
-      `<div class="sect">Reporting</div><div class="field"><label>Step label</label>
-       <input class="ctl" data-k="__label" value="${esc(n.cfg.__label || '')}" placeholder="${esc(t.name)}">
-       <div class="hint">Shown on the card and in journey reports — e.g. “48h exam nudge”.</div></div>`;
+    /*
+      BUILT FIRST, SHOWN SECOND.
+
+      A field label, hint and option list can each be a function of the current config, so any one
+      of them can throw on a step whose config is in a shape it did not expect. Assigning the HTML
+      straight into the drawer meant a throw halfway through left the PREVIOUS step body on screen
+      under the new step heading. Between two steps of the same kind that is indistinguishable from
+      a working drawer, and every control in it is still wired to the step before it.
+
+      Building into a string first means the drawer either shows this step or says it could not,
+      and never shows one step fields while holding another step values.
+    */
+    let bodyHtml = null;
+    try {
+      bodyHtml = pre + (T[n.key].f || []).filter(f => !f.when || f.when(n.cfg)).map(f => fieldHtml(f, n.cfg, n.key)).join('') +
+        `<div class="sect">Reporting</div><div class="field"><label>Step label</label>
+         <input class="ctl" data-k="__label" value="${esc(n.cfg.__label || '')}" placeholder="${esc(t.name)}">
+         <div class="hint">Shown on the card and in journey reports — e.g. “48h exam nudge”.</div></div>`;
+    } catch (err) {
+      bodyHtml = null;
+      console.error('[journey] step settings could not be drawn', err);
+    }
+
+    if (bodyHtml === null) {
+      drBody.innerHTML = `<div class="note warn">${svg(I.warn, 14)}<div>These settings could not be
+        drawn. Delete the step and add it again — nothing else on the canvas is affected.</div></div>`;
+      drFoot.innerHTML = `<button class="btn" onclick="closeDrawer()">Close</button>
+        <div style="flex:1"></div><button class="btn danger" id="dDel">Delete step</button>`;
+      gid('dDel').onclick = () => {
+        snapshot(); delNode(id); sel = null; closeDrawer(true); render();
+        if (currentJourneyId) persist('Step deleted.');
+      };
+      drawer.classList.add('on'); scrim.classList.add('on');
+      return;   // drawerIsStep stays false, so nothing is harvested out of a body that is not this step
+    }
+
+    drBody.innerHTML = bodyHtml;
     bindConfig(n);
     drFoot.innerHTML = `<button class="btn primary" onclick="closeDrawer()">Save step</button>
       ${t.test ? '<button class="btn" id="dTest">Send test</button>' : ''}
       ${t.g === 'cond' ? '<button class="btn" id="dCond">Test this condition</button>' : ''}
       <div style="flex:1"></div><button class="btn danger" id="dDel">Delete step</button>`;
-    gid('dDel').onclick = () => { snapshot(); delNode(id); sel = null; closeDrawer(); render(); toast('Step deleted.'); };
+    gid('dDel').onclick = () => {
+      snapshot(); delNode(id); sel = null; closeDrawer(true); render();
+      // Deleting is a change like any other, and the same argument applies: it has to reach the
+      // database, not just the canvas.
+      if (currentJourneyId) persist('Step deleted.'); else toast('Step deleted.');
+    };
     const tb = gid('dTest');
     if (tb) tb.onclick = () => {
       if (badCfg(n)) { toast('Finish setting the step up before sending a test.', 1); return; }
@@ -1890,6 +2262,8 @@ function initBuilder(root, bootOpts = {}) {
       if (badCfg(n)) { toast('Finish setting the step up before testing it.', 1); return; }
       openCondTest(n);
     };
+    drawerIsStep = true;
+    drawerNodeId = id;
     drawer.classList.add('on'); scrim.classList.add('on'); render();
   }
 
@@ -2084,6 +2458,20 @@ function initBuilder(root, bootOpts = {}) {
   }
 
   function bindConfig(n) {
+    /*
+      The first edit after the drawer opens is pushed onto the undo stack.
+
+      Field edits used to bypass undo entirely: nothing snapshotted them, so Ctrl+Z jumped back
+      past every setting you had just typed to whatever structural change came before, with no
+      sign that the settings had gone with it. On a journey where undo is one keystroke away from
+      the canvas, that is a silent way to lose exactly the work this drawer exists to capture.
+
+      Once per opening, not once per keystroke: typing a subject line should be one step to undo,
+      not forty.
+    */
+    let snapped = false;
+    const snapOnce = () => { if (!snapped) { snapped = true; snapshot(); } };
+
     const refresh = () => {
       const d = pruneEdges(n); render(); openConfig(n.id);
       if (d) toast(`${d} connection${d > 1 ? 's' : ''} removed — those branches no longer exist.`, 1);
@@ -2094,19 +2482,110 @@ function initBuilder(root, bootOpts = {}) {
         el.onclick = ev => {
           const b = ev.target.closest('button'); if (!b) return;
           el.querySelectorAll('button').forEach(x => x.classList.remove('on')); b.classList.add('on');
-          n.cfg[el.dataset.k] = b.dataset.v; render();
+          snapOnce(); n.cfg[el.dataset.k] = b.dataset.v; render();
         };
       } else if (el.type === 'checkbox') {
-        el.onchange = () => { n.cfg[el.dataset.k] = el.checked; render(); };
+        el.onchange = () => { snapOnce(); n.cfg[el.dataset.k] = el.checked; render(); };
       } else {
-        const h = () => { n.cfg[el.dataset.k] = el.value; render(); };
+        const h = () => { snapOnce(); n.cfg[el.dataset.k] = el.value; render(); };
         el.oninput = h;
         el.onchange = () => {
           h();
           const f = (T[n.key].f || []).find(x => x.k === el.dataset.k);
           if (f && f.t === 'select' && (T[n.key].f || []).some(x => x.when)) openConfig(n.id);
+
+          /*
+            The account dropdown. Picking an account can change the route, because the link runs
+            both ways: accounts are listed per route, so choosing one that cannot carry the current
+            route is only possible when the route is wrong for it. Keeping the route there silently
+            produces a step that fails every send, so the route follows the account. An account that
+            CAN carry the current route is left alone — that route was chosen deliberately.
+          */
+          if (el.dataset.k === 'waba' && n.key === 'act_wa') {
+            const wid = waWabaIdOf(n.cfg.waba);
+            const rows = WA_SENDER_ROWS.filter(s => s.wabaId === wid);
+            const cur = waRouteOf(n.cfg);
+            const other = cur === 'netcore' ? 'meta' : 'netcore';
+            const sentOn = r => rows.some(s => (r === 'netcore' ? s.lastSentNetcore : s.lastSentMeta));
+            let route = cur;
+            if ((!rows.some(s => waCanCarry(s, cur)) || (!sentOn(cur) && sentOn(other)))
+                && rows.some(s => waCanCarry(s, other))) {
+              route = other; n.cfg.provider = other;
+            }
+            const pool = rows.filter(s => waCanCarry(s, route));
+            const first = pool.find(s => s.ready) || pool[0] || rows[0];
+            if (first) n.cfg.sender = first.label;
+            render(); openConfig(n.id);
+          }
+
+          /* And the number itself: one that cannot carry the current route takes the route with
+             it, rather than leaving the step pinned to a route it has no credentials for. */
+          if (el.dataset.k === 'sender' && n.key === 'act_wa') {
+            const s = WA_SENDER_ROWS.find(x => x.label === n.cfg.sender);
+            if (s) {
+              if (s.wabaId) n.cfg.waba = waWabaLabel(s);
+              const cur = waRouteOf(n.cfg);
+              if (!waCanCarry(s, cur)) {
+                const other = cur === 'netcore' ? 'meta' : 'netcore';
+                if (waCanCarry(s, other)) n.cfg.provider = other;
+              }
+              render(); openConfig(n.id);
+            }
+          }
+          /* The line under the sender address names the provider the chosen domain is verified
+             with, so it is describing the old domain until the drawer is redrawn. The route itself
+             no longer moves — it is chosen above and is what narrowed this list in the first
+             place — so this only refreshes the wording. */
+          if (el.dataset.k === 'from' && (T[n.key].f || []).some(x => x.t === 'esproute')) openConfig(n.id);
         };
       }
+    });
+
+    /* The Send-through dropdown. Stores the provider ID behind the label that was picked, and
+       an empty string for "Follow the journey's route" — which is what JourneyDispatch's
+       journey_email_provider() reads as "not pinned". */
+    drBody.querySelectorAll('[data-espk]').forEach(el => {
+      el.onchange = () => {
+        n.cfg[el.dataset.espk] = emailRouteValue(el.value);
+        /* The domain list narrows to the provider just chosen, so a domain picked under the old
+           one may no longer be offered — and an invisible selection is worse than none. */
+        const s = ESP_SENDERS.find(x => x.provider === n.cfg[el.dataset.espk]);
+        if (s) {
+          const doms = s.domains && s.domains.length ? s.domains : (s.domain ? [s.domain] : []);
+          if (doms.length && !doms.includes(n.cfg.from)) n.cfg.from = s.domain || doms[0];
+        }
+        render();
+        openConfig(n.id);
+      };
+    });
+
+    /*
+      The WhatsApp route, and the two pickers it drives.
+
+      Changing the route moves the account and the number to the ones that route is really sent
+      on — not merely to something capable. That matters because the number holding the Netcore
+      key can also send through Meta, so "leave it if it still works" would keep every Meta step
+      on the Netcore account.
+    */
+    /*
+      Step-level switches. Re-rendered rather than just toggled in place so any field whose `when`
+      depends on this one appears or disappears immediately, the same as every other field change.
+    */
+    drBody.querySelectorAll('.sw[data-tg]').forEach(sw => {
+      const flip = () => { n.cfg[sw.dataset.tg] = !n.cfg[sw.dataset.tg]; render(); openConfig(n.id); };
+      sw.onclick = flip;
+      sw.onkeydown = ev => { if (ev.key === ' ' || ev.key === 'Enter') { ev.preventDefault(); flip(); } };
+    });
+
+    drBody.querySelectorAll('[data-wak]').forEach(el => {
+      el.onchange = () => {
+        const route = el.value === WA_ROUTE_LABELS.netcore ? 'netcore' : 'meta';
+        n.cfg[el.dataset.wak] = route;
+        const pick = waPreferred(route);
+        if (pick) { n.cfg.waba = waWabaLabel(pick); n.cfg.sender = pick.label; }
+        render();
+        openConfig(n.id);
+      };
     });
     drBody.querySelectorAll('[data-preview]').forEach(b => b.onclick = () => {
       showPreview(b.dataset.preview, n.cfg.template, n.cfg.subject);
@@ -2859,6 +3338,10 @@ function initBuilder(root, bootOpts = {}) {
 
   /* serialize the whole canvas for persistence */
   function serialize() {
+    /* Save draft is reachable with a step drawer still open, and what is on screen in that drawer
+       is part of the journey being saved. Taken before the graph is read, so pressing Save draft
+       without closing the step first saves the step too. */
+    if (drawerIsStep) harvestDrawer();
     return { nodes, edges, settings, name: gid('jname').value, status: status.toLowerCase() };
   }
   /*
@@ -2894,8 +3377,31 @@ function initBuilder(root, bootOpts = {}) {
   }
   buildPalette();
   wirePaletteSearch();
+  /*
+    A STEP'S CONFIG HAS TO BE AN OBJECT, AND WHAT ARRIVES IS SOMETIMES AN ARRAY.
+
+    This is the whole of the "my template does not save" bug, and it is worth writing down because
+    nothing about it looks wrong from either end.
+
+    A step with no settings is stored as {}. PHP decodes that into an empty array, encodes it back
+    out as [], and the browser parses [] into a JavaScript ARRAY. Assigning to it still works —
+    cfg.template = 'Batch 1 and 2 full' sets a property on the array, reading it back gives the
+    template, and the canvas card duly shows it. But JSON.stringify serialises an array by its
+    indices and throws every other property away, so the save posts cfg: [] and the server stores
+    exactly what it was sent. The template was on screen, in memory, and never in the payload.
+
+    Once a step had been saved empty it could never hold anything again: every edit went onto an
+    array and was dropped on the way out, silently, every time. Which is precisely what journey 50's
+    two email steps did, while the WhatsApp step beside them — configured before it was ever saved,
+    so its cfg was still a real object — round-tripped perfectly.
+
+    Fixed at the point the graph arrives, so every path below it works with an object.
+  */
+  const asCfgObject = (c) => (c && typeof c === 'object' && !Array.isArray(c)) ? c : {};
+
   if (initial && initial.nodes && Object.keys(initial.nodes).length) {
     nodes = initial.nodes; edges = initial.edges || {}; seq = computeSeq();
+    Object.values(nodes).forEach(n => { n.cfg = asCfgObject(n.cfg); });
   } else {
     nodes = {}; edges = {};
   }
@@ -3009,7 +3515,41 @@ export default function JourneyBuilder() {
             liveId = created.id;
             navigate(`/netcore/journeys/${liveId}`, { replace: true });
           }
-          await saveGraph(liveId, payload);
+          const saved = await saveGraph(liveId, payload);
+
+          /*
+            READ BACK WHAT WAS STORED, and refuse to call it saved if a step came back different.
+
+            A save that reports success while quietly dropping a step's settings is the worst
+            outcome available here: the canvas still shows the template, the toast still says saved,
+            and the loss is only discovered later when the journey does nothing. It happened on
+            journey 50, where two email steps came back from the database with empty configs after
+            a save the panel had called successful.
+
+            The response already carries the stored graph, so this costs one comparison and turns a
+            silent loss into a message naming the step.
+          */
+          /*
+            Compared key by key, not as raw JSON. PHP hands an empty config back as [] rather than
+            {}, and object keys come back in whatever order they were stored, so a straight string
+            comparison would report a loss on every step that has no settings yet.
+          */
+          const sig = (cfg) => {
+            const o = cfg && typeof cfg === 'object' && !Array.isArray(cfg) ? cfg : {};
+            return Object.keys(o).sort()
+              .filter((k) => o[k] !== '' && o[k] !== null && o[k] !== undefined)
+              .map((k) => k + '=' + JSON.stringify(o[k])).join('&');
+          };
+          const back = saved && saved.graph && saved.graph.nodes;
+          if (back) {
+            const lost = Object.keys(payload.nodes || {}).filter((nid) =>
+              sig((payload.nodes[nid] || {}).cfg) !== sig((back[nid] || {}).cfg));
+            if (lost.length) {
+              throw new Error('The server did not store ' + lost.length + ' step'
+                + (lost.length > 1 ? 's' : '') + ' (' + lost.join(', ') + '). Nothing on the canvas '
+                + 'was changed — try saving again.');
+            }
+          }
           return liveId;
         },
         // Publishing is server-validated. A rejection carries .problems, which the

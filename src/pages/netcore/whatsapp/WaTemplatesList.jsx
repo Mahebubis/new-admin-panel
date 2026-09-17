@@ -4,7 +4,7 @@ import api from '../../../api/axios';
 import toast from 'react-hot-toast';
 import WaMessageCard from './WaMessageCard';
 import WaTemplateImportModal from './WaTemplateImportModal';
-import { WA_TPL_API, FORM, WA, WA_CSS, fmtDate, n0 } from './waShared';
+import { WA_TPL_API, FORM, WA, WA_CSS, fmtDate, n0, waTemplateDisabled } from './waShared';
 import { Spinner, WhatsAppIcon, ApprovalBadge, CategoryChip, Notice } from './WaUi';
 
 const STATUS_TABS = [{ key: 'active', label: 'Active' }, { key: 'archived', label: 'Archived' }];
@@ -148,13 +148,16 @@ export default function WaTemplatesList() {
         const why  = d.rejected_message || '';
         /* A rejection with no reason is the one status an admin can do nothing with, so Meta's
            own explanation is shown as a persistent error rather than a passing success toast. */
-        if (d.auto_disabled) toast.error(d.disabled_reason || 'Meta has re-classified this template.', { duration: 25000 });
+        /* Only a real drift is worth an alarm — see waTemplateDisabled. A flag with matching
+           categories behind it means the drift was already resolved. */
+        if (waTemplateDisabled(d)) toast.error(d.disabled_reason || 'Meta has re-classified this template.', { duration: 25000 });
         else if (next === 'rejected' && why) toast.error(`Rejected — ${why}`, { duration: 20000 });
         else toast.success(`Status: ${next}`);
         setRows(rs => rs.map(r => (r.id === id
           ? { ...r, approval_status: next, rejected_message: why, wabas: d.wabas || r.wabas,
               auto_disabled: d.auto_disabled, disabled_reason: d.disabled_reason,
-              meta_category: d.meta_category }
+              /* both categories, since whether it is blocked is derived from the pair */
+              category: d.category || r.category, meta_category: d.meta_category }
           : r)));
       } else toast.error(res.data.message || 'Could not check', { duration: 10000 });
     } catch (e) { toast.error(e?.response?.data?.message || 'Could not check', { duration: 10000 }); }
@@ -190,7 +193,9 @@ export default function WaTemplatesList() {
         }
         setRows(rs => rs.map(r => (r.id === id
           ? { ...r, approval_status: d.approval_status, wabas: d.wabas || r.wabas,
-              auto_disabled: d.auto_disabled, disabled_reason: d.disabled_reason }
+              auto_disabled: d.auto_disabled, disabled_reason: d.disabled_reason,
+              /* carried too, because whether the template is blocked is derived from these two */
+              category: d.category || r.category, meta_category: d.meta_category }
           : r)));
       } else toast.error(res.data.message || 'Could not submit', { id: t, duration: 15000 });
     } catch (e) { toast.error(e?.response?.data?.message || 'Could not submit', { id: t, duration: 15000 }); }
@@ -231,6 +236,27 @@ export default function WaTemplatesList() {
       const res = await api.post(WA_TPL_API, new URLSearchParams({ action, id }), FORM);
       if (res.data.success) { toast.success('Done', { id: t }); fetchPage(page); }
       else toast.error(res.data.message || 'Failed', { id: t });
+    } catch (e) { toast.error(e?.response?.data?.message || 'Network error', { id: t }); }
+  };
+
+  /*
+    Copy a template and open the copy.
+
+    Opening it is the point. A duplicate is made in order to change something, so landing on the
+    list with a new row somewhere in it would leave the actual next step — find it, open it, edit
+    it — still to do. The copy carries the words and the buttons but none of the original's Meta
+    review, so it starts unsubmitted and cannot be sent until it has been approved in its own right.
+  */
+  const duplicate = async (id, name) => {
+    const t = toast.loading('Copying "' + name + '"…');
+    try {
+      const res = await api.post(WA_TPL_API, new URLSearchParams({ action: 'duplicate', id }), FORM);
+      if (res.data.success && res.data.data?.id) {
+        toast.success('Copied as "' + res.data.data.name + '" — not yet submitted to Meta', { id: t, duration: 8000 });
+        nav('/netcore/whatsapp/templates/' + res.data.data.id);
+      } else {
+        toast.error(res.data.message || 'Could not copy', { id: t });
+      }
     } catch (e) { toast.error(e?.response?.data?.message || 'Network error', { id: t }); }
   };
 
@@ -351,7 +377,7 @@ export default function WaTemplatesList() {
                         <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#0f172a', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.01em' }}>
                           {t.display_name || t.name}
                         </h3>
-                        <ApprovalBadge status={t.approval_status} />
+                        <ApprovalBadge status={t.approval_status} disabled={waTemplateDisabled(t)} />
                       </div>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginTop: 7 }}>
@@ -374,6 +400,8 @@ export default function WaTemplatesList() {
                         bodyValues={samples}
                         footerText={t.footer_text}
                         buttons={t.buttons || []}
+                        destinationAttr={(t.var_defaults || {}).button_destination_attr || ''}
+                        trackedUrl={t.click_target_url || ''}
                       />
 
                       {/* ── Meta re-classified this template ───────────────────────────────
@@ -383,7 +411,7 @@ export default function WaTemplatesList() {
                           is dropped for anyone over their marketing cap — the campaign still
                           reports thousands sent. The template has already been pulled out of
                           every picker; these two buttons are the only ways back. */}
-                      {t.auto_disabled ? (
+                      {waTemplateDisabled(t) ? (
                         <div style={{ marginTop: 10, fontSize: 11, color: '#b42318', background: '#fef3f2',
                                       border: '1px solid #fecaca', borderRadius: 8, padding: '9px 11px', lineHeight: 1.55 }}>
                           <div style={{ fontWeight: 800, marginBottom: 3 }}>
@@ -432,17 +460,36 @@ export default function WaTemplatesList() {
                           "business accounts" listing one row is noise. With two, the single
                           badge is the pessimistic rollup and this is where you find out WHICH
                           account is holding it up. */}
-                      {Array.isArray(t.wabas) && t.wabas.length > 1 && (
-                        <div style={{ marginTop: 12 }}>
-                          <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.4px', marginBottom: 2 }}>
-                            BUSINESS ACCOUNTS
+                      {/*
+                          An account switched off in settings is summarised on one line instead of
+                          taking a row of its own. It still holds this template at Meta, and
+                          switching the number back on brings its state back, so it is not hidden
+                          outright — but it is not somewhere we send, so it does not deserve equal
+                          weight with the accounts that are.
+                      */}
+                      {(() => {
+                        const all = Array.isArray(t.wabas) ? t.wabas : [];
+                        const live = all.filter(w => !w.inactive);
+                        const off = all.length - live.length;
+                        if (live.length <= 1 && !off) return null;
+                        return (
+                          <div style={{ marginTop: 12 }}>
+                            <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.4px', marginBottom: 2 }}>
+                              BUSINESS ACCOUNTS
+                            </div>
+                            {live.map(w => (
+                              <WabaRow key={w.waba_id} w={w} busy={submittingId === t.id}
+                                       onSubmit={wid => submitToMeta(t.id, wid)} />
+                            ))}
+                            {off > 0 && (
+                              <div style={{ fontSize: 10, color: '#cbd5e1', paddingTop: 5, borderTop: '1px solid #f1f5f9' }}
+                                   title="Switched off in WhatsApp settings — Meta still holds this template for it">
+                                {off} switched-off account{off > 1 ? 's' : ''} not shown
+                              </div>
+                            )}
                           </div>
-                          {t.wabas.map(w => (
-                            <WabaRow key={w.waba_id} w={w} busy={submittingId === t.id}
-                                     onSubmit={wid => submitToMeta(t.id, wid)} />
-                          ))}
-                        </div>
-                      )}
+                        );
+                      })()}
                     </div>
 
                     <div className="wa-card-actions">
@@ -455,14 +502,19 @@ export default function WaTemplatesList() {
                             onClick={() => setConfirm({ id: t.id, action: 'archive', label: `archive "${t.name}"` })}>
                             Archive
                           </button>
+                          <button className="wa-btn wa-btn-text wa-btn-sm"
+                            title="Make an editable copy — the copy is not approved and must be submitted on its own"
+                            onClick={() => duplicate(t.id, t.name)}>
+                            Duplicate
+                          </button>
                           <button className="wa-btn wa-btn-outlined wa-btn-sm"
                             onClick={() => nav(`/netcore/whatsapp/templates/${t.id}`)}>
                             Edit
                           </button>
                           <button className="wa-btn wa-btn-contained wa-btn-sm"
                             onClick={() => nav(`/netcore/whatsapp/new?template_id=${t.id}`)}
-                            disabled={t.approval_status !== 'approved' || !!t.auto_disabled}
-                            title={t.auto_disabled ? 'Disabled — Meta re-classified this template' : (t.approval_status === 'approved' ? 'Start a campaign with this template' : 'Only approved templates can be sent')}>
+                            disabled={t.approval_status !== 'approved' || waTemplateDisabled(t)}
+                            title={waTemplateDisabled(t) ? 'Disabled — Meta re-classified this template' : (t.approval_status === 'approved' ? 'Start a campaign with this template' : 'Only approved templates can be sent')}>
                             Use
                           </button>
                         </>

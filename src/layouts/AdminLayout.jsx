@@ -1078,6 +1078,7 @@ const sidebarMenu = [
   {
     key: 'netcore', group: 'Netcore', icon: 'fas fa-network-wired', items: [
       { text: 'Netcore Behaviour', link: '/netcore/behaviour', icon: 'fas fa-chart-line', perm: 'netcore_behaviour' },
+      { text: 'Messaging Analytics', link: '/netcore/analytics', icon: 'fas fa-chart-pie', perm: 'netcore_analytics' },
     ]
   },
   {
@@ -1220,9 +1221,11 @@ const sidebarMenu = [
     ]
   },
 
+  /* Took over the Enrollment Audit slot in Sep 2026. That page still exists at
+     /enrollment-audit for anyone holding the link — it is only off the sidebar. */
   {
-    key: 'enrollment_audit', group: 'Enrollment Audit', icon: 'fas fa-file-circle-check', items: [
-      { text: 'Enrollment Audit', link: '/enrollment-audit', icon: 'fas fa-file-import', perm: 'enrollment_audit' },
+    key: 'profile_metrics', group: 'Resume/Profile Metrics', icon: 'fas fa-chart-line', items: [
+      { text: 'Resume/Profile Metrics', link: '/profile-metrics', icon: 'fas fa-id-card', perm: 'profile_metrics' },
     ]
   },
 ];

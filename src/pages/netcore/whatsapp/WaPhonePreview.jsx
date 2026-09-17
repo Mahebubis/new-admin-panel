@@ -1,4 +1,5 @@
-import { WA } from './waShared';
+import { useState } from 'react';
+import { WA, buttonDestination } from './waShared';
 
 /*
  * A true-to-life WhatsApp message preview.
@@ -55,6 +56,8 @@ const BtnIcon = ({ type }) => {
  * @param bodyText      may contain {{n}}
  * @param bodyValues    ordered values for the body's placeholders
  * @param buttons       [{ type, text, url, dynamic }]
+ * @param destinationAttr the attribute a dynamic URL button resolves per contact, e.g. [PC_LINK]
+ * @param trackedUrl      the template's tracked-link destination, used when no attribute is set
  * @param plainText     when set, renders as a free-text message instead of a template
  */
 export default function WaPhonePreview({
@@ -66,6 +69,8 @@ export default function WaPhonePreview({
   bodyValues = [],
   footerText = '',
   buttons = [],
+  destinationAttr = '',
+  trackedUrl = '',
   plainText = null,
   height = 480,
   emptyHint = 'Select a template to preview it here',
@@ -73,6 +78,10 @@ export default function WaPhonePreview({
   const body = plainText !== null ? plainText : fillPlaceholders(bodyText, bodyValues);
   const header = headerType === 'text' ? fillPlaceholders(headerText, headerValues) : '';
   const isEmpty = !String(body || '').trim();
+  // Which button the pointer is over. A real bubble rather than only a title attribute: the
+  // native tooltip takes a second to appear and is the first thing a reader gives up on, and this
+  // one line is the whole point of the hover.
+  const [hoverBtn, setHoverBtn] = useState(-1);
   const now = new Date();
   const clock = `${String(now.getHours() % 12 || 12).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
@@ -137,16 +146,33 @@ export default function WaPhonePreview({
 
             {(buttons || []).length > 0 && (
               <div style={{ marginTop: 3, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {buttons.map((b, i) => (
-                  <div key={i} style={{
-                    background: '#fff', borderRadius: 6, padding: '8px 6px', textAlign: 'center',
-                    color: '#00a5f4', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center',
-                    justifyContent: 'center', gap: 6, boxShadow: '0 1px 1px rgba(0,0,0,.12)',
-                  }}>
-                    <BtnIcon type={b.type} />
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.text || 'Button'}</span>
-                  </div>
-                ))}
+                {buttons.map((b, i) => {
+                  const dest = buttonDestination(b, { destinationAttr, trackedUrl });
+                  return (
+                    <div key={i} title={dest}
+                      onMouseEnter={() => setHoverBtn(i)} onMouseLeave={() => setHoverBtn(-1)}
+                      style={{
+                        background: '#fff', borderRadius: 6, padding: '8px 6px', textAlign: 'center',
+                        color: '#00a5f4', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center',
+                        justifyContent: 'center', gap: 6, boxShadow: '0 1px 1px rgba(0,0,0,.12)',
+                        position: 'relative', cursor: 'help',
+                      }}>
+                      <BtnIcon type={b.type} />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.text || 'Button'}</span>
+                      {hoverBtn === i && dest && (
+                        <div style={{
+                          position: 'absolute', bottom: 'calc(100% + 6px)', left: 0, right: 0,
+                          background: '#0f172a', color: '#fff', borderRadius: 7, padding: '7px 9px',
+                          fontSize: 10.5, fontWeight: 500, lineHeight: 1.45, textAlign: 'left',
+                          // Wraps instead of truncating: a URL cut off in the middle is worse than
+                          // no URL at all, because it reads as the whole one.
+                          wordBreak: 'break-all', whiteSpace: 'normal', zIndex: 30,
+                          boxShadow: '0 8px 20px rgba(0,0,0,.25)', pointerEvents: 'none',
+                        }}>{dest}</div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

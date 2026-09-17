@@ -5,7 +5,9 @@ import toast from 'react-hot-toast';
 import ConfirmDialog from '../ConfirmDialog';
 import SearchableSelect from './SearchableSelect';
 import WaPhonePreview from './WaPhonePreview';
-import { WA_TPL_API, FORM, WA, WA_CSS, inp, label, card } from './waShared';
+import { WA_TPL_API, WA_SET_API, ATTR_API, FORM, WA, WA_CSS, inp, label, card, waPhoneE164, waPhoneHasToken } from './waShared';
+import WaAttributeField from './WaAttributeField';
+import { buildCustomAttributeTags } from '../campaignMergeTags';
 import { Spinner, WhatsAppIcon, Notice, ApprovalBadge } from './WaUi';
 
 // Same base + fallback as src/api/axios.js — the tracked link shown here is the real public URL
@@ -80,12 +82,55 @@ const EMPTY = {
   header_type: 'none', header_text: '', header_media_url: '',
   body_text: '', footer_text: '', buttons: [], click_target_url: '', link_id: null,
   sample_values: { header: [], body: [] },
+  var_defaults: {},
   approval_status: 'pending',
 };
 
 function countVars(text) {
   const m = String(text || '').match(/\{\{\s*(\d+)\s*\}\}/g) || [];
   return m.reduce((max, tok) => Math.max(max, parseInt(tok.replace(/\D/g, ''), 10) || 0), 0);
+}
+
+/*
+ * What you READ versus what Meta STORES.
+ *
+ * Meta only understands {{1}}, {{2}} … and the body it approves must contain exactly those. But
+ * "Hi {{1}}, your link is {{11}}" is unreadable — you cannot check the copy without also holding
+ * eleven numbers in your head. So the editor shows [FIRST_NAME] and [PC_LINK] in their places and
+ * converts back on every keystroke. The stored body never changes shape.
+ *
+ * The pair is a true round trip because the mapping is one-to-one: each {{n}} has at most one
+ * attribute, and toStored() only recognises a bracket token that some {{n}} actually claims. A
+ * token you type by hand that nothing is mapped to stays literal text, which is correct — nothing
+ * would have filled it.
+ */
+function toDisplay(body, varDefaults) {
+  return String(body || '').replace(/\{\{\s*(\d+)\s*\}\}/g, (m, n) => (varDefaults || {})[String(n)] || m);
+}
+
+function toStored(display, varDefaults) {
+  /*
+   * Variable numbers are consumed IN ORDER, which is what makes a repeated attribute survive.
+   *
+   * A first-wins lookup looked fine until the same attribute filled two slots — "Hi [FIRST_NAME],
+   * … Name: [FIRST_NAME]" would turn BOTH into {{1}} and {{2}} would vanish from the body, taking
+   * a variable Meta had approved with it. Walking the numbers in order instead gives the first
+   * occurrence {{1}} and the second {{2}}, which is the mapping the operator actually set.
+   *
+   * Numeric keys only: 'button_url_suffix' and 'button_destination_attr' share this map and are
+   * not body variables.
+   */
+  const slots = Object.entries(varDefaults || {})
+    .filter(([n, tok]) => /^\d+$/.test(n) && tok)
+    .map(([n, tok]) => ({ n: parseInt(n, 10), tok, used: false }))
+    .sort((a, b) => a.n - b.n);
+
+  return String(display || '').replace(/\[[A-Z0-9_]+\]/g, m => {
+    const slot = slots.find(s => !s.used && s.tok === m);
+    if (!slot) return m;         // nothing claims this token — leave it as the literal text it is
+    slot.used = true;
+    return `{{${slot.n}}}`;
+  });
 }
 
 /*
@@ -135,6 +180,30 @@ export default function WaTemplateEditor() {
   const bodyRef = useRef(null);
   const lastSavedRef = useRef(JSON.stringify(EMPTY));
 
+  /* Your attributes, for the body and button-URL pickers. Fetched here because the editor is
+     reachable directly by URL and has no parent holding the list. */
+  const [customAttrTags, setCustomAttrTags] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.post(ATTR_API, new URLSearchParams({ action: 'list', per_page: 200 }), FORM);
+        if (res.data.success) setCustomAttrTags(buildCustomAttributeTags(res.data.data.attributes));
+      } catch { /* the editor still works without the picker */ }
+    })();
+  }, []);
+
+  /* The business's own WhatsApp numbers, to choose a Call button's destination from rather than
+     typing one. See the Call button field for why choosing beats typing here. */
+  const [ownNumbers, setOwnNumbers] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.post(WA_SET_API, new URLSearchParams({ action: 'get' }), FORM);
+        if (res.data.success) setOwnNumbers(res.data.data.senders || []);
+      } catch { /* typing one by hand still works */ }
+    })();
+  }, []);
+
   useEffect(() => {
     if (!routeId) return;
     (async () => {
@@ -153,6 +222,7 @@ export default function WaTemplateEditor() {
               header: t.sample_values?.header || [],
               body: t.sample_values?.body || [],
             },
+            var_defaults: t.var_defaults && typeof t.var_defaults === 'object' ? t.var_defaults : {},
           };
           setTpl(loaded);
           lastSavedRef.current = JSON.stringify(loaded);
@@ -167,6 +237,169 @@ export default function WaTemplateEditor() {
   const alreadyApproved = !!tpl.meta_template_id && tpl.approval_status === 'approved';
   const bodyVars = countVars(tpl.body_text);
   const headerVars = tpl.header_type === 'text' ? countVars(tpl.header_text) : 0;
+
+  /*
+   * One click on a sample row does both jobs: names the attribute that fills {{n}} at send time,
+   * and supplies the example Meta insists on for approval.
+   *
+   * An example the operator has already typed is never overwritten — theirs is more realistic than
+   * anything derivable from an attribute name, and Meta compares the example against the copy.
+   */
+  /*
+   * Typing or pasting [ATTRIBUTE] into the body MAKES it a variable.
+   *
+   * Before this, a bracket token only became {{n}} if some slot was already mapped to it, so the
+   * ordinary way of working — paste the finished copy, then say what fills each slot — left the
+   * brackets as literal words. The counter read "0 variables" and Meta would have approved
+   * "Hi [FIRST_NAME]," as that exact text, with the brackets, for every recipient.
+   *
+   * Now an unclaimed token that names a real attribute takes the next free number and records
+   * itself, so the body and the mapping cannot disagree however the copy arrived. A bracket word
+   * that is NOT one of your attributes is left alone, which keeps "[see below]" as prose.
+   */
+  const setBodyFromDisplay = (display) => {
+    setTpl(t => {
+      const defaults = { ...(t.var_defaults || {}) };
+      const slots = Object.entries(defaults)
+        .filter(([n, tok]) => /^\d+$/.test(n) && tok)
+        .map(([n, tok]) => ({ n: parseInt(n, 10), tok, used: false }))
+        .sort((a, b) => a.n - b.n);
+      let maxN = slots.reduce((m, s) => Math.max(m, s.n), 0);
+      const known = new Set(customAttrTags.map(x => x.value));
+      const added = [];
+
+      const body = String(display || '').replace(/\[[A-Z0-9_]+\]/g, m => {
+        const slot = slots.find(s => !s.used && s.tok === m);
+        if (slot) { slot.used = true; return `{{${slot.n}}}`; }
+        if (!known.has(m)) return m;
+        maxN += 1;
+        defaults[String(maxN)] = m;
+        added.push(maxN);
+        return `{{${maxN}}}`;
+      });
+
+      // Meta refuses a submission with a blank example, so a newly created slot gets one.
+      const samples = { header: [...(t.sample_values?.header || [])], body: [...(t.sample_values?.body || [])] };
+      added.forEach(n => {
+        if (!String(samples.body[n - 1] || '').trim()) samples.body[n - 1] = (defaults[String(n)] || '').replace(/[[\]]/g, '');
+      });
+
+      return { ...t, body_text: body, var_defaults: defaults, sample_values: samples };
+    });
+  };
+
+  const setSampleAttribute = (i, token) => {
+    setTpl(t => {
+      const s = { header: [...(t.sample_values?.header || [])], body: [...(t.sample_values?.body || [])] };
+      if (!String(s.body[i] || '').trim()) s.body[i] = token.replace(/[[\]]/g, '');
+      return { ...t, sample_values: s, var_defaults: { ...(t.var_defaults || {}), [String(i + 1)]: token } };
+    });
+  };
+
+  const setVarDefault = (n, token) =>
+    setTpl(t => ({ ...t, var_defaults: { ...(t.var_defaults || {}), [String(n)]: token } }));
+
+  /*
+   * Picking an attribute in the body adds a VARIABLE, not the token itself.
+   *
+   * Meta approves the body text and then renders it from its own copy, so `[PC_LINK]` typed into
+   * the body would be approved as those nine literal characters and delivered as those nine
+   * literal characters. The only thing WhatsApp personalises is a {{n}} parameter, whose value
+   * travels with each individual send.
+   *
+   * So one click does three things: writes {{n}} where the cursor is, records that {{n}} means
+   * this attribute, and seeds a sample value so Meta has something to approve against. Campaigns
+   * read the recording and start pre-filled.
+   */
+  const pickBodyAttribute = (token, el) => {
+    const n = bodyVars + 1;
+    const marker = `{{${n}}}`;
+    /*
+     * The cursor is in the DISPLAYED text, which is not the stored text — [FIRST_NAME] occupies
+     * twelve characters where {{1}} occupies five. So the insert is done on the display string and
+     * converted back, rather than applying a display offset to the stored one and landing in the
+     * middle of a token.
+     */
+    const shown = toDisplay(tpl.body_text, tpl.var_defaults);
+    const start = el?.selectionStart ?? shown.length;
+    const end = el?.selectionEnd ?? start;
+    const nextDefaults = { ...(tpl.var_defaults || {}), [String(n)]: token };
+    const body = toStored(shown.slice(0, start) + marker + shown.slice(end), nextDefaults);
+
+    const samples = { ...(tpl.sample_values || { header: [], body: [] }) };
+    const bodySamples = [...(samples.body || [])];
+    // Meta rejects a submission with a blank example, so the attribute's own name stands in.
+    bodySamples[n - 1] = bodySamples[n - 1] || token.replace(/[[\]]/g, '');
+    samples.body = bodySamples;
+
+    setTpl(t => ({
+      ...t,
+      body_text: body,
+      sample_values: samples,
+      var_defaults: { ...(t.var_defaults || {}), [String(n)]: token },
+    }));
+    requestAnimationFrame(() => {
+      if (!el) return;
+      el.focus();
+      // The caret lands after the DISPLAYED token, since that is what the field now holds.
+      const pos = start + token.length;
+      el.setSelectionRange(pos, pos);
+    });
+  };
+
+  /*
+   * An attribute on a button URL becomes Meta's URL-SUFFIX variable, not inline text.
+   *
+   * Meta will not approve a URL with a variable in the middle, but it does allow one at the very
+   * end — the dynamic-URL button. So the address is written as "<your url>{{1}}" and the campaign
+   * supplies the tail per recipient, which is the machinery already behind
+   * variables.button_url_suffix in the send worker.
+   *
+   * Be warned: this build's own history records Meta rejecting dynamic-URL templates on this
+   * account, and Netcore accepting a button parameter and then never delivering it (WhatsApp then
+   * refuses the message with 131008). If the approval comes back rejected, that is why, and the
+   * reliable alternative is the same attribute in a BODY variable, where WhatsApp auto-links it.
+   */
+  /*
+   * A per-person button destination, done the only way Meta allows.
+   *
+   * My first attempt appended the attribute to whatever address you typed, which is wrong for the
+   * case that matters. PC_LINK is not a suffix — it is a WHOLE URL on someone else's domain,
+   * chat.whatsapp.com, different for every student. Meta approves a button URL once and permits a
+   * variable only at the very end, so the domain is identical in every copy of the message. A
+   * per-person address can never be the button URL itself.
+   *
+   * It can be the other side of a redirect, and that redirector already exists. The button points
+   * at c.php with this recipient's own token on the end — one fixed domain, which Meta is happy
+   * to approve — c.php records the tap and then forwards them to whatever the attribute resolved
+   * to for them.
+   *
+   * That also answers click tracking, which was otherwise impossible here: Meta and Netcore both
+   * report nothing at all for a URL button, so a tap is only ever observable if it crosses our own
+   * server first. Sending everyone through c.php is what makes the count exist.
+   */
+  const pickButtonAttribute = (i, b, token) => {
+    setButton(i, { url: `${API_BASE}/api/whatsapp/c.php?t={{1}}`, dynamic: true, dynamicTouched: true });
+    setTpl(t => ({
+      ...t,
+      var_defaults: {
+        ...(t.var_defaults || {}),
+        button_destination_attr: token,
+        // The campaign fills {{1}} with this recipient's id — see wa_render_for_recipient().
+        button_url_suffix: 'XX_WA_CLICK_TOKEN_XX',
+      },
+    }));
+  };
+
+  const clearButtonAttribute = (i, b) => {
+    setButton(i, { url: '', dynamic: false, dynamicTouched: true });
+    setTpl(t => {
+      const next = { ...(t.var_defaults || {}) };
+      delete next.button_destination_attr;
+      delete next.button_url_suffix;
+      return { ...t, var_defaults: next };
+    });
+  };
 
   /* Appends the next placeholder at the cursor. WhatsApp requires a consecutive 1..N run, so
      the number is derived from what's already used rather than being typed by hand. */
@@ -239,6 +472,15 @@ export default function WaTemplateEditor() {
       if (!b.text.trim()) return 'Every button needs a label';
       if (b.type === 'url' && !b.url.trim()) return 'A "Visit website" button needs a URL';
       if (b.type === 'phone' && !b.phone.trim()) return 'A "Call phone number" button needs a number';
+      /*
+        A literal number is put into international form here, so what is saved is what Meta accepts.
+        A number holding an attribute is left exactly as written — it is the author's choice, the
+        field says what Meta does with it, and mangling the token would help nobody.
+      */
+      if (b.type === 'phone' && !waPhoneHasToken(b.phone) && !waPhoneE164(b.phone)) {
+        return `The Call button number "${b.phone.trim()}" is not a phone number Meta will accept — `
+             + 'write it with the country code, like +918237850238';
+      }
     }
     return null;
   };
@@ -267,6 +509,7 @@ export default function WaTemplateEditor() {
         })),
         click_target_url: tpl.click_target_url || '',
         sample_values: JSON.stringify(tpl.sample_values || {}),
+        var_defaults: JSON.stringify(tpl.var_defaults || {}),
         approval_status: tpl.approval_status,
       });
       const res = await api.post(WA_TPL_API, body, FORM);
@@ -380,6 +623,23 @@ export default function WaTemplateEditor() {
            */}
           {/* Always confirms first. Submitting to Meta is not undoable — an approved template
               can't be renamed or un-submitted — so it should never happen on a single click. */}
+          {/*
+            Save without submitting.
+
+            Meta approval is one-way — once a template is submitted its name and language are
+            fixed — so writing several templates in advance and approving them when you are ready
+            needs a way to stop short of that. This is the same local save the editor already does
+            for an approved template, exposed on its own rather than only reachable as a side
+            effect of the Meta button.
+          */}
+          {!alreadyApproved && (
+            <button onClick={async () => { const err = validate(); if (err) return toast.error(err); await saveOnly(); }}
+              disabled={saving || metaBusy}
+              title="Stores this template here only. Nothing is sent to Meta, so you can keep editing it."
+              style={{ padding: '10px 18px', border: '1.5px solid #e2e8f0', background: '#fff', color: '#475569', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: (saving || metaBusy) ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
+              {saving ? 'Saving…' : 'SAVE AS DRAFT'}
+            </button>
+          )}
           <button onClick={() => { const err = validate(); if (err) return toast.error(err); setConfirmSaveOpen(true); }}
             disabled={saving || metaBusy}
             title={alreadyApproved ? 'Updates the local copy — Meta already holds the approved wording' : 'Saves your copy and sends it to Meta for approval'}
@@ -495,14 +755,65 @@ export default function WaTemplateEditor() {
             <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12 }}>
               Supports *bold*, _italic_ and ~strikethrough~. Use variables for anything that changes per contact.
             </div>
-            <textarea ref={bodyRef} rows={8} maxLength={1024} value={tpl.body_text}
-              onChange={e => set('body_text', e.target.value)}
+            {/*
+              Body composer: the formatting markers WhatsApp understands, an emoji palette, and
+              your own attributes — all acting on the same plain text that is sent to Meta.
+
+              Inserting an attribute writes its [NAME] token straight into the copy, so the body
+              reads the way it will arrive and there is no separate mapping table to keep in step.
+              A token is resolved per recipient at send time by the same resolver the email side
+              uses, so [PC_LINK] becomes that student's own group link.
+            */}
+            <WaAttributeField
+              fieldRef={bodyRef}
+              multiline
+              rows={8}
+              maxLength={1024}
+              value={toDisplay(tpl.body_text, tpl.var_defaults)}
+              onChange={setBodyFromDisplay}
+              customTags={customAttrTags}
+              showTrackedLink
+              onPickAttribute={pickBodyAttribute}
               placeholder={'Hi {{1}},\n\nOur records show you have not completed your exam. Please log in to your dashboard to complete it before the deadline.\n\nReply "STOP" to unsubscribe.'}
-              style={{ ...inp, resize: 'vertical', lineHeight: 1.55 }} />
+            />
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
               <span style={{ fontSize: 10.5, color: '#94a3b8' }}>{bodyVars} variable(s)</span>
-              <span style={{ fontSize: 10.5, color: (tpl.body_text || '').length > 950 ? '#c2410c' : '#cbd5e1' }}>{(tpl.body_text || '').length}/1024</span>
             </div>
+
+            {/*
+              What each variable will be filled with, stated where you wrote it.
+
+              Meta approves the body text and then renders it itself, so a variable is the ONLY
+              place personalisation can live. Picking an attribute above writes {{n}} into the copy
+              and records the attribute here; every campaign built on this template starts with
+              these already filled in, and can still override any of them.
+            */}
+            {bodyVars > 0 && (
+              <div style={{ marginTop: 10, border: '1.5px solid #eef2ff', background: '#fbfcff', borderRadius: 8, padding: 10 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 800, color: '#4338ca', letterSpacing: '.3px', marginBottom: 6 }}>
+                  WHAT FILLS EACH VARIABLE
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {Array.from({ length: bodyVars }, (_, k) => k + 1).map(n => {
+                    const token = (tpl.var_defaults || {})[String(n)] || '';
+                    return (
+                      <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontFamily: 'monospace', fontSize: 11.5, color: '#1e3a8a', flexShrink: 0, width: 44 }}>{`{{${n}}}`}</span>
+                        {token ? (
+                          <>
+                            <span style={{ fontFamily: 'monospace', fontSize: 11.5, color: '#166534', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 999, padding: '2px 9px' }}>{token}</span>
+                            <button type="button" onClick={() => setVarDefault(n, '')}
+                              style={{ border: 'none', background: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '0 4px' }}>×</button>
+                          </>
+                        ) : (
+                          <span style={{ fontSize: 11, color: '#94a3b8' }}>chosen per campaign — pick an attribute above to set it here instead</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div style={{ marginTop: 16 }}>
               <label style={label}>Footer <span style={{ fontWeight: 500, color: '#94a3b8' }}>(optional, max 60 chars)</span></label>
@@ -595,12 +906,42 @@ export default function WaTemplateEditor() {
                     <input style={inp} value={tpl.sample_values?.header?.[i] || ''} onChange={e => setSample('header', i, e.target.value)} placeholder="e.g. iCAT 174" />
                   </div>
                 ))}
-                {Array.from({ length: bodyVars }).map((_, i) => (
-                  <div key={`b${i}`}>
-                    <label style={label}>Body {`{{${i + 1}}}`}</label>
-                    <input style={inp} value={tpl.sample_values?.body?.[i] || ''} onChange={e => setSample('body', i, e.target.value)} placeholder="e.g. Rahul" />
-                  </div>
-                ))}
+                {/*
+                  Each sample row is also where a variable gets its ATTRIBUTE.
+
+                  Picking one in the body only records the mapping when the {{n}} is inserted by
+                  the picker. Paste a finished body — which is the normal way to bring copy over —
+                  and every slot reads "chosen per campaign", because nothing ever said what fills
+                  it. Here every slot is listed by number whether it was typed or pasted, so the
+                  mapping can always be completed, and the sample Meta needs is filled at the same
+                  time from the same click.
+                */}
+                {Array.from({ length: bodyVars }).map((_, i) => {
+                  const token = (tpl.var_defaults || {})[String(i + 1)] || '';
+                  return (
+                    <div key={`b${i}`}>
+                      <label style={label}>Body {`{{${i + 1}}}`}</label>
+                      <WaAttributeField
+                        format={false}
+                        customTags={customAttrTags}
+                        value={tpl.sample_values?.body?.[i] || ''}
+                        onChange={v => setSample('body', i, v)}
+                        onPickAttribute={tok => setSampleAttribute(i, tok)}
+                        placeholder="e.g. Rahul"
+                      />
+                      {token
+                        ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, fontSize: 11 }}>
+                            <span style={{ color: '#166534', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 999, padding: '2px 8px', fontFamily: 'monospace' }}>{token}</span>
+                            <span style={{ color: '#94a3b8' }}>fills this for every recipient</span>
+                            <button type="button" onClick={() => setVarDefault(i + 1, '')}
+                              style={{ border: 'none', background: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: '0 2px' }}>×</button>
+                          </div>
+                        )
+                        : <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 4 }}>Pick an attribute to fill this per recipient</div>}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -643,10 +984,24 @@ export default function WaTemplateEditor() {
                             it is appended on save (wa_templates.php) and stripped for display here,
                             so the two can never drift apart and nobody has to retype a number.
                           */}
-                          <input style={inp}
+                          {/*
+                            The picker here offers the TRACKED LINK, not attributes.
+
+                            Meta freezes a button URL at approval and refuses any that carries a
+                            variable, so a per-recipient address in a button is not something this
+                            panel is choosing not to do — it is not available. The tracked link is
+                            the one form that works: a fixed URL whose landing page identifies the
+                            visitor. For a genuinely per-person link like PC_LINK, put it in a body
+                            variable, where WhatsApp auto-links whatever arrives.
+                          */}
+                          <WaAttributeField
+                            customTags={customAttrTags}
+                            showTrackedLink
+                            format={false}
+                            onPickAttribute={token => pickButtonAttribute(i, b, token)}
                             value={plainUrl(b.url, tpl.link_id)}
-                            onChange={e => {
-                              const url = plainUrl(e.target.value, tpl.link_id);
+                            onChange={raw => {
+                              const url = plainUrl(raw, tpl.link_id);
                               /*
                                * A link to our own platform is trackable and almost always should
                                * be, so it ticks itself — forgetting the box is the single mistake
@@ -662,6 +1017,24 @@ export default function WaTemplateEditor() {
                               setButton(i, patch);
                             }}
                             placeholder={String(tpl.click_target_url || '').trim() || 'https://dashboard.internshipstudio.com/login'} />
+
+                          {/* The suffix is shown as its own row because it is a second, separately
+                              removable half of the address — not part of what you typed. */}
+                          {!!(tpl.var_defaults || {}).button_destination_attr && (
+                            <div style={{ marginTop: 6, fontSize: 11.5, color: '#166534', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '9px 11px', lineHeight: 1.6 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <b>Goes to each recipient's own</b>
+                                <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{(tpl.var_defaults || {}).button_destination_attr}</span>
+                                <button type="button" onClick={() => clearButtonAttribute(i, b)}
+                                  style={{ marginLeft: 'auto', border: 'none', background: 'none', color: '#15803d', cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '0 2px' }}>×</button>
+                              </div>
+                              <div style={{ color: '#15803d', marginTop: 3 }}>
+                                Meta approves one fixed address for a button, so this one points at our own
+                                redirector. The tap is recorded there and the person is forwarded to their own
+                                link — which is also the only way a WhatsApp button tap can be counted at all.
+                              </div>
+                            </div>
+                          )}
                           {!String(b.url || '').trim() && !!String(tpl.click_target_url || '').trim() && (
                             <div style={{ fontSize: 10.5, color: '#0369a1', marginTop: 5, lineHeight: 1.5 }}>
                               Leave this blank and the button uses your <b>Tracked link destination</b> above —
@@ -696,7 +1069,17 @@ export default function WaTemplateEditor() {
                           {/* The blank button falls back to the tracked destination, exactly as the
                               server does on save — so this preview shows the URL Meta will really
                               receive rather than going blank and looking unconfigured. */}
-                          {!!b.dynamic && !!(String(b.url || '').trim() || String(tpl.click_target_url || '').trim()) && (
+                          {/*
+                            Silent when the button is attribute-backed, because this panel's advice
+                            is actively harmful there. It tells you to copy the address into Tracked
+                            link destination, which issues a link id — and a template WITH a link id
+                            takes the static branch on submit, stripping the {{1}} the per-recipient
+                            redirect depends on. Following the hint would quietly turn a dynamic
+                            button back into a fixed one, with nothing on screen to say so. The green
+                            row above already explains what this button does.
+                          */}
+                          {!(tpl.var_defaults || {}).button_destination_attr
+                            && !!b.dynamic && !!(String(b.url || '').trim() || String(tpl.click_target_url || '').trim()) && (
                             <div style={{ marginTop: 8, background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '9px 11px' }}>
                               <div style={{ fontSize: 10, fontWeight: 800, color: '#0369a1', letterSpacing: '.3px', marginBottom: 4 }}>
                                 SENT TO META AS
@@ -714,14 +1097,111 @@ export default function WaTemplateEditor() {
                                   : <>Set the <b>Tracked link destination</b> above to this same address and save once;
                                       the tracking number is added here automatically.</>}
                               </div>
+                              {/*
+                                WHAT A TRACKED LINK CANNOT DO, said here because the line above reads as
+                                though it can.
+
+                                This URL is one fixed string, identical in every copy of the message — that
+                                is exactly what gets it approved by Meta — so the tap arrives carrying
+                                nothing about who made it. It is counted, and the visitor gets the cookie
+                                that credits a later conversion, but the report cannot put a name to it
+                                until that person signs in. Reading "it records the tap" and expecting a
+                                named click is the single most common misreading of this screen.
+
+                                A per-person button is a different thing and is offered right here: pick an
+                                attribute for the button and it points at our redirector carrying a token
+                                unique to that one message, which names the tap instantly with no sign-in.
+                              */}
+                              {!!tpl.link_id && (
+                                <div style={{ fontSize: 10.5, color: '#0c4a6e', marginTop: 6, lineHeight: 1.5,
+                                              borderTop: '1px solid #bae6fd', paddingTop: 6 }}>
+                                  <b>This address is the same for everyone</b>, so a tap is counted but not named —
+                                  the report can only say who tapped once that person signs in. For a click credited
+                                  to the individual straight away, use <b>Attribute</b> on the button instead: it
+                                  sends each recipient through a link carrying their own message's token.
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
                       )}
                       {b.type === 'phone' && (
                         <div style={{ gridColumn: '1 / -1' }}>
-                          <label style={label}>Phone number</label>
-                          <input style={inp} value={b.phone} onChange={e => setButton(i, { phone: e.target.value })} placeholder="+918237850238" />
+                          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+                            <label style={label}>Phone number</label>
+                            {ownNumbers.length > 0 && (
+                              /*
+                                PICK A NUMBER instead of typing one.
+
+                                Meta checks this against the real numbering plan and answers with
+                                "Param components[2]['buttons'][1]['phone_number'] is not a valid
+                                phone number" — an array index, no field name, and it arrives once
+                                per business account, so a missing country code reads as three
+                                separate failures. Every number offered here is one Meta already
+                                knows, complete with its country code.
+                              */
+                              <select
+                                value=""
+                                onChange={(e) => { if (e.target.value) setButton(i, { phone: e.target.value }); }}
+                                style={{ ...inp, width: 'auto', maxWidth: 240, fontSize: 11.5, padding: '4px 8px' }}
+                              >
+                                <option value="">Use one of our numbers…</option>
+                                {ownNumbers.map((s) => {
+                                  const num = waPhoneE164(s.number || s.display_phone_number || '');
+                                  if (!num) return null;
+                                  return <option key={s.id} value={num}>{(s.label || s.verified_name || 'Number') + ' · ' + num}</option>;
+                                })}
+                              </select>
+                            )}
+                          </div>
+                          {/*
+                            The same Attribute picker the website button has.
+
+                            A number picked from here goes in as a token, and a token typed into a
+                            template is delivered as the token: Meta approves the button once and
+                            then renders the stored value for every recipient, so it cannot resolve
+                            per person. It is offered because it was asked for, and the line under
+                            the field says plainly what Meta will do with it.
+
+                            A literal number typed or picked from the account's own numbers is
+                            tidied into international form on the way out — see waPhoneE164 — which
+                            is what stops the (#192) rejection.
+                          */}
+                          <WaAttributeField
+                            customTags={customAttrTags}
+                            format={false}
+                            value={b.phone}
+                            onChange={v => setButton(i, { phone: v })}
+                            placeholder="+918237850238"
+                          />
+                          {waPhoneHasToken(b.phone) ? (
+                            /*
+                              This used to say Meta would refuse the button, which was true of what was
+                              being sent and not of what had to be sent. A Call button really is approved
+                              once and dials one number for everyone, so the token cannot travel to Meta
+                              — but it does not have to. It is replaced with the number the attribute
+                              holds at the moment the template is submitted, and Meta receives a literal
+                              number like any other. Submitting template 166 this way was accepted by both
+                              business accounts.
+                            */
+                            <div style={{ fontSize: 10.5, color: '#0c4a6e', marginTop: 5, lineHeight: 1.5,
+                                          background: '#f0f9ff', border: '1px solid #bae6fd',
+                                          borderRadius: 7, padding: '7px 9px' }}>
+                              <b>The number saved in this attribute is what gets submitted.</b> A Call
+                              button is approved once and dials the same number for everyone, so the
+                              attribute is resolved when you send the template to Meta rather than per
+                              recipient. Change the attribute under <b>Audience → Attributes</b> and
+                              resubmit, and every template using it follows. If it has no number saved,
+                              the submit stops and says so.
+                              {' '}For a number that differs per recipient, put the attribute in a body
+                              variable instead, where WhatsApp turns whatever arrives into a tappable link.
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 10.5, color: WA.sub, marginTop: 5, lineHeight: 1.5 }}>
+                              Country code and nothing else, like <b>+918237850238</b>. A ten-digit number
+                              is given <b>+91</b> when the template is saved.
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -743,6 +1223,8 @@ export default function WaTemplateEditor() {
               bodyValues={tpl.sample_values?.body || []}
               footerText={tpl.footer_text}
               buttons={tpl.buttons || []}
+              destinationAttr={(tpl.var_defaults || {}).button_destination_attr || ''}
+              trackedUrl={tpl.click_target_url || ''}
               height={470}
               emptyHint="Start writing the message body to see it here"
             />

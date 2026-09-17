@@ -7,7 +7,6 @@ import TemplateEditDrawer from './TemplateEditDrawer';
 
 const TPL_API = '/api/campaigns/templates.php';
 const CAMP_API = '/api/campaigns/campaigns.php';
-const SETTINGS_API = '/api/campaigns/settings.php';
 const ATTR_API = '/api/attributes/attributes.php';
 const FORM = { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } };
 
@@ -28,8 +27,17 @@ function TemplateThumbnail({ html, height = 220 }) {
   );
 }
 
-/* Searchable domain picker + "add a new one on the fly" — mirrors the tag picker's UX. */
-function DomainPicker({ value, onChange, domains }) {
+/*
+  Searchable domain picker, restricted to the chosen sender's own domains.
+
+  `locked` is set whenever that sender has domains configured, and it removes the "use what I
+  typed" escape hatch. That hatch was right while the list was a loose collection of everything the
+  panel had ever sent through; it is wrong now the list means "verified with this provider", because
+  anything typed past it produces a campaign that authenticates against a domain the provider has
+  never heard of and fails on every recipient. A domain is added where it is verified — in Settings,
+  against the sender it belongs to — and appears here immediately afterwards.
+*/
+function DomainPicker({ value, onChange, domains, locked = false, lockedHint = '' }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const ref = useRef(null);
@@ -42,6 +50,7 @@ function DomainPicker({ value, onChange, domains }) {
 
   const filtered = domains.filter(d => d.toLowerCase().includes(search.toLowerCase()));
   const exact = domains.some(d => d.toLowerCase() === search.trim().toLowerCase());
+  const canAdd = !locked;
 
   const pick = d => { onChange(d); setOpen(false); setSearch(''); };
   const addNew = () => {
@@ -60,11 +69,17 @@ function DomainPicker({ value, onChange, domains }) {
       {open && (
         <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, boxShadow: '0 10px 24px rgba(0,0,0,.12)', zIndex: 60, padding: 8 }}>
           <input autoFocus value={search} onChange={e => setSearch(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && !exact) addNew(); }}
-            placeholder="Search or add a domain…"
+            onKeyDown={e => { if (e.key === 'Enter' && canAdd && !exact) addNew(); }}
+            placeholder={canAdd ? 'Search or add a domain…' : 'Search'}
             style={{ width: '100%', padding: '8px 10px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 12.5, marginBottom: 6, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }} />
           <div style={{ maxHeight: 200, overflowY: 'auto' }}>
-            {filtered.length === 0 && <div style={{ padding: 8, fontSize: 12, color: '#94a3b8', textAlign: 'center' }}>{domains.length === 0 ? 'No domains yet — add one below' : 'No matches'}</div>}
+            {filtered.length === 0 && (
+              <div style={{ padding: 8, fontSize: 12, color: '#94a3b8', textAlign: 'center' }}>
+                {domains.length === 0
+                  ? (canAdd ? 'No domains yet — add one below' : 'This sender has no domain set up yet')
+                  : 'No matches'}
+              </div>
+            )}
             {filtered.map(d => (
               <div key={d} onClick={() => pick(d)}
                 style={{ padding: '8px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 12.5, color: value === d ? '#1e3a8a' : '#334155', background: value === d ? '#eff6ff' : 'transparent', fontWeight: value === d ? 600 : 500 }}
@@ -74,11 +89,16 @@ function DomainPicker({ value, onChange, domains }) {
               </div>
             ))}
           </div>
-          {search.trim() !== '' && !exact && (
+          {canAdd && search.trim() !== '' && !exact && (
             <button type="button" onClick={addNew}
               style={{ marginTop: 8, width: '100%', textAlign: 'left', padding: '8px 10px', border: '1px dashed #a5b4fc', background: '#f5f3ff', borderRadius: 6, fontSize: 12.5, color: '#1e3a8a', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
               + Use "{search.trim().replace(/^@/, '')}"
             </button>
+          )}
+          {locked && lockedHint && (
+            <div style={{ marginTop: 8, fontSize: 10.5, color: '#94a3b8', lineHeight: 1.5, padding: '0 2px' }}>
+              {lockedHint}
+            </div>
           )}
         </div>
       )}
@@ -90,6 +110,7 @@ export default function CampaignStepContent({ draft, setField, onValidChange, sa
   const [templates, setTemplates] = useState([]);
   const [loadingTpl, setLoadingTpl] = useState(true);
   const [domains, setDomains] = useState([]);
+  const [senders, setSenders] = useState([]);
   const [showReplyTo, setShowReplyTo] = useState(!!draft.reply_to);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const fileInputRef = useRef(null);
@@ -156,27 +177,26 @@ export default function CampaignStepContent({ draft, setField, onValidChange, sa
   const loadDomains = async () => {
     try {
       const res = await api.post(CAMP_API, new URLSearchParams({ action: 'domains' }), FORM);
-      if (res.data.success) setDomains(res.data.data.domains || []);
+      if (!res.data.success) return;
+      const d = res.data.data;
+      setDomains(d.domains || []);
+      setSenders(d.senders || []);
+
+      /*
+       * A brand-new campaign starts on whichever sender Settings has flagged active — a sensible
+       * default, and nothing more: from here the campaign owns the choice, and changing that
+       * radio later will not move a campaign that has already picked one. Only a draft that has
+       * never named a provider is filled in.
+       */
+      const usable = (d.senders || []).filter(x => x.configured);
+      const known = usable.some(x => x.provider === draft.esp_transport);
+      if (!known) {
+        const pick = usable.find(x => x.provider === d.active_provider) || usable[0];
+        if (pick) applySender(pick, true);
+      }
     } catch { /* non-critical — user can still type a new domain */ }
   };
   useEffect(() => { loadDomains(); }, []); // eslint-disable-line
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await api.post(SETTINGS_API, new URLSearchParams({ action: 'get' }), FORM);
-        if (res.data.success) {
-          const rows = res.data.data.settings || [];
-          const active = rows.find(r => r.is_active);
-          if (active && !draft.sender_email) {
-            setField('sender_email', active.default_sender_email || '');
-            setField('sender_name', draft.sender_name || active.default_sender_name || '');
-            if (!draft.sending_domain && active.default_sending_domain) setField('sending_domain', active.default_sending_domain);
-          }
-        }
-      } catch { /* settings not reachable — leave fields for manual entry */ }
-    })(); // eslint-disable-next-line
-  }, []);
 
   const valid = !!(draft.subject?.trim() && draft.sender_email?.trim() && draft.sending_domain && draft.template_id);
   useEffect(() => { onValidChange(valid); }, [valid]); // eslint-disable-line
@@ -192,6 +212,62 @@ export default function CampaignStepContent({ draft, setField, onValidChange, sa
   const setDomain = (d) => {
     setField('sending_domain', d);
     setField('sender_email', localPart + '@' + d);
+  };
+
+  /*
+   * The sender the campaign will actually go out through, and the domains that belong to it.
+   *
+   * A domain is verified with ONE provider. Amazon SES will not send from a domain only SendGrid
+   * knows about — it answers with a rejection on every recipient — so the domain list is narrowed
+   * to the chosen sender rather than offering the union and letting a whole send fail on it.
+   * A sender nobody has addressed yet has no history, and falls back to the full list so a first
+   * campaign on it can still be built.
+   */
+  const currentSender = senders.find(x => x.provider === draft.esp_transport) || null;
+  /*
+    ONLY this sender's domains — no union, no fallback to the full list while the sender has one of
+    its own. Each provider verifies its own domains, so offering another provider's is offering a
+    campaign that cannot be delivered.
+
+    The full list is still the fallback for a sender with nothing configured, because otherwise its
+    first campaign could not be addressed at all; the picker stays unlocked in that one case so a
+    domain can be typed to get going.
+  */
+  const senderHasOwn = !!currentSender && (currentSender.domains?.length || 0) > 0;
+  const senderDomains = senderHasOwn ? currentSender.domains : domains;
+
+  /*
+   * Move the campaign onto a sender, carrying the domain and the from-address with it.
+   *
+   * The domain is only replaced when the new provider cannot send from the current one — an admin
+   * who has verified the same domain with two providers keeps what they typed. `initial` marks
+   * the automatic first pick, where the sender name and local part are prefilled too; a deliberate
+   * switch must never overwrite a subject line's worth of typing.
+   */
+  const applySender = (sender, initial = false) => {
+    if (!sender) return;
+    setField('esp_transport', sender.provider);
+
+    /*
+      The domain follows the sender unless the new sender can genuinely send from the current one.
+
+      `list` is that sender's verified domains, so "is what we have on it" is the whole test. Two
+      senders that share a verified domain keep what was typed; otherwise the sender's own default
+      wins, which is what makes picking Amazon SES land on its mailer domain rather than leaving a
+      SendGrid one behind that SES would reject.
+    */
+    const list = sender.domains?.length ? sender.domains : [];
+    const keep = draft.sending_domain && (list.length === 0 || list.includes(draft.sending_domain));
+    const nextDomain = keep ? draft.sending_domain : (sender.default_sending_domain || list[0] || '');
+
+    const fallbackLocal = (sender.default_sender_email || '').split('@')[0] || '';
+    const local = ((draft.sender_email || '').split('@')[0]) || (initial ? fallbackLocal : '');
+
+    if (nextDomain) {
+      setField('sending_domain', nextDomain);
+      if (local) setField('sender_email', local + '@' + nextDomain);
+    }
+    if (initial && !draft.sender_name && sender.default_sender_name) setField('sender_name', sender.default_sender_name);
   };
 
   const pickTemplate = async (tpl) => {
@@ -238,11 +314,47 @@ export default function CampaignStepContent({ draft, setField, onValidChange, sa
   };
 
   return (
-    <div style={{ display: 'flex', gap: 24, maxWidth: 1100 }}>
+    <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={card}>
           <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>Sender details</div>
           <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 18 }}>Define sender details to be used for sending the email</div>
+
+          {senders.length > 0 && (
+            <div style={{ marginBottom: 18 }}>
+              <label style={label}>Send through <span style={{ color: '#dc2626' }}>*</span></label>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {senders.map(sd => {
+                  const on = draft.esp_transport === sd.provider;
+                  const off = !sd.configured;
+                  return (
+                    <button key={sd.provider} type="button" disabled={off} onClick={() => applySender(sd)}
+                      title={off ? 'No API key saved for this sender yet — finish it in Settings' : `Sends through ${sd.label}`}
+                      style={{
+                        flex: '1 1 150px', textAlign: 'left', padding: '10px 13px', borderRadius: 9, fontFamily: 'inherit',
+                        border: on ? '1.5px solid #4f46e5' : '1.5px solid #e2e8f0',
+                        background: off ? '#f8fafc' : (on ? '#eef2ff' : '#fff'),
+                        cursor: off ? 'not-allowed' : 'pointer', opacity: off ? 0.55 : 1,
+                      }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{
+                          width: 13, height: 13, borderRadius: '50%', flexShrink: 0, boxSizing: 'border-box',
+                          border: on ? '4px solid #4f46e5' : '1.5px solid #cbd5e1', background: '#fff',
+                        }} />
+                        <span style={{ fontSize: 12.5, fontWeight: 700, color: on ? '#1e3a8a' : '#334155' }}>{sd.label}</span>
+                      </div>
+                      <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 4, marginLeft: 21 }}>
+                        {off ? 'Not set up yet' : (sd.default_sending_domain || 'No default domain')}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 7 }}>
+                This campaign sends through the sender picked here, whatever is set as the active sender in Settings.
+              </div>
+            </div>
+          )}
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
             <AttributeField label="Sender name" value={draft.sender_name} onChange={v => setField('sender_name', v)} placeholder="Internship Studio" extraTags={customAttrTags} />
@@ -251,7 +363,9 @@ export default function CampaignStepContent({ draft, setField, onValidChange, sa
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <input style={{ ...inp, flex: 1, minWidth: 0 }} value={localPart} onChange={e => setLocalPart(e.target.value)} placeholder="alert" />
                 <span style={{ color: '#94a3b8', fontSize: 13, flexShrink: 0 }}>@</span>
-                <DomainPicker value={draft.sending_domain} onChange={setDomain} domains={domains} />
+                <DomainPicker value={draft.sending_domain} onChange={setDomain} domains={senderDomains}
+                  locked={senderHasOwn}
+                  lockedHint={`Verified with ${currentSender?.label || 'this sender'}. To send from another domain, verify it with ${currentSender?.label || 'the provider'} and add it under Settings.`} />
               </div>
             </div>
           </div>
@@ -357,7 +471,7 @@ export default function CampaignStepContent({ draft, setField, onValidChange, sa
         </div>
       </div>
 
-      <div style={{ width: 340, flexShrink: 0 }}>
+      <div style={{ flex: '0 1 620px', minWidth: 360, position: 'sticky', top: 16 }}>
         <div style={{ ...card, position: 'sticky', top: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Live preview</div>

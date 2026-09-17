@@ -123,6 +123,51 @@ const SCOPE_OPTIONS = [
   { value: 'same_template', label: 'Only this same template', sublabel: 'for recurring reminders' },
 ];
 
+const canCarry = (s, route) => (route === 'netcore' ? !!s.has_api_key : !!s.phone_number_id);
+
+/*
+  The route a brand-new campaign starts on.
+
+  Meta Cloud API, not "whatever the default number happens to be set to". The number flagged
+  default is the one this business sends the most from, which is a different question from which
+  API a new campaign should go out through — and because that number holds a Netcore key, taking
+  the route from it opened every new campaign on Netcore. Netcore is the fallback route here, the
+  one to reach for when Meta rejects a send with #200; it should be chosen, not arrived at.
+
+  Only used when no route is set at all, so an existing campaign always keeps its own.
+*/
+const DEFAULT_ROUTE = 'meta';
+
+/*
+  THE NUMBER THIS BUSINESS ACTUALLY USES FOR A ROUTE, which is not the same as the first one
+  that could carry it.
+
+  Several numbers may be capable — most hold a Meta phone number id — but in practice one
+  account is the Meta one and another is the Netcore one, and picking by list order or by the
+  single "default" flag lands on the wrong one for whichever route the flag does not describe.
+
+  A completed send is the evidence, and it is evidence that maintains itself: last_sent_meta and
+  last_sent_netcore come from campaigns that really went out on that route (see wa_settings.php),
+  so adding a number and sending through it makes it the default for that route with nothing to
+  configure. Failed sends are not counted, so a number tried once on the wrong route and rejected
+  never becomes the suggestion.
+
+  The flagged default and then any usable number are the fallbacks, for a fresh install where
+  nothing has been sent yet.
+*/
+const preferredFrom = (list, route) => {
+  const capable = list.filter(s => canCarry(s, route));
+  const usable = capable.filter(s => s.ready && s.is_active === 1);
+  const pool = usable.length ? usable : capable;
+  const stamp = (s) => (route === 'netcore' ? s.last_sent_netcore : s.last_sent_meta) || '';
+  const used = pool.filter(s => stamp(s));
+  if (used.length) {
+    return used.slice().sort((a, b) => String(stamp(b)).localeCompare(String(stamp(a))))[0];
+  }
+  return pool.find(s => s.is_default === 1) || pool[0] || null;
+};
+
+
 export default function WaStepSetup({ draft, setField, onValidChange }) {
   const nav = useNavigate();
   const [allTags, setAllTags] = useState([]);
@@ -133,8 +178,33 @@ export default function WaStepSetup({ draft, setField, onValidChange }) {
   // second half is checked here rather than only at send time so the wizard can't walk you
   // through four steps and then refuse.
   const chosenSender = senders.find(s => Number(s.id) === Number(draft.sender_id)) || null;
-  const valid = !!draft.name?.trim() && !!chosenSender && chosenSender.ready && chosenSender.is_active === 1;
+  /*
+    The route is part of what makes the Setup step valid, because a campaign with no explicit
+    route used to fall back to the number's current provider at send time — which is how one
+    built on Netcore went out through Meta after somebody changed the number in settings.
+  */
+  const valid = !!draft.name?.trim() && !!chosenSender && chosenSender.ready
+    && chosenSender.is_active === 1 && !!draft.send_provider;
   useEffect(() => { onValidChange(valid); }, [valid]); // eslint-disable-line
+
+  /*
+    Seed the route from the chosen number, then leave it alone. This is a starting value, not a
+    live link: once it is on the draft it belongs to the campaign, and re-pointing the number in
+    settings cannot change it. It is re-seeded only when the current choice is impossible for the
+    number now selected — picking a Meta-only number while the draft says Netcore would otherwise
+    leave a campaign pinned to a route that cannot send.
+  */
+  useEffect(() => {
+    if (!chosenSender) return;
+    const canMeta = !!chosenSender.phone_number_id;
+    const canNetcore = !!chosenSender.has_api_key;
+    const current = String(draft.send_provider || '');
+    const stillValid = (current === 'meta' && canMeta) || (current === 'netcore' && canNetcore);
+    if (stillValid) return;
+    const seed = (chosenSender.provider === 'netcore' && canNetcore) ? 'netcore'
+      : canMeta ? 'meta' : (canNetcore ? 'netcore' : '');
+    if (seed && seed !== current) setField('send_provider', seed);
+  }, [chosenSender?.id]); // eslint-disable-line
 
   useEffect(() => {
     (async () => {
@@ -152,8 +222,22 @@ export default function WaStepSetup({ draft, setField, onValidChange }) {
           // case needs no interaction at all. On an existing campaign, re-derive the display
           // label from the saved sender_id (labels aren't stored on the campaign).
           const existing = list.find(s => Number(s.id) === Number(draft.sender_id));
-          const pick = existing
-            || (draft.sender_id ? null : (list.find(s => s.is_default === 1 && s.is_active === 1) || list.find(s => s.is_active === 1)));
+
+          /*
+            A campaign nobody has touched yet opens on the default route and on the number that
+            route is really sent from — the same pairing the Send through dropdown applies, so the
+            two never start out disagreeing. An existing campaign keeps everything it was saved
+            with; `existing` being found is what tells the two apart.
+          */
+          let pick = existing;
+          if (!existing && !draft.sender_id) {
+            const route = (list.some(s => canCarry(s, DEFAULT_ROUTE)) ? DEFAULT_ROUTE
+              : (list.some(s => canCarry(s, 'netcore')) ? 'netcore' : ''));
+            if (route && !draft.send_provider) setField('send_provider', route);
+            pick = (route ? preferredFrom(list, route) : null)
+              || list.find(s => s.is_default === 1 && s.is_active === 1)
+              || list.find(s => s.is_active === 1);
+          }
           if (pick) {
             setField('sender_id', pick.id);
             setField('waba_id', pick.waba_id);
@@ -167,41 +251,159 @@ export default function WaStepSetup({ draft, setField, onValidChange }) {
 
   // The WABA dropdown lists each distinct account once; the number dropdown is filtered to it,
   // exactly like the Netcore panel's own two-step pick.
-  const wabaOptions = Object.values(senders.reduce((acc, s) => {
+  /*
+    Everything below the route is filtered BY the route.
+
+    A number carries credentials per route — a Netcore API key, a Meta phone number id — and only
+    some numbers have both. Listing every account and number regardless meant choosing a WABA, then
+    a number, and only then discovering the route you needed was not available on it, two steps
+    back. Choosing the route first and narrowing what follows means every option on screen can
+    actually send.
+  */
+  const routeCapable = (s) => canCarry(s, draft.send_provider === 'netcore' ? 'netcore' : 'meta');
+  const routeSenders = senders.filter(routeCapable);
+
+  const preferredFor = (route) => preferredFrom(senders, route);
+
+  /*
+    Accounts are still listed by route — an account with nothing that can carry it has nothing to
+    offer — but the COUNT is of every number it owns, because that is what the admin is checking
+    the line against. Counting only the route-capable ones made an account with two numbers read
+    "1 number(s)" and looked like half of it had gone missing.
+  */
+  const wabaOptions = Object.values(routeSenders.reduce((acc, s) => {
     if (!acc[s.waba_id]) {
-      acc[s.waba_id] = { value: s.waba_id, label: `${s.waba_name || 'WABA'} - ${s.waba_id}`, count: 0 };
+      acc[s.waba_id] = { value: s.waba_id, label: `${s.waba_name || 'WABA'} - ${s.waba_id}`, onRoute: 0 };
     }
-    acc[s.waba_id].count++;
+    acc[s.waba_id].onRoute++;
     return acc;
-  }, {})).map(w => ({ ...w, sublabel: `${w.count} number(s)` }));
+  }, {})).map(w => {
+    const total = senders.filter(s => String(s.waba_id) === String(w.value)).length;
+    return {
+      ...w,
+      sublabel: total === w.onRoute
+        ? `${total} number${total === 1 ? '' : 's'}`
+        : `${total} numbers · ${w.onRoute} on this route`,
+    };
+  });
 
   const activeWaba = draft.waba_id || chosenSender?.waba_id || wabaOptions[0]?.value || '';
 
+  /*
+    EVERY number on the chosen account, including the ones this route cannot carry.
+
+    They used to be filtered out, on the reasoning that every option on screen should be able to
+    send. That reasoning is right about what happens on SEND and wrong about what the admin is
+    doing here: an account with two numbers showed one, with nothing saying the other existed, and
+    the only reading available was that a number had been deleted or the panel was broken.
+
+    So they are all listed, each saying which routes it can carry, and picking one that needs the
+    other route moves the route with it — the same two-way link the account dropdown has. Nothing
+    unsendable can be selected: a number with no credentials at all, or a deactivated one, is
+    still disabled and still says why.
+  */
+  const otherRoute = draft.send_provider === 'netcore' ? 'meta' : 'netcore';
   const numberOptions = senders
     .filter(s => String(s.waba_id) === String(activeWaba))
-    .map(s => ({
-      value: s.id,
-      label: `${s.display_name || 'Business number'} (${s.business_number})`,
-      sublabel: s.ready ? (s.is_default === 1 ? 'default' : '') : 'no API key',
-      disabled: !s.ready || s.is_active !== 1,
-      meta: s,
-    }));
+    .map(s => {
+      const onRoute = routeCapable(s);
+      const onOther = canCarry(s, otherRoute);
+      return {
+        value: s.id,
+        label: `${s.display_name || 'Business number'} (${s.business_number})`,
+        sublabel: !s.ready ? 'no credentials saved'
+          : s.is_active !== 1 ? 'deactivated'
+          : onRoute ? (s.is_default === 1 ? 'default' : '')
+          : `switches this campaign to ${otherRoute === 'netcore' ? 'Netcore' : 'Meta'}`,
+        // Unusable only when it genuinely cannot send at all. Needing the other route is not a
+        // reason to grey a number out, because choosing it fixes the route rather than failing.
+        disabled: (!onRoute && !onOther) || !s.ready || s.is_active !== 1,
+        offRoute: !onRoute && onOther,
+        meta: s,
+      };
+    });
 
+  /*
+    Changing the route re-picks the account and the number underneath it.
+
+    Those lists narrow to what the new route can carry, so a selection made under the old one may
+    no longer be on screen — and an invisible selection is worse than none. Preference goes to the
+    default number when it can carry the route, so the common single-number case needs no further
+    clicks, then to any usable one.
+  */
+  const applySender = (pick) => {
+    if (!pick) return;
+    setField('sender_id', pick.id);
+    setField('waba_id', pick.waba_id);
+    setField('sender_label', pick.business_number);
+    setField('sender_display_name', pick.display_name || 'Internship Studio');
+  };
+
+  /*
+    Changing the route moves the account and the number under it to the ones this route is
+    actually sent on — not merely to something capable.
+
+    It re-picks even when the current number COULD carry the new route, which is the whole point
+    of the request behind this: the number that holds the Netcore key can also send through Meta,
+    so "leave it alone if it still works" left every Meta campaign on the Netcore account. The
+    admin's own explicit pick afterwards is never overruled, because this only runs on a route
+    change.
+  */
+  const onRouteChange = (route) => {
+    setField('send_provider', route);
+    applySender(preferredFor(route));
+  };
+
+  /*
+    Picking an account can change the route, because the link runs both ways.
+
+    The accounts are listed per route, so choosing one that cannot carry the current route is only
+    possible when the route is wrong for it — a Meta-only account selected while the draft says
+    Netcore. Silently keeping the route there produces a campaign that fails every recipient with
+    nothing on screen to explain why, so the route follows the account instead. When the account
+    can carry the current route, the route is left exactly as it is: the admin chose it.
+  */
   const onWabaChange = (wabaId) => {
     setField('waba_id', wabaId);
+
+    const onThisWaba = senders.filter(s => String(s.waba_id) === String(wabaId));
+    const current = draft.send_provider === 'netcore' ? 'netcore' : 'meta';
+    const other = current === 'netcore' ? 'meta' : 'netcore';
+    const sentOn = (r) => onThisWaba.some(x => (r === 'netcore' ? x.last_sent_netcore : x.last_sent_meta));
+
+    let route = current;
+    // Cannot carry it at all, or has only ever been sent on the other one. The second clause is
+    // what makes the two dropdowns agree: an account this business sends through Netcore should
+    // say Netcore the moment it is chosen, even though its number could technically do Meta too.
+    if (!onThisWaba.some(s => canCarry(s, current))
+        || (!sentOn(current) && sentOn(other) && onThisWaba.some(s => canCarry(s, other)))) {
+      if (onThisWaba.some(s => canCarry(s, other))) { route = other; setField('send_provider', other); }
+    }
+
     // Numbers are per-WABA, so a stale selection from the previous account must not survive —
-    // jump to that account's first usable number instead of leaving an invisible mismatch.
-    const first = senders.find(s => String(s.waba_id) === String(wabaId) && s.ready && s.is_active === 1)
-      || senders.find(s => String(s.waba_id) === String(wabaId));
+    // jump to that account's number for the route now in force.
+    const pool = onThisWaba.filter(s => canCarry(s, route));
+    const first = pool.find(s => s.ready && s.is_active === 1) || pool[0] || null;
     setField('sender_id', first ? first.id : null);
+    if (first) {
+      setField('sender_label', first.business_number);
+      setField('sender_display_name', first.display_name || 'Internship Studio');
+    }
   };
 
   const onNumberChange = (id, opt) => {
     setField('sender_id', id);
-    if (opt?.meta) {
-      setField('waba_id', opt.meta.waba_id);
-      setField('sender_label', opt.meta.business_number);
-      setField('sender_display_name', opt.meta.display_name || 'Internship Studio');
+    if (!opt?.meta) return;
+    setField('waba_id', opt.meta.waba_id);
+    setField('sender_label', opt.meta.business_number);
+    setField('sender_display_name', opt.meta.display_name || 'Internship Studio');
+    /*
+      A number that cannot carry the current route takes the route with it. The alternative is a
+      campaign pinned to a route its own number has no credentials for, which fails every single
+      recipient at send time with nothing on this screen having warned about it.
+    */
+    if (!routeCapable(opt.meta) && canCarry(opt.meta, otherRoute)) {
+      setField('send_provider', otherRoute);
     }
   };
 
@@ -240,6 +442,63 @@ export default function WaStepSetup({ draft, setField, onValidChange }) {
           </Notice>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            {/*
+              Which API carries this campaign — ALWAYS an explicit choice, never "whatever the
+              number is set to".
+
+              The old blank "Number default" option stored NULL, and the sender then read the
+              number's CURRENT provider at send time. That is why a campaign built on Netcore went
+              out through Meta: changing the number in WhatsApp settings silently re-routed every
+              campaign that had been left on the default, including ones already scheduled. A
+              campaign now carries its own route from the moment it is created, and nothing in
+              settings can move it afterwards.
+
+              Only the routes the chosen number can actually use are offered. A number with no
+              Netcore API key cannot send through Netcore, and offering it is how you get a
+              campaign that fails every recipient with nothing on screen to explain why.
+            */}
+            {senders.length > 0 && (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={label}>Send through <span style={{ color: '#dc2626' }}>*</span></label>
+                {/*
+                  The same searchable control as the two fields below it, rather than a pair of
+                  pills. Three controls that choose one thing each should look and behave alike,
+                  and the sublabel is where each route can say which account it will land on —
+                  which is the question the pills left the admin to answer by clicking and looking.
+                */}
+                <SearchableSelect
+                  value={String(draft.send_provider || '')}
+                  onChange={onRouteChange}
+                  options={[
+                    // Offered when ANY number can carry it, since the route is chosen before the
+                    // number now and the lists below narrow to match.
+                    { value: 'meta', label: 'Meta Cloud API', ok: senders.some(x => x.phone_number_id) },
+                    { value: 'netcore', label: 'Netcore API', ok: senders.some(x => x.has_api_key) },
+                  ]
+                    .filter(o => o.ok || String(draft.send_provider || '') === o.value)
+                    .map(o => {
+                      const pick = preferredFor(o.value);
+                      return {
+                        value: o.value,
+                        label: o.label,
+                        sublabel: pick
+                          ? `${pick.waba_name || 'WABA'} · ${pick.business_number}`
+                          : 'no number set up for this route',
+                        disabled: !o.ok,
+                      };
+                    })}
+                  placeholder="Select how this campaign is sent"
+                  searchPlaceholder="Search"
+                />
+                <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 6, lineHeight: 1.5 }}>
+                  Fixed for this campaign — changing the number's provider in WhatsApp settings later
+                  will not move it. Delivery route only: approved templates are always read from Meta,
+                  since Netcore's API has no template endpoint. Choose <b>Netcore</b> if Meta rejects
+                  sends with <b>#200</b> (your Meta app is not connected to this WhatsApp Business
+                  Account).
+                </div>
+              </div>
+            )}
             <div>
               <label style={label}>WABA ID <span style={{ color: '#dc2626' }}>*</span></label>
               <SearchableSelect
@@ -266,54 +525,38 @@ export default function WaStepSetup({ draft, setField, onValidChange }) {
                         {o.meta.display_name || 'Business number'}
                       </span>
                       <span style={{ fontSize: 10.5, color: '#94a3b8' }}>{o.meta.business_number}</span>
+                      {/* Only for a number the current route cannot carry — it is about to change
+                          the field above, and that must not happen silently. */}
+                      {o.offRoute && (
+                        <span style={{ display: 'block', fontSize: 10, color: '#b45309', marginTop: 2 }}>
+                          {o.sublabel}
+                        </span>
+                      )}
                     </span>
-                    <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 800, padding: '2px 7px', borderRadius: 999, letterSpacing: '.3px',
-                      background: o.meta.ready ? '#dcfce7' : '#fee2e2', color: o.meta.ready ? '#15803d' : '#dc2626' }}>
-                      {o.meta.ready ? (o.meta.is_default === 1 ? 'DEFAULT' : 'READY') : 'NOT READY'}
+                    {/*
+                      Which routes this number can actually carry, shown on the row itself. The
+                      provider is not a property of the WABA, it is a property of each number: one
+                      account can hold a number with a Netcore key and another with only a Meta
+                      phone number ID. Reading that off the row is what stops you picking a number
+                      and then finding the route you wanted is not offered.
+                    */}
+                    <span style={{ flexShrink: 0, display: 'flex', gap: 4, alignItems: 'center' }}>
+                      {!!o.meta.has_api_key && (
+                        <span style={{ fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 999, letterSpacing: '.3px', background: '#ede9fe', color: '#6d28d9' }}>NETCORE</span>
+                      )}
+                      {!!o.meta.phone_number_id && (
+                        <span style={{ fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 999, letterSpacing: '.3px', background: '#dbeafe', color: '#1d4ed8' }}>META</span>
+                      )}
+                      <span style={{ fontSize: 9, fontWeight: 800, padding: '2px 7px', borderRadius: 999, letterSpacing: '.3px',
+                        background: o.meta.ready ? '#dcfce7' : '#fee2e2', color: o.meta.ready ? '#15803d' : '#dc2626' }}>
+                        {o.meta.ready ? (o.meta.is_default === 1 ? 'DEFAULT' : 'READY') : 'NOT READY'}
+                      </span>
                     </span>
                   </div>
                 )}
               />
             </div>
 
-            {/*
-              Which API carries this campaign. Per campaign rather than only per number, because
-              the two routes fail in opposite situations and you want to be able to switch one
-              campaign over without re-pointing the number every other campaign uses.
-              Blank = follow whatever the number is set to.
-            */}
-            {chosenSender && (
-              <div style={{ gridColumn: '1 / -1' }}>
-                <label style={label}>Send through</label>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {[
-                    { id: '', label: `Number default (${(chosenSender.provider || 'meta') === 'netcore' ? 'Netcore' : 'Meta'})` },
-                    { id: 'meta', label: 'Meta Cloud API' },
-                    { id: 'netcore', label: 'Netcore API' },
-                  ].map(o => {
-                    const active = String(draft.send_provider || '') === o.id;
-                    return (
-                      <button key={o.id || 'default'} type="button" onClick={() => setField('send_provider', o.id)}
-                        style={{
-                          padding: '7px 14px', borderRadius: 999, fontSize: 11.5, fontWeight: 700,
-                          cursor: 'pointer', fontFamily: 'inherit',
-                          border: `1.5px solid ${active ? '#1e3a8a' : '#e2e8f0'}`,
-                          background: active ? '#1e3a8a' : '#fff',
-                          color: active ? '#fff' : '#64748b',
-                          transition: 'all 200ms cubic-bezier(.4,0,.2,1)',
-                        }}>
-                        {o.label}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 6, lineHeight: 1.5 }}>
-                  Delivery route only — approved templates are always read from Meta, since Netcore's API
-                  has no template endpoint. Choose <b>Netcore</b> if Meta rejects sends with <b>#200</b>
-                  (your Meta app is not connected to this WhatsApp Business Account).
-                </div>
-              </div>
-            )}
 
             {chosenSender && (
               <div style={{ gridColumn: '1 / -1' }}>

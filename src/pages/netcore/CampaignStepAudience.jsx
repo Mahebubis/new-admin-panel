@@ -162,8 +162,35 @@ export default function CampaignStepAudience({ draft, setField, onValidChange, o
   // about unsaved changes every time the count refreshes.
   const [stats, setStats] = useState({ matched: 0, excluded: 0 });
   const [exporting, setExporting] = useState(false);
+  /*
+    Whether verification CAN run (an Elastic Email key exists) and what a campaign that has never
+    chosen should show. Both come from the account, so the card is hidden entirely when there is no
+    key — offering a switch that silently does nothing is worse than not offering it.
+  */
+  const [verifyPossible, setVerifyPossible] = useState(false);
+  const [verifyDefault, setVerifyDefault] = useState(false);
   const abortRef = useRef(null);
   const toastedForRef = useRef(''); // dedupe: only toast once per distinct overlap set
+
+  /*
+    What the switch shows. The draft's own answer when it has one, the account default when it does
+    not — a campaign carrying null really will be verified if the default is on, so showing it as
+    off would misrepresent what pressing Send does.
+  */
+  const verifyOn = draft.verify_before_send === null || draft.verify_before_send === undefined
+    ? verifyDefault
+    : !!Number(draft.verify_before_send);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.post(CAMP_API, new URLSearchParams({ action: 'domains' }), FORM);
+        if (!res.data.success) return;
+        setVerifyPossible(!!res.data.data.verify_possible);
+        setVerifyDefault(!!res.data.data.verify_default);
+      } catch { /* non-critical — the card just stays hidden */ }
+    })();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -369,6 +396,42 @@ export default function CampaignStepAudience({ draft, setField, onValidChange, o
           </div>
         )}
       </div>
+
+      {/*
+        VERIFY THIS CAMPAIGN'S AUDIENCE.
+
+        Here rather than in Settings because it is a decision about THIS audience, and the right
+        answer differs campaign to campaign: a freshly imported list is worth checking address by
+        address, and a segment of students who have been receiving mail for a year is not — the
+        verification credits would buy nothing.
+
+        Beside Domain filters because the two do the same kind of thing: both take people out of the
+        audience before it is queued.
+      */}
+      {verifyPossible && (
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div style={{ minWidth: 0, paddingRight: 14 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Verify addresses first</div>
+              <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 2, lineHeight: 1.55 }}>
+                Check each address really exists before this campaign is queued. Anything that comes back
+                <b> invalid</b> or <b> high risk</b> goes on the Blocklist and is left out of this send and
+                every one after it.
+              </div>
+            </div>
+            <Toggle on={!!verifyOn} onClick={() => setField('verify_before_send', verifyOn ? 0 : 1)} />
+          </div>
+          <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 10, lineHeight: 1.55,
+                        borderTop: '1px solid #f1f5f9', paddingTop: 9 }}>
+            <b>Each address is checked once, ever.</b> Anyone already verified by an earlier campaign or
+            journey is decided from the stored verdict with no API call, so overlapping audiences and
+            re-imported lists cost nothing extra.
+            {draft.verify_before_send === null && verifyDefault && (
+              <> This campaign is following the account default, which is on.</>
+            )}
+          </div>
+        </div>
+      )}
 
       <div style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>

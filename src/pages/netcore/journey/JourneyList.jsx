@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Plus, Search, Download, Hash, Percent, ArrowUpDown, MoreVertical, Pin, X, MessageCircle, Mail } from 'lucide-react';
+import { Plus, Search, Download, Hash, Percent, ArrowUpDown, MoreVertical, RotateCw, Check, Pin, X, MessageCircle, Mail } from 'lucide-react';
 import { listJourneys, createJourney, duplicateJourney, removeJourney, setStatus, loadOptions } from './journeyStore';
 import FilterDrawer from '../FilterDrawer';
 import { resolvePreset, describePreset } from '../filterPresets';
@@ -110,6 +110,31 @@ tr:hover .jl-dots,.jl-dots:focus-visible,.jl-dots[data-open]{opacity:1}
 .jl-dots:focus-visible{outline:2px solid #1e3a8a;outline-offset:2px}
 /* A coarse pointer has no hover at all, so it would be permanently invisible there. */
 @media (hover:none){.jl-dots{opacity:1}}
+
+/* Per-row refresh: pulls the latest counts without reloading the page or blanking the table.
+   Same hover-reveal contract as the ⋮ beside it; stays visible while it is spinning or showing
+   its brief "done" tick so the feedback isn't lost when the pointer moves away. */
+.jl-refresh{flex:none;border:0;cursor:pointer;color:#64748b;padding:4px;border-radius:6px;background:none;
+  display:grid;place-items:center;opacity:0;
+  transition:opacity .14s cubic-bezier(.4,0,.2,1),background .15s,color .15s}
+tr:hover .jl-refresh,.jl-refresh:focus-visible,.jl-refresh[data-state]{opacity:1}
+.jl-refresh:hover{background:#eef2ff;color:#1e3a8a}
+.jl-refresh:focus-visible{outline:2px solid #1e3a8a;outline-offset:2px}
+.jl-refresh[data-state="busy"]{color:#1e3a8a;cursor:progress}
+.jl-refresh[data-state="busy"] svg{animation:jl-spin .8s linear infinite}
+.jl-refresh[data-state="done"]{color:#16a34a;background:#f0fdf4}
+@keyframes jl-spin{to{transform:rotate(360deg)}}
+@media (hover:none){.jl-refresh{opacity:1}}
+@media (prefers-reduced-motion:reduce){.jl-refresh[data-state="busy"] svg{animation:none}}
+
+/* Horizontal 3-dot loader shown in every data cell of a row while that row is refreshing —
+   the same treatment as a segment count refresh in Audience → Segments. */
+.jl-dot-load{display:inline-flex;gap:4px;align-items:center;vertical-align:middle}
+.jl-dot-load span{width:6px;height:6px;border-radius:50%;background:#1e3a8a;animation:jl_dot_pulse 1.2s infinite ease-in-out}
+.jl-dot-load span:nth-child(2){animation-delay:.15s}
+.jl-dot-load span:nth-child(3){animation-delay:.30s}
+@keyframes jl_dot_pulse{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){.jl-dot-load span{animation:none;opacity:.6}}
 `;
 
 function Metric({ row, k, isPct }) {
@@ -156,6 +181,8 @@ function Metric({ row, k, isPct }) {
 }
 const nowLocal = () => { const d = new Date(); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
 
+const DotLoad = () => <span className="jl-dot-load" role="status" aria-label="Refreshing"><span /><span /><span /></span>;
+
 function Badge({ status }) {
   const b = BADGE[status] || BADGE.draft;
   return <span style={{ background: b.bg, color: b.fg, border: `1px solid ${b.bd}`, fontSize: 9.5, fontWeight: 800, padding: '2px 8px', borderRadius: 5, letterSpacing: '.4px', whiteSpace: 'nowrap' }}>{b.label}</span>;
@@ -180,7 +207,12 @@ export default function JourneyList() {
   const navigate = useNavigate();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTabRaw] = useState('all');
+  /* The tab lives in the URL (?tab=) so a refresh or a shared link lands on the same tab.
+     No param means Ongoing — the journeys that are actually live are what people come here for. */
+  const [params, setParams] = useSearchParams();
+  const tab = TAB_ORDER.includes(params.get('tab')) ? params.get('tab') : 'ongoing';
+  const setTabRaw = v => setParams(p => { const n = new URLSearchParams(p); n.set('tab', v); return n; }, { replace: true });
+  const [rowRefresh, setRowRefresh] = useState({}); // id -> 'busy' | 'done'
   const [q, setQRaw] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [mode, setMode] = useState('abs');
@@ -222,6 +254,19 @@ export default function JourneyList() {
     try { setRows(await listJourneys()); } finally { setLoading(false); }
   };
   useEffect(() => { refresh(); }, []);
+
+  /* One row's refresh. The API has no single-journey stats call, so this refetches the list
+     quietly (no "Loading…" row) and swaps it in — every row gets fresh numbers as a bonus. */
+  const refreshRow = async id => {
+    if (rowRefresh[id] === 'busy') return;
+    setRowRefresh(m => ({ ...m, [id]: 'busy' }));
+    const started = Date.now();
+    try { setRows(await listJourneys()); } catch { /* read() already toasted */ }
+    // Keep the spin visible for a beat so a fast response still reads as "it refreshed".
+    await new Promise(r => setTimeout(r, Math.max(0, 450 - (Date.now() - started))));
+    setRowRefresh(m => ({ ...m, [id]: 'done' }));
+    setTimeout(() => setRowRefresh(m => { const n = { ...m }; if (n[id] === 'done') delete n[id]; return n; }), 1200);
+  };
   // Changing the filter/search/sort resets to page 1 and clears bulk selection.
   const setTab = v => { setTabRaw(v); setPage(1); setPicked(new Set()); };
   const setQ = v => { setQRaw(v); setPage(1); setPicked(new Set()); };
@@ -559,23 +604,33 @@ export default function JourneyList() {
                       style={{ background: 'none' }}>
                       <MoreVertical size={16} />
                     </button>
+                    <button className="jl-refresh"
+                      title={rowRefresh[r.id] === 'busy' ? 'Refreshing…' : rowRefresh[r.id] === 'done' ? 'Up to date' : 'Refresh stats'}
+                      aria-label={`Refresh stats for ${r.name}`}
+                      data-state={rowRefresh[r.id]}
+                      aria-busy={rowRefresh[r.id] === 'busy'}
+                      onClick={() => refreshRow(r.id)}>
+                      {rowRefresh[r.id] === 'done' ? <Check size={15} strokeWidth={2.4} /> : <RotateCw size={15} strokeWidth={2.2} />}
+                    </button>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: 11.5, color: '#94a3b8' }}>ID - {r.id}</span><Badge status={r.status} />
                   </div>
                 </td>
                 <td style={{ padding: '13px 14px', verticalAlign: 'top', minWidth: 230 }}>
-                  <div style={{ color: '#334155' }}>{r.dates || '-'}</div>
-                  <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 4 }}>Last edited: {r.edited || '—'}</div>
+                  {rowRefresh[r.id] === 'busy' ? <DotLoad /> : (<>
+                    <div style={{ color: '#334155' }}>{r.dates || '-'}</div>
+                    <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 4 }}>Last edited: {r.edited || '—'}</div>
+                  </>)}
                 </td>
-                <td style={cell}><Metric row={r} k="sent" isPct={isPct} /></td>
-                <td style={cell}><Metric row={r} k="delivered" isPct={isPct} /></td>
-                <td style={cell}><Metric row={r} k="opened" isPct={isPct} /></td>
-                <td style={cell}><Metric row={r} k="clicked" isPct={isPct} /></td>
-                <td style={cell}><Metric row={r} k="conversions" isPct={isPct} /></td>
-                <td style={cell}>{r.revenue ? nUS(r.revenue) : 0}</td>
+                <td style={cell}>{rowRefresh[r.id] === 'busy' ? <DotLoad /> : <Metric row={r} k="sent" isPct={isPct} />}</td>
+                <td style={cell}>{rowRefresh[r.id] === 'busy' ? <DotLoad /> : <Metric row={r} k="delivered" isPct={isPct} />}</td>
+                <td style={cell}>{rowRefresh[r.id] === 'busy' ? <DotLoad /> : <Metric row={r} k="opened" isPct={isPct} />}</td>
+                <td style={cell}>{rowRefresh[r.id] === 'busy' ? <DotLoad /> : <Metric row={r} k="clicked" isPct={isPct} />}</td>
+                <td style={cell}>{rowRefresh[r.id] === 'busy' ? <DotLoad /> : <Metric row={r} k="conversions" isPct={isPct} />}</td>
+                <td style={cell}>{rowRefresh[r.id] === 'busy' ? <DotLoad /> : (r.revenue ? nUS(r.revenue) : 0)}</td>
                 <td style={{ padding: '13px 14px', verticalAlign: 'top' }}>
-                  {r.convGoal ? <span style={{ color: '#15803d', fontWeight: 600 }}>Set</span>
+                  {rowRefresh[r.id] === 'busy' ? <DotLoad /> : r.convGoal ? <span style={{ color: '#15803d', fontWeight: 600 }}>Set</span>
                     : <button onClick={() => navigate(`/netcore/journeys/${r.id}`)} style={linkBtn}>Set goal</button>}
                 </td>
               </tr>

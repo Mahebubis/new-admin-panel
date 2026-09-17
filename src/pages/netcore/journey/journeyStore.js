@@ -156,8 +156,25 @@ export async function validateGraph(id, graph, settings) {
 }
 
 /** KPIs, node stats, waiting counts, suppression breakdown, control-vs-treated lift. */
-export async function getReport(id) {
-  return await read({ action: 'report', id }, null);
+export async function getReport(id, range = null) {
+  // from/to are plain YYYY-MM-DD days; the server widens them to cover both whole days. Left off
+  // entirely for "All time", so a report with no picker touched costs the same query it always did.
+  const params = { action: 'report', id };
+  if (range && range.from && range.to) { params.from = range.from; params.to = range.to; }
+  return await read(params, null);
+}
+
+/**
+ * The PEOPLE behind one message step's numbers — who opened it, who tapped it, who converted.
+ *
+ * Paged and one bucket at a time because each of those numbers can stand for tens of thousands of
+ * rows. The range is the report's own window, passed straight through, so the list can never
+ * contain somebody the number that opened it did not count.
+ */
+export async function stepPeople(id, nodeId, { bucket = 'opened', page = 1, perPage = 50, range = null } = {}) {
+  const params = { action: 'step_people', id, node_id: nodeId, bucket, page, per_page: perPage };
+  if (range && range.from && range.to) { params.from = range.from; params.to = range.to; }
+  return await read(params, { rows: [], total: 0, counts: {}, bucket });
 }
 
 /** Who is in the journey right now, which node, and when they are due to leave. */
