@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '../../../api/axios';
 import {
-  API, STREAM, METRIC, nf, pctText, rate, inr, fmtBucket, fmtBucketLong, fmtDateTime, fmtDay,
+  API, STREAM, METRIC, nf, pctText, rate, inr, fmtBucket, fmtBucketLong, fmtDateTime, rangeParams, rangeLabel, rangeKey, providerParam,
   Skel, DotLoader, Empty, Donut, StatusPill, ChannelIcon, KindIcon, Pagination, ripple, CountUp, providerColor,
 } from './maShared';
 
@@ -24,7 +24,7 @@ const PEOPLE_STATUSES = [
  * furthest status they reached. Server-paginated; the status chips carry their own counts from the
  * same query, so a chip and the list it opens can never disagree.
  */
-export function PeopleTable({ kind, channel, id, nodeId, range, initialStatus = 'all' }) {
+export function PeopleTable({ kind, channel, id, nodeId, range, providers = [], initialStatus = 'all' }) {
   const [status, setStatus] = useState(initialStatus);
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -40,11 +40,12 @@ export function PeopleTable({ kind, channel, id, nodeId, range, initialStatus = 
   useEffect(() => {
     const my = ++seq.current;
     setBusy(true);
-    api.get(API, { params: { action: 'people', kind, channel, id, node_id: nodeId || '', status, search: debounced, page, per_page: perPage, from: range.from, to: range.to, _t: Date.now() } })
+    api.get(API, { params: { action: 'people', kind, channel, id, node_id: nodeId || '', status, search: debounced, page, per_page: perPage, ...rangeParams(range), ...providerParam(providers), _t: Date.now() } })
       .then(r => { if (my === seq.current && r.data?.success) setData(r.data.data); })
       .catch(() => {})
       .finally(() => { if (my === seq.current) setBusy(false); });
-  }, [kind, channel, id, nodeId, status, debounced, page, perPage, range.from, range.to]);
+  }, [kind, channel, id, nodeId, status, debounced, page, perPage, rangeKey(range), providers.join()]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Keyed on the range text so a new-but-equal range object does not refetch.
 
   const counts = data?.counts || {};
   const isWa = channel === 'whatsapp';
@@ -123,7 +124,7 @@ function TrendTip({ active, payload, label, gran }) {
 
 const TREND_KEYS = ['sent', 'delivered', 'opened', 'clicked', 'failed'];
 
-export default function SourceDrawer({ source, range, onClose }) {
+export default function SourceDrawer({ source, range, providers = [], onClose }) {
   const [closing, setClosing] = useState(false);
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
@@ -142,10 +143,10 @@ export default function SourceDrawer({ source, range, onClose }) {
 
   useEffect(() => {
     setData(null); setErr(null);
-    api.get(API, { params: { action: 'source', kind: source.kind, channel: source.channel, id: source.id, from: range.from, to: range.to, _t: Date.now() } })
+    api.get(API, { params: { action: 'source', kind: source.kind, channel: source.channel, id: source.id, ...rangeParams(range), ...providerParam(providers), _t: Date.now() } })
       .then(r => { if (r.data?.success) { setData(r.data.data); const st = r.data.data.steps || []; if (st.length === 1) setOpen(st[0].node_id); } else setErr(r.data?.message || 'Could not load'); })
       .catch(e => setErr(e?.response?.data?.message || 'Could not load'));
-  }, [source.kind, source.channel, source.id, range.from, range.to]);
+  }, [source.kind, source.channel, source.id, rangeKey(range), providers.join()]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const st = STREAM[source.stream];
   const isWa = source.channel === 'whatsapp';
@@ -153,7 +154,7 @@ export default function SourceDrawer({ source, range, onClose }) {
   const gran = data?.range?.granularity || 'day';
   const tabs = source.kind === 'journey'
     ? [['steps', `Steps${data ? ` (${data.steps.length})` : ''}`], ['overview', 'Overview'], ['people', 'All recipients']]
-    : [['overview', 'Overview'], ['people', 'Recipients']];
+    : [['overview', 'Overview'], ['people', source.kind === 'support' ? 'Replies sent' : source.kind === 'transactional' ? 'Emails sent' : 'Recipients']];
 
   const openStep = (nodeId, status = 'all') => { setStepStatus(status); setOpen(o => (o === nodeId && status === 'all' ? null : nodeId)); };
 
@@ -172,7 +173,7 @@ export default function SourceDrawer({ source, range, onClose }) {
                 <span className="ma-tag" style={{ background: `${st.color}22`, color: isWa ? '#047857' : '#4338ca' }}><KindIcon kind={source.kind} size={11} />{st.short}</span>
                 <span>ID {source.id}</span>
                 {source.status && <span className="ma-tag" style={{ background: '#f1f5f9', color: '#475569' }}>{source.status}</span>}
-                <span>· {fmtDay(range.from)}{range.to !== range.from ? ` – ${fmtDay(range.to)}` : ''}</span>
+                <span>· {rangeLabel(range)}</span>
                 {data?.took_ms != null && <span>· {data.took_ms} ms</span>}
               </div>
             </div>
@@ -305,7 +306,7 @@ export default function SourceDrawer({ source, range, onClose }) {
                           {s.skipped > 0 && <span>Suppressed <b style={{ color: '#0f172a' }}>{nf(s.skipped)}</b></span>}
                           {s.revenue > 0 && <span>Revenue <b style={{ color: '#047857' }}>{inr(s.revenue)}</b></span>}
                         </div>
-                        <PeopleTable key={`${s.node_id}:${stepStatus}`} kind="journey" channel={source.channel} id={source.id} nodeId={s.node_id} range={range} initialStatus={stepStatus} />
+                        <PeopleTable key={`${s.node_id}:${stepStatus}`} kind="journey" channel={source.channel} id={source.id} nodeId={s.node_id} range={range} providers={providers} initialStatus={stepStatus} />
                       </div>
                     )}
                   </div>
@@ -316,7 +317,7 @@ export default function SourceDrawer({ source, range, onClose }) {
 
           {tab === 'people' && (
             <div className="ma-card" style={{ overflow: 'hidden' }}>
-              <PeopleTable kind={source.kind} channel={source.channel} id={source.id} range={range} />
+              <PeopleTable kind={source.kind} channel={source.channel} id={source.id} range={range} providers={providers} />
             </div>
           )}
 

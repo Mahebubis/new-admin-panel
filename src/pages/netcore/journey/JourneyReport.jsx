@@ -79,9 +79,13 @@ const RANGE_PRESETS = [
 ];
 
 /** A preset key (plus the two custom boxes) resolved to the {from,to} the API takes, or null. */
-function resolveRange(key, customFrom, customTo) {
+function resolveRange(key, customFrom, customTo, fromTime = '', toTime = '') {
   if (key === 'custom') {
-    return customFrom && customTo ? { from: customFrom, to: customTo } : null;
+    if (!customFrom || !customTo) return null;
+    // Times are sent only when they narrow the day; the whole day is the server's default.
+    const ft = fromTime && fromTime !== '00:00:00' && fromTime !== '00:00' ? fromTime : '';
+    const tt = toTime && toTime !== '23:59:59' && toTime !== '23:59' ? toTime : '';
+    return { from: customFrom, to: customTo, fromTime: ft, toTime: tt };
   }
   const preset = RANGE_PRESETS.find(p => p.key === key);
   if (!preset || preset.days === null) return null;
@@ -279,7 +283,7 @@ function StepPeopleSheet({ journeyId, step, range, convGoal, onClose }) {
       if (alive) { setData(d); setLoading(false); }
     })();
     return () => { alive = false; };
-  }, [journeyId, step.id, bucket, page, range?.from, range?.to]); // eslint-disable-line
+  }, [journeyId, step.id, bucket, page, range?.from, range?.to, range?.fromTime, range?.toTime]); // eslint-disable-line
 
   const counts = data?.counts || {};
   const rows = data?.rows || [];
@@ -298,7 +302,7 @@ function StepPeopleSheet({ journeyId, step, range, convGoal, onClose }) {
               </div>
               <h2 style={{ margin: '3px 0 0', fontSize: 19, fontWeight: 700, color: '#0f172a' }}>{step.name}</h2>
               <div style={{ fontSize: 12, color: '#64748b', marginTop: 3 }}>
-                {range ? <>Measured over <b>{range.from === range.to ? range.from : `${range.from} to ${range.to}`}</b>.</> : 'All time.'}
+                {range ? <>Measured over <b>{range.fromTime || range.toTime ? `${range.from} ${range.fromTime || '00:00:00'} to ${range.to} ${range.toTime || '23:59:59'}` : (range.from === range.to ? range.from : `${range.from} to ${range.to}`)}</b>.</> : 'All time.'}
                 {' '}Same window as the table behind this.
               </div>
             </div>
@@ -535,7 +539,9 @@ export default function JourneyReport() {
   const rangeKey = RANGE_PRESETS.some(p => p.key === rangeParam) ? rangeParam : 'all';
   const customFrom = params.get('from') || '';
   const customTo = params.get('to') || '';
-  const range = resolveRange(rangeKey, customFrom, customTo);
+  const customFromTime = params.get('ft') || '00:00:00';
+  const customToTime = params.get('tt') || '23:59:59';
+  const range = resolveRange(rangeKey, customFrom, customTo, customFromTime, customToTime);
 
   /*
    * The view AND the window both live in the URL, so a particular report can be linked to and
@@ -543,14 +549,39 @@ export default function JourneyReport() {
    * query string — changing the tab used to wipe the date range with it.
    */
   const writeParams = (next) => {
-    const merged = { tab, range: rangeKey, from: customFrom, to: customTo, ...next };
+    const merged = { tab, range: rangeKey, from: customFrom, to: customTo, ft: params.get('ft') || '', tt: params.get('tt') || '', ...next };
     const out = {};
     if (merged.tab && merged.tab !== 'overall') out.tab = merged.tab;
     if (merged.range && merged.range !== 'all') out.range = merged.range;
-    if (merged.range === 'custom') { if (merged.from) out.from = merged.from; if (merged.to) out.to = merged.to; }
+    if (merged.range === 'custom') {
+      if (merged.from) out.from = merged.from; if (merged.to) out.to = merged.to;
+      if (merged.ft && merged.ft !== '00:00:00') out.ft = merged.ft;
+      if (merged.tt && merged.tt !== '23:59:59') out.tt = merged.tt;
+    }
     setParams(out, { replace: true });
   };
   const setTab = t => writeParams({ tab: t });
+
+  /*
+   * The custom range is edited as a DRAFT. Every keystroke in a date or time box used to be written
+   * straight to the URL, and each write refetched the report — so picking "15 Sep 10:05 → 16 Sep
+   * 10:45" fired four half-finished requests (and "Custom" with one box empty fell back to all
+   * time). Now nothing is fetched until Apply.
+   */
+  const [customOpen, setCustomOpen] = useState(false);
+  const [draft, setDraft] = useState({ from: '', to: '', ft: '00:00:00', tt: '23:59:59' });
+  const openCustom = () => {
+    setDraft({ from: customFrom, to: customTo, ft: customFromTime, tt: customToTime });
+    setCustomOpen(true);
+  };
+  const applyCustom = () => {
+    if (!draft.from || !draft.to) { toast.error('Pick both dates'); return; }
+    const norm = (t, end) => (t && t.length === 5 ? `${t}:${end ? '59' : '00'}` : (t || (end ? '23:59:59' : '00:00:00')));
+    const ft = norm(draft.ft, false); const tt = norm(draft.tt, true);
+    if (`${draft.from} ${ft}` > `${draft.to} ${tt}`) { toast.error('The start is after the end'); return; }
+    writeParams({ range: 'custom', from: draft.from, to: draft.to, ft, tt });
+    setCustomOpen(false);
+  };
 
   useEffect(() => {
     let alive = true;
@@ -562,7 +593,7 @@ export default function JourneyReport() {
     return () => { alive = false; };
     // Re-fetched on the resolved days, not on the preset key: "Custom" with only one box filled in
     // resolves to null and must not throw away the numbers already on screen.
-  }, [id, range?.from, range?.to]); // eslint-disable-line
+  }, [id, range?.from, range?.to, range?.fromTime, range?.toTime]); // eslint-disable-line
 
   const derived = useMemo(() => {
     if (!j) return null;
@@ -689,24 +720,38 @@ export default function JourneyReport() {
         */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           {RANGE_PRESETS.map(p => (
-            <button key={p.key} type="button" onClick={() => writeParams({ range: p.key })}
+            <button key={p.key} type="button"
+              onClick={() => { if (p.key === 'custom') { openCustom(); return; } setCustomOpen(false); writeParams({ range: p.key }); }}
               style={{
                 padding: '6px 11px', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer',
                 fontFamily: 'inherit',
-                border: rangeKey === p.key ? '1px solid #4f46e5' : '1px solid #e2e8f0',
-                background: rangeKey === p.key ? '#eef2ff' : '#fff',
-                color: rangeKey === p.key ? '#1e3a8a' : '#64748b',
-              }}>{p.label}</button>
+                border: (p.key === 'custom' ? (rangeKey === 'custom' || customOpen) : rangeKey === p.key && !customOpen) ? '1px solid #4f46e5' : '1px solid #e2e8f0',
+                background: (p.key === 'custom' ? (rangeKey === 'custom' || customOpen) : rangeKey === p.key && !customOpen) ? '#eef2ff' : '#fff',
+                color: (p.key === 'custom' ? (rangeKey === 'custom' || customOpen) : rangeKey === p.key && !customOpen) ? '#1e3a8a' : '#64748b',
+              }}>{p.key === 'custom' && rangeKey === 'custom' && range && !customOpen
+                ? `Custom: ${range.from} ${customFromTime.slice(0, 5)} → ${range.to} ${customToTime.slice(0, 5)}`
+                : p.label}</button>
           ))}
-          {rangeKey === 'custom' && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <input type="date" value={customFrom} max={customTo || undefined}
-                onChange={e => writeParams({ range: 'custom', from: e.target.value })}
-                style={{ padding: '5px 8px', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 12, fontFamily: 'inherit', color: '#334155' }} />
+          {customOpen && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <input type="date" value={draft.from} max={draft.to || undefined} aria-label="From date"
+                onChange={e => setDraft(d => ({ ...d, from: e.target.value }))} style={{ padding: '5px 8px', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 12, fontFamily: 'inherit', color: '#334155' }} />
+              {/* Time of day on each end, defaulting to the whole day (00:00:00 → 23:59:59). */}
+              <input type="time" step="1" value={draft.ft} aria-label="From time"
+                onChange={e => setDraft(d => ({ ...d, ft: e.target.value || '00:00:00' }))} style={{ padding: '5px 8px', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 12, fontFamily: 'inherit', color: '#334155' }} />
               <span style={{ fontSize: 12, color: '#94a3b8' }}>to</span>
-              <input type="date" value={customTo} min={customFrom || undefined}
-                onChange={e => writeParams({ range: 'custom', to: e.target.value })}
-                style={{ padding: '5px 8px', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 12, fontFamily: 'inherit', color: '#334155' }} />
+              <input type="date" value={draft.to} min={draft.from || undefined} aria-label="To date"
+                onChange={e => setDraft(d => ({ ...d, to: e.target.value }))} style={{ padding: '5px 8px', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 12, fontFamily: 'inherit', color: '#334155' }} />
+              <input type="time" step="1" value={draft.tt} aria-label="To time"
+                onChange={e => setDraft(d => ({ ...d, tt: e.target.value || '23:59:59' }))} style={{ padding: '5px 8px', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 12, fontFamily: 'inherit', color: '#334155' }} />
+              <button type="button" onClick={applyCustom}
+                style={{ padding: '6px 14px', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', border: '1px solid #1e3a8a', background: '#1e3a8a', color: '#fff' }}>
+                Apply
+              </button>
+              <button type="button" onClick={() => setCustomOpen(false)}
+                style={{ padding: '6px 11px', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b' }}>
+                Cancel
+              </button>
             </span>
           )}
         </div>
@@ -719,13 +764,15 @@ export default function JourneyReport() {
       */}
       {range && (
         <div style={{ margin: '0 0 18px', fontSize: 12, color: '#64748b' }}>
-          Showing <b style={{ color: '#334155' }}>{range.from === range.to ? range.from : `${range.from} to ${range.to}`}</b>.
+          Showing <b style={{ color: '#334155' }}>{range.fromTime || range.toTime
+            ? `${range.from} ${range.fromTime || '00:00:00'} to ${range.to} ${range.toTime || '23:59:59'}`
+            : (range.from === range.to ? range.from : `${range.from} to ${range.to}`)}</b>.
           Messages count by when they were sent, conversions by when the goal fired.
         </div>
       )}
-      {rangeKey === 'custom' && !range && (
+      {customOpen && (
         <div style={{ margin: '0 0 18px', fontSize: 12, color: '#b45309' }}>
-          Pick both dates to apply a custom range — showing all time until then.
+          Pick the dates and times, then press Apply — the numbers below still show {range ? 'the previous range' : 'all time'} until then.
         </div>
       )}
 

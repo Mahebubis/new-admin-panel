@@ -4,9 +4,11 @@
 import { TICKETS } from "../fdStore";
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, Bell, BookOpen, CheckCircle2, ChevronDown, ChevronRight, FileDown, FileSpreadsheet, FileText, Gauge, Inbox, LineChart as LineChartIcon, MessageSquareText, PauseCircle, PlusCircle, Printer, Reply, Sparkles, Timer, TrendingUp, UserPlus } from "lucide-react";
 import { ACTIVITIES, ANALYTICS, DISTRIBUTION, PERF, STATS, STAT_FILTER, avColor, initials } from "../fdConstants";
-import { ChartTooltip, PrioBadge, Ring, Spinner, StatusBadge, buildExportRows, exportCSV, exportExcel, exportPDF, useClickAway, useCounter, useDesk, useToast } from "../fdShared";
+import { ChartTooltip, PrioBadge, Ring, Spinner, StatusBadge, exportExcel, exportPDF, useClickAway, useCounter, useToast } from "../fdShared";
+import { archive, tickets as ticketsApi } from "../fdApi";
+import { MailArchive } from "../components/MailArchive";
 import { Area, AreaChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnalyticsModal, AssignDialog, TicketModal } from "../components/Chrome";
 import { useFreshdeskStats } from "../useFreshdeskData";
 import { currentAgentProfile } from "../fdAgent";
@@ -258,17 +260,83 @@ function DashboardPage({ onOpen, onOpenTickets, go, tickets }) {
   const [exporting, setExporting] = useState(false);
   const expRef = useRef(null);
   useClickAway(expRef, () => setExpOpen(false));
-  const runExport = (kind) => {
-    setExpOpen(false); setExporting(true);
-    setTimeout(() => {
-      try {
-        const rows = buildExportRows();
-        if (kind === "xlsx") { exportExcel(rows, "helphive-tickets.xlsx"); push({ type: "success", title: "Export ready", desc: "helphive-tickets.xlsx downloaded." }); }
-        else if (kind === "csv") { exportCSV(rows, "helphive-tickets.csv"); push({ type: "success", title: "Export ready", desc: "helphive-tickets.csv downloaded." }); }
-        else { const ok = exportPDF("Support Tickets Report", ["Ticket Number","Customer Name","Email","Category","Priority","Status","Assigned Agent"], rows); push(ok ? { type: "success", title: "Opening print dialog", desc: "Choose “Save as PDF”." } : { type: "error", title: "Popup blocked", desc: "Allow popups to export PDF." }); }
-      } catch (e) { push({ type: "error", title: "Export failed", desc: "Something went wrong generating the file." }); }
+  /*
+   * Export Report — every ticket on the desk, from the server.
+   *
+   * This used to serialise the client-side TICKETS array, which is one page of
+   * the working set, and stamped every resolved row with a literal "18 Jul
+   * 2026" closed date and "5h 24m" resolution time left over from the mock. A
+   * report with invented columns is worse than no report: it gets forwarded.
+   *
+   * CSV now streams from fd_export.php so it is genuinely ALL tickets at any
+   * volume. The .xlsx and print paths have to materialise rows in the tab, so
+   * they page the real list endpoint and hand anything larger to the CSV route
+   * rather than silently exporting a prefix.
+   */
+  const XLSX_TICKET_CAP = 5000;
+
+  const fetchAllTickets = async (cap) => {
+    const rows = [];
+    let page = 1;
+    for (;;) {
+      const res = await ticketsApi.list({ view: "all", page, perPage: 500, scope: "export" });
+      const batch = res.tickets || [];
+      rows.push(...batch);
+      if (rows.length >= cap || page >= (res.pages || 1) || batch.length === 0) break;
+      page++;
+    }
+    return rows.slice(0, cap);
+  };
+
+  const exportRow = (t) => ({
+    "Ticket Number": t.id, "Customer Name": t.name, "Email": t.email, "Phone": t.phone,
+    "Subject": t.subject, "Category": t.category, "Priority": t.priority, "Status": t.status,
+    "Assigned Agent": t.agent, "Source": t.source, "Department": t.dept,
+    "Created": t.createdAt || "", "Last Message": t.lastMessageAt || "",
+    "First Response": t.firstResponseAt || "", "Resolved": t.resolvedAt || "",
+    "SLA Status": t.sla,
+  });
+
+  const runExport = async (kind) => {
+    setExpOpen(false);
+
+    if (kind === "csv") {
+      // A plain navigation: PHP streams it straight to disk, so a 40k-row desk
+      // exports as easily as a 40-row one.
+      window.location.href = archive.csvUrl({ format: "tickets" });
+      push({ type: "success", title: "Preparing your file", desc: "Every ticket on the desk is downloading as CSV." });
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const cap = kind === "pdf" ? 1000 : XLSX_TICKET_CAP;
+      const list = await fetchAllTickets(cap + 1);
+      const truncated = list.length > cap;
+      const rows = list.slice(0, cap).map(exportRow);
+
+      if (!rows.length) {
+        push({ type: "info", title: "Nothing to export", desc: "There are no tickets on the desk yet." });
+        return;
+      }
+
+      if (kind === "xlsx") {
+        const ok = await exportExcel(rows, "internshipstudio-tickets.xlsx");
+        push(ok
+          ? { type: "success", title: "Export ready", desc: `${rows.length.toLocaleString("en-IN")} tickets written${truncated ? " — more remain, use CSV for the full desk." : "."}` }
+          : { type: "error", title: "Export failed", desc: "The spreadsheet library could not be loaded. Use CSV instead." });
+      } else {
+        const ok = exportPDF("Support Tickets Report",
+          ["Ticket Number", "Customer Name", "Email", "Category", "Priority", "Status", "Assigned Agent"], rows);
+        push(ok
+          ? { type: "success", title: "Opening print dialog", desc: `Choose “Save as PDF”.${truncated ? " Showing the first 1,000 tickets." : ""}` }
+          : { type: "error", title: "Popup blocked", desc: "Allow popups to export PDF." });
+      }
+    } catch (e) {
+      push({ type: "error", title: "Export failed", desc: e.message || "Something went wrong generating the file." });
+    } finally {
       setExporting(false);
-    }, 500);
+    }
   };
   return (
     <div className="content route">
@@ -320,6 +388,7 @@ function DashboardPage({ onOpen, onOpenTickets, go, tickets }) {
       <AnalyticsChart />
       <div className="two-col"><TicketTimeline live={live} onOpen={onOpen} tickets={tickets} /><TicketDistribution /></div>
       <RecentTicketsTable onOpen={onOpen} go={go} tickets={tickets} />
+      <MailArchive />
       <PerformancePanel />
 
       <TicketModal open={modal === "ticket"} onClose={() => setModal(null)} />

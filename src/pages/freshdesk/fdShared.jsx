@@ -161,16 +161,20 @@ function downloadBlob(data, filename, mime) {
   document.body.removeChild(a); setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
-function buildExportRows() {
-  return TICKETS.map((t) => ({
-    "Ticket Number": t.id, "Customer Name": t.name, "Email": t.email, "Phone": t.phone,
-    "Subject": t.subject, "Category": t.category, "Priority": t.priority, "Status": t.status,
-    "Assigned Agent": t.agent, "Created": t.created,
-    "Closed Date": ["Resolved","Closed"].includes(t.status) ? "18 Jul 2026" : "—",
-    "Resolution Time": ["Resolved","Closed"].includes(t.status) ? "5h 24m" : "—",
-    "SLA Status": t.sla, "Source": t.source, "Department": t.dept,
-  }));
-}
+/*
+ * buildExportRows() lived here and has been deleted.
+ *
+ * It serialised TICKETS -- one page of the client-side working set -- and
+ * stamped every resolved row with a literal "18 Jul 2026" closed date and a
+ * "5h 24m" resolution time, both left over from the mock. An export is the one
+ * artefact that leaves the building, so inventing two of its columns was the
+ * worst place in the app to leave mock data.
+ *
+ * Exports are now server-side: fd_export.php streams the real rows for the
+ * whole desk (see the Export Report menu and the Mail Archive card on the
+ * dashboard). exportCSV/exportExcel/exportPDF below still take whatever rows
+ * they are given -- they just no longer have a fabricating source of them.
+ */
 
 /* async because SheetJS is fetched on demand. Never rejects — callers fire and forget,
    so a failed CDN load returns false instead of surfacing an unhandled rejection. */
@@ -379,7 +383,7 @@ export {
   Switch,
   ToastCtx,
   ToastHost,
-  buildExportRows,
+
   computeAnalytics,
   downloadBlob,
   exportCSV,

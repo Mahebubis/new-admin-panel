@@ -161,6 +161,9 @@ export async function getReport(id, range = null) {
   // entirely for "All time", so a report with no picker touched costs the same query it always did.
   const params = { action: 'report', id };
   if (range && range.from && range.to) { params.from = range.from; params.to = range.to; }
+  // Optional time of day on each end; the server defaults to the whole of both days.
+  if (range && range.fromTime) params.from_time = range.fromTime;
+  if (range && range.toTime) params.to_time = range.toTime;
   return await read(params, null);
 }
 
@@ -174,6 +177,8 @@ export async function getReport(id, range = null) {
 export async function stepPeople(id, nodeId, { bucket = 'opened', page = 1, perPage = 50, range = null } = {}) {
   const params = { action: 'step_people', id, node_id: nodeId, bucket, page, per_page: perPage };
   if (range && range.from && range.to) { params.from = range.from; params.to = range.to; }
+  if (range && range.fromTime) params.from_time = range.fromTime;
+  if (range && range.toTime) params.to_time = range.toTime;
   return await read(params, { rows: [], total: 0, counts: {}, bucket });
 }
 

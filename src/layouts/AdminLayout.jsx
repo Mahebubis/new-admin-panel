@@ -1228,6 +1228,12 @@ const sidebarMenu = [
       { text: 'Resume/Profile Metrics', link: '/profile-metrics', icon: 'fas fa-id-card', perm: 'profile_metrics' },
     ]
   },
+
+  {
+    key: 'caller_iq', group: 'Caller IQ', icon: 'fas fa-phone-volume', items: [
+      { text: 'Caller IQ', link: '/caller-iq', icon: 'fas fa-square-phone', perm: 'caller_iq' },
+    ]
+  },
 ];
 
 // Routes that need maximum table width — collapse sidebar on entry.

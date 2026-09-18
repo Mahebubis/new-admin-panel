@@ -75,6 +75,10 @@ const EXTRA_SECTION_PERMISSIONS = {
   'Resume/Profile Metrics': {
     profile_metrics: 'Resume/Profile Metrics (profile, resume & hiring-portal activity)',
   },
+  /* The API (caller-iq/caller_iq.php) checks the same key. */
+  'Caller IQ': {
+    caller_iq: 'Caller IQ (counselor phone calls, outcomes & agents)',
+  },
 };
 
 /* ─── section → icon emoji map (mirrors PHP sectionIconMap) ─── */

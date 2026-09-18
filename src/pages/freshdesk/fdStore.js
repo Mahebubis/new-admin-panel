@@ -25,7 +25,7 @@ import { AGENTS, AGENT_POOL, CALL_TYPES, DEPTS, HIST_CREATED, HIST_STATUS, HIST_
    useFreshdeskData() + useFreshdeskRealtime().
 
    It stays a MODULE-LEVEL binding, reassigned on every load, because a number
-   of helpers in this file read it outside of React — buildExportRows(),
+   of helpers in this file read it outside of React —
    computeAnalytics(), the command palette's search, the dashboard's recent-
    tickets table. Those all run during a render, i.e. after the first load has
    populated it, so they see real data. Anything that needs to re-render when

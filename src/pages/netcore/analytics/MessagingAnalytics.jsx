@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import toast from 'react-hot-toast';
 import api from '../../../api/axios';
 import SourceDrawer from './SourceDrawer';
+import StatDrawer from './StatDrawer';
 import {
-  API, CSS, STREAMS, STREAM, METRICS, METRIC, ZERO, sumMetrics, nf, compact, pctText, rate, inr,
-  fmtBucket, fmtBucketLong, fmtDay, PRESETS, resolveRange, todayYmd, CountUp, ripple, Skel, Empty, Donut,
-  ChannelIcon, KindIcon, Pagination, providerColor,
+  API, CSS, STREAMS, STREAM, METRIC, ZERO, sumMetrics, nf, compact, pctText, rate, inr,
+  fmtBucket, fmtBucketLong, PRESETS, resolveRange, rangeParams, rangeKey, rangeLabel, DAY_START, DAY_END, todayYmd, CountUp, ripple, Skel, Empty, Donut,
+  ChannelIcon, KindIcon, Pagination, providerColor, PROVIDERS, PROVIDER, providerParam, Popover,
 } from './maShared';
 
 /*
@@ -22,7 +24,8 @@ import {
  */
 
 const CHANNELS = [{ key: 'all', label: 'All channels' }, { key: 'email', label: 'Email', icon: 'email' }, { key: 'whatsapp', label: 'WhatsApp', icon: 'whatsapp' }];
-const SOURCES  = [{ key: 'all', label: 'Campaigns + Journeys' }, { key: 'campaign', label: 'Campaigns', icon: 'campaign' }, { key: 'journey', label: 'Journeys', icon: 'journey' }];
+const SOURCES  = [{ key: 'all', label: 'Campaigns + Journeys' }, { key: 'campaign', label: 'Campaigns', icon: 'campaign' }, { key: 'journey', label: 'Journeys', icon: 'journey' }, { key: 'support', label: 'Freshdesk (SMTP)', icon: 'support' }, { key: 'transactional', label: 'Refund & project emails', icon: 'transactional' }];
+const KIND_TAG = { campaign: ['#f0f9ff', '#0369a1', 'campaign'], journey: ['#f5f3ff', '#6d28d9', 'journey'], support: ['#ecfeff', '#0e7490', 'freshdesk'], transactional: ['#f0fdfa', '#0f766e', 'refund / project'] };
 const TREND_METRICS = ['sent', 'delivered', 'opened', 'clicked', 'failed', 'skipped', 'conversions'];
 const cache = new Map();
 
@@ -48,7 +51,7 @@ function TrendTip({ active, payload, label, gran, metric }) {
   );
 }
 
-function Funnel({ m, isWa, color }) {
+function Funnel({ m, isWa, color, untracked }) {
   const steps = [
     ['Attempted', m.attempted], ['Sent', m.sent], ['Delivered', m.delivered],
     [isWa ? 'Read' : 'Opened', m.opened], ['Clicked', m.clicked], ['Conversions', m.conversions],
@@ -60,8 +63,12 @@ function Funnel({ m, isWa, color }) {
         <div className="ma-funnel-row" key={l}>
           <span className="lb">{l}</span>
           <span className="bar"><span style={{ width: `${Math.max(v ? 1.5 : 0, (v / max) * 100)}%`, background: color, opacity: 1 - i * 0.11 }} /></span>
-          <span className="v">{nf(v)}</span>
-          <span className="p">{i === 0 ? '' : pctText(v, i <= 2 ? m.attempted : m.sent)}</span>
+          {untracked && ['Delivered', 'Opened', 'Clicked', 'Conversions'].includes(l)
+            ? <span className="ma-nt" style={{ gridColumn: 'span 2', textAlign: 'right' }}>not tracked</span>
+            : <>
+              <span className="v">{nf(v)}</span>
+              <span className="p">{i === 0 ? '' : pctText(v, i <= 2 ? m.attempted : m.sent)}</span>
+            </>}
         </div>
       ))}
       <div className="ma-funnel-row" style={{ marginTop: 2 }}>
@@ -84,7 +91,12 @@ export default function MessagingAnalytics() {
   const preset  = PRESETS.some(p => p.key === params.get('range')) ? params.get('range') : 'today';
   const channel = CHANNELS.some(c => c.key === params.get('channel')) ? params.get('channel') : 'all';
   const srcKind = SOURCES.some(c => c.key === params.get('source')) ? params.get('source') : 'all';
-  const range = useMemo(() => resolveRange(preset, params.get('from'), params.get('to')), [preset, params]);
+  const pFrom = params.get('from'); const pTo = params.get('to'); const pFt = params.get('ft'); const pTt = params.get('tt');
+  const range = useMemo(() => resolveRange(preset, pFrom, pTo, pFt, pTt), [preset, pFrom, pTo, pFt, pTt]);
+  const provParam = params.get('prov') || '';
+  const provs = useMemo(() => provParam.split(',').filter(k => PROVIDER[k]), [provParam]);
+  // Everything the overview request depends on — the cache and the refetch are keyed on it.
+  const fKey = `${rangeKey(range)}|${provs.join(',')}`;
 
   const setParam = useCallback(patch => setParams(p => {
     const n = new URLSearchParams(p);
@@ -92,31 +104,43 @@ export default function MessagingAnalytics() {
     return n;
   }, { replace: true }), [setParams]);
 
-  const [data, setData] = useState(() => cache.get(`${range.from}|${range.to}`)?.data || null);
-  const [failures, setFailures] = useState(() => cache.get(`${range.from}|${range.to}`)?.failures || null);
+  const [data, setData] = useState(() => cache.get(fKey)?.data || null);
+  const [failures, setFailures] = useState(() => cache.get(fKey)?.failures || null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [metric, setMetric] = useState('sent');
-  const [kpiFocus, setKpiFocus] = useState(null);
   const [tableTab, setTableTab] = useState('all');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState({ key: 'sent', dir: 'desc' });
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
   const [drawer, setDrawer] = useState(null);
-  const [customOpen, setCustomOpen] = useState(false);
-  const [draft, setDraft] = useState({ from: range.from, to: range.to });
+  const [statDrawer, setStatDrawer] = useState(null);
+  const [menu, setMenu] = useState(null);          // { id, el } — the open filter menu and its trigger
+  const [provHover, setProvHover] = useState(null);  // hover card for a provider chip
+  const [draft, setDraft] = useState(null);
+  const [compactHead, setCompactHead] = useState(false);
   const reqId = useRef(0);
-  const popRef = useRef(null);
+  const sentinel = useRef(null);
+
+  /* The header collapses once the page has scrolled past its resting position. The sentinel sits
+     just above the sticky block; when it leaves the viewport the block is stuck, so compact it. */
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return undefined;
+    const io = new IntersectionObserver(([e]) => setCompactHead(!e.isIntersecting), { threshold: 0 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   const load = useCallback(async ({ force = false } = {}) => {
-    const key = `${range.from}|${range.to}`;
+    const key = fKey;
     const hit = cache.get(key);
     if (hit && !force) { setData(hit.data); setFailures(hit.failures); }
     else if (!hit) { setData(null); setFailures(null); }
     const my = ++reqId.current;
     setBusy(true); setError(null);
-    const p = { from: range.from, to: range.to, _t: Date.now() };
+    const p = { ...rangeParams(range), ...providerParam(provs), _t: Date.now() };
     const ov = api.get(API, { params: { ...p, action: 'overview' } });
     const fl = api.get(API, { params: { ...p, action: 'failures' } });
     fl.catch(() => {}); // a superseded range returns early below, before the .then is attached
@@ -135,7 +159,7 @@ export default function MessagingAnalytics() {
       setFailures(r.data.data.reasons);
       cache.set(key, { ...(cache.get(key) || {}), failures: r.data.data.reasons });
     }).catch(() => {});
-  }, [range.from, range.to]);
+  }, [fKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); setPage(1); }, [load]);
 
@@ -146,13 +170,6 @@ export default function MessagingAnalytics() {
     return () => clearInterval(t);
   }, [range.to, load]);
 
-  useEffect(() => {
-    if (!customOpen) return undefined;
-    const h = e => { if (popRef.current && !popRef.current.contains(e.target)) setCustomOpen(false); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, [customOpen]);
-
   /* ── Slice by the Channel / Source filters ─────────────────────────── */
   const activeStreams = useMemo(() => STREAMS.filter(s =>
     (channel === 'all' || s.channel === channel) && (srcKind === 'all' || s.kind === srcKind)), [channel, srcKind]);
@@ -161,6 +178,7 @@ export default function MessagingAnalytics() {
   const emailT = useMemo(() => sumMetrics(activeStreams.filter(s => s.channel === 'email').map(s => S[s.key] || ZERO)), [activeStreams, S]);
   const waT    = useMemo(() => sumMetrics(activeStreams.filter(s => s.channel === 'whatsapp').map(s => S[s.key] || ZERO)), [activeStreams, S]);
   const gran = data?.range?.granularity || (range.from === range.to ? 'hour' : 'day');
+  const granWord = { minute: 'minute', hour: 'hour', day: 'day', month: 'month' }[gran];
 
   const series = useMemo(() => (data?.series || []).map(row => {
     const o = { bucket: row.bucket };
@@ -211,126 +229,333 @@ export default function MessagingAnalytics() {
   const hasAny = totals.attempted > 0 || totals.conversions > 0;
   const loadingFirst = !data && busy;
 
-  const pickPreset = k => {
-    if (k === 'custom') { setDraft({ from: range.from, to: range.to }); setCustomOpen(o => !o); return; }
-    setCustomOpen(false);
-    setParam({ range: k === 'today' ? null : k, from: null, to: null });
+  /* Per-provider numbers for the strip. They come back from the server WITHOUT the provider filter,
+     so every provider keeps its count while one is selected — the strip is both the stats and the
+     filter. Channel and Source still narrow them, so the chips agree with the tiles beside them. */
+  const provStats = useMemo(() => {
+    const keep = new Set(activeStreams.map(s => s.key));
+    return PROVIDERS
+      .filter(p => channel === 'all' || p.channel === channel)
+      .map(p => ({ ...p, m: sumMetrics((data?.providers || []).filter(x => x.provider === p.key && keep.has(x.stream))) }));
+  }, [data, channel, activeStreams]);
+
+  const toggleProvider = k => {
+    const next = provs.includes(k) ? provs.filter(x => x !== k) : [...provs, k];
+    const patch = { prov: next.join(',') || null };
+    // Picking a WhatsApp provider while the channel says Email would show nothing at all.
+    if (channel !== 'all' && PROVIDER[k] && PROVIDER[k].channel !== channel && !provs.includes(k)) patch.channel = null;
+    setParam(patch);
+  };
+  const setOnlyProviders = list => setParam({ prov: list.join(',') || null });
+
+  const openMenu = (id, e) => {
+    const el = e.currentTarget;
+    setMenu(m => (m?.id === id ? null : { id, el }));
+  };
+  const closeMenu = useCallback(() => setMenu(null), []);
+
+  const pickPreset = (k, e) => {
+    if (k === 'custom') {
+      setDraft({ from: range.from, to: range.to, ft: range.fromTime, tt: range.toTime });
+      openMenu('custom', e);
+      return;
+    }
+    setMenu(null);
+    setParam({ range: k === 'today' ? null : k, from: null, to: null, ft: null, tt: null });
   };
   const applyCustom = () => {
-    if (!draft.from || !draft.to) { toast.error('Pick both dates'); return; }
-    setParam({ range: 'custom', from: draft.from, to: draft.to });
-    setCustomOpen(false);
+    if (!draft?.from || !draft?.to) { toast.error('Pick both dates'); return; }
+    const ft = draft.ft || DAY_START; const tt = draft.tt || DAY_END;
+    if (`${draft.from} ${ft.length === 5 ? `${ft}:00` : ft}` > `${draft.to} ${tt.length === 5 ? `${tt}:59` : tt}`) { toast.error('The start is after the end'); return; }
+    setParam({ range: 'custom', from: draft.from, to: draft.to, ft: ft === DAY_START ? null : ft, tt: tt === DAY_END ? null : tt });
+    setMenu(null);
   };
   const toggleSort = key => setSort(s => (s.key === key ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: key === 'name' ? 'asc' : 'desc' }));
 
   const openSource = r => setDrawer(r);
+  // From a person row inside the stat drawer: the same shape the campaigns table hands over.
+  const openSourceFromPerson = r => setDrawer({
+    key: `${r.stream}:${r.sid}`, stream: r.stream, kind: r.kind, channel: r.channel, id: r.sid, name: r.source_name, status: null,
+  });
 
   const kpis = [
-    { key: 'sent', label: 'Sent', value: totals.sent, sub: <><b>{pctText(totals.sent, totals.attempted)}</b> of {nf(totals.attempted)} attempted</>, e: emailT.sent, w: waT.sent },
-    { key: 'delivered', label: 'Delivered', value: totals.delivered, sub: <><b>{pctText(totals.delivered, totals.sent)}</b> delivery rate</>, e: emailT.delivered, w: waT.delivered },
+    { key: 'sent', label: 'Sent', value: totals.sent, sub: <><b>{pctText(totals.sent, totals.attempted)}</b> of {nf(totals.attempted)}</>, e: emailT.sent, w: waT.sent },
+    { key: 'delivered', label: 'Delivered', value: totals.delivered, sub: <><b>{pctText(totals.delivered, totals.sent)}</b> of sent</>, e: emailT.delivered, w: waT.delivered },
     { key: 'opened', label: 'Opened / Read', value: totals.opened, sub: <><b>{pctText(totals.opened, totals.sent)}</b> of sent</>, e: emailT.opened, w: waT.opened },
-    { key: 'clicked', label: 'Clicked', value: totals.clicked, sub: <><b>{pctText(totals.clicked, totals.sent)}</b> CTR · <b>{pctText(totals.clicked, totals.opened)}</b> of opens</>, e: emailT.clicked, w: waT.clicked },
-    { key: 'failed', label: 'Rejected', value: totals.failed + totals.bounced, sub: <><b>{pctText(totals.failed + totals.bounced, totals.attempted)}</b> · {nf(totals.failed)} failed · {nf(totals.bounced)} bounced</>, e: emailT.failed + emailT.bounced, w: waT.failed + waT.bounced },
-    { key: 'skipped', label: 'Skipped', value: totals.skipped, sub: <>Suppressed, dedup or opt-out</>, e: emailT.skipped, w: waT.skipped },
-    { key: 'conversions', label: 'Conversions', value: totals.conversions, sub: totals.revenue ? <><b>{inr(totals.revenue)}</b> journey revenue</> : <><b>{pctText(totals.conversions, totals.sent)}</b> of sent</>, e: emailT.conversions, w: waT.conversions },
+    { key: 'clicked', label: 'Clicked', value: totals.clicked, sub: <><b>{pctText(totals.clicked, totals.sent)}</b> CTR</>, e: emailT.clicked, w: waT.clicked },
+    { key: 'rejected', color: METRIC.failed.color, label: 'Rejected', value: totals.failed + totals.bounced, sub: <><b>{pctText(totals.failed + totals.bounced, totals.attempted)}</b> · {nf(totals.bounced)} bounced</>, e: emailT.failed + emailT.bounced, w: waT.failed + waT.bounced },
+    { key: 'skipped', label: 'Skipped', value: totals.skipped, sub: <><b>{pctText(totals.skipped, totals.attempted)}</b> of attempts</>, e: emailT.skipped, w: waT.skipped },
+    { key: 'conversions', label: 'Conversions', value: totals.conversions, sub: totals.revenue ? <><b>{inr(totals.revenue)}</b></> : <><b>{pctText(totals.conversions, totals.sent)}</b> of sent</>, e: emailT.conversions, w: waT.conversions },
   ];
 
-  const rangeText = range.from === range.to ? fmtDay(range.from) : `${fmtDay(range.from)} – ${fmtDay(range.to)}`;
+  const channelText = { all: 'All', email: 'Email', whatsapp: 'WhatsApp' }[channel];
+  const sourceText = { all: 'All', campaign: 'Campaigns', journey: 'Journeys', support: 'Freshdesk', transactional: 'Refund & project' }[srcKind];
+  const providerText = !provs.length ? 'All' : provs.length === 1 ? PROVIDER[provs[0]].label : `${PROVIDER[provs[0]].label} +${provs.length - 1}`;
+  const filtersOn = channel !== 'all' || srcKind !== 'all' || provs.length > 0;
+  const caret = <svg className="car" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>;
+  const tick = <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={4} strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>;
 
   return (
     <div className="ma">
       <style>{CSS}</style>
-      <div className="ma-progress" data-on={busy ? '1' : undefined} />
 
-      <div className="ma-head">
-        <div>
-          <h1>Messaging analytics</h1>
-          <p>Every email and WhatsApp message — by campaign, journey, provider and {gran === 'hour' ? 'hour' : 'day'}.</p>
+      <div className="ma-title" style={{ marginBottom: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', minWidth: 0 }}>
+          <h1 style={{ fontSize: 16 }}>Messaging analytics</h1>
+          <span className="ma-updated">{rangeLabel(range)} · per {granWord}{data ? ` · updated ${data.generated_at.slice(11, 16)} · ${data.took_ms} ms` : ''}</span>
         </div>
-        <div className="ma-head-r">
-          {data && <span className="ma-updated">Updated {data.generated_at.slice(11, 16)} · {data.took_ms} ms</span>}
-          <button className="ma-btn ma-rip" onPointerDown={ripple} onClick={() => load({ force: true })} disabled={busy}>
-            {Ic.refresh(busy ? 'spin' : '')} Refresh
-          </button>
-        </div>
+        <span className="ma-updated">Tip: click any stat or provider</span>
       </div>
 
-      {/* ── Filters ─────────────────────────────────────────────── */}
-      <div className="ma-toolbar">
-        <div className="ma-pop-wrap" ref={popRef}>
+      <div ref={sentinel} style={{ height: 1 }} aria-hidden="true" />
+      {/* ── Sticky: filters, stats, providers. Each collapses to a slim strip once scrolled. ── */}
+      <div className="ma-sticky" data-compact={compactHead ? '1' : undefined}>
+        <div className="ma-progress" data-on={busy ? '1' : undefined} />
+        <div className="ma-filters">
           <div className="ma-seg" role="tablist" aria-label="Date range">
             {PRESETS.map(p => (
-              <button key={p.key} role="tab" onPointerDown={ripple} data-on={preset === p.key ? '1' : undefined} onClick={() => pickPreset(p.key)}>
-                {p.key === 'custom' && <span className="ic">{Ic.cal}</span>}{p.label}
+              <button key={p.key} role="tab" onPointerDown={ripple} data-on={preset === p.key ? '1' : undefined}
+                      onClick={e => pickPreset(p.key, e)} aria-haspopup={p.key === 'custom' ? 'dialog' : undefined}>
+                {p.key === 'custom' && <span className="ic">{Ic.cal}</span>}{p.key === 'custom' && preset === 'custom' ? rangeLabel(range) : p.label}
               </button>
             ))}
           </div>
-          {customOpen && (
-            <div className="ma-pop" role="dialog" aria-label="Custom date range">
-              <h4>Custom range</h4>
-              <label>From<input type="date" value={draft.from} max={todayYmd()} onChange={e => setDraft(d => ({ ...d, from: e.target.value }))} /></label>
-              <label>To<input type="date" value={draft.to} max={todayYmd()} min={draft.from} onChange={e => setDraft(d => ({ ...d, to: e.target.value }))} /></label>
-              <div className="row">
-                <button className="ma-btn ma-rip" onPointerDown={ripple} onClick={() => setCustomOpen(false)}>Cancel</button>
-                <button className="ma-btn primary ma-rip" onPointerDown={ripple} onClick={applyCustom}>Apply</button>
+
+          <button className="ma-dd ma-rip" onPointerDown={ripple} onClick={e => openMenu('channel', e)} aria-haspopup="listbox"
+                  data-active={channel !== 'all' ? '1' : undefined} data-open={menu?.id === 'channel' ? '1' : undefined}>
+            Channel <b>{channel !== 'all' && <ChannelIcon channel={channel} size={12} />}{channelText}</b>{caret}
+          </button>
+          <button className="ma-dd ma-rip" onPointerDown={ripple} onClick={e => openMenu('source', e)} aria-haspopup="listbox"
+                  data-active={srcKind !== 'all' ? '1' : undefined} data-open={menu?.id === 'source' ? '1' : undefined}>
+            Source <b>{srcKind !== 'all' && <KindIcon kind={srcKind} size={12} />}{sourceText}</b>{caret}
+          </button>
+          <button className="ma-dd ma-rip" onPointerDown={ripple} onClick={e => openMenu('provider', e)} aria-haspopup="listbox"
+                  data-active={provs.length ? '1' : undefined} data-open={menu?.id === 'provider' ? '1' : undefined}>
+            Provider <b>{provs.length === 1 && <i style={{ width: 8, height: 8, borderRadius: '50%', background: providerColor(provs[0]) }} />}{providerText}</b>{caret}
+          </button>
+          {filtersOn && (
+            <button className="ma-dd ma-rip" onPointerDown={ripple} style={{ color: '#4f46e5', borderStyle: 'dashed' }}
+                    onClick={() => { setParam({ channel: null, source: null, prov: null }); setTableTab('all'); }}>
+              Reset
+            </button>
+          )}
+          <button className="ma-iconbtn ma-rip" style={{ marginLeft: 'auto', width: compactHead ? 26 : 30, height: compactHead ? 26 : 30 }} onPointerDown={ripple}
+                  onClick={() => load({ force: true })} disabled={busy} title="Refresh" aria-label="Refresh">
+            {Ic.refresh(busy ? 'spin' : '')}
+          </button>
+        </div>
+
+        <div className="ma-stats">
+          {kpis.map(k => {
+            const c = k.color || METRIC[k.key].color;
+            return (
+              <button key={k.key} className="ma-stat ma-rip" onPointerDown={ripple} style={{ '--c': c }}
+                      onClick={() => setStatDrawer(k.key)} title={`See everyone behind ${k.label}`}>
+                <span className="k">{k.label}</span>
+                <span className="row">
+                  <span className="v">{loadingFirst ? <Skel w={54} h={18} /> : <CountUp value={k.value} />}</span>
+                  <span className="s">{loadingFirst ? '' : k.sub}</span>
+                </span>
+                {channel === 'all' && !loadingFirst && (
+                  <span className="cs">
+                    <em style={{ color: '#6366f1' }}><ChannelIcon channel="email" size={10} />{compact(k.e)}</em>
+                    <em style={{ color: '#059669' }}><ChannelIcon channel="whatsapp" size={10} />{compact(k.w)}</em>
+                  </span>
+                )}
+                <span className="go">{Ic.arrow}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/*
+          Providers as a real table: one full-width row each, every figure in its own aligned column,
+          email providers first then WhatsApp. Clicking a row filters the page to that provider.
+          Scrolled, the table gives way to a single line of chips (name + sent).
+        */}
+        {(() => {
+          const rows = provStats.filter(p => provs.includes(p.key) || p.m.attempted || p.m.conversions);
+          const cell = (v, base, color, bad) => (
+            <td>
+              <span className="pv" style={bad && v ? { color: '#dc2626' } : undefined}>{nf(v)}</span>
+              <span className="pp">{pctText(v, base)}</span>
+              <span className="pb"><i style={{ width: `${Math.min(100, rate(v, base))}%`, background: color }} /></span>
+            </td>
+          );
+          return (
+            <div className="ma-provs" data-filtering={provs.length ? '1' : undefined} role="group" aria-label="Providers">
+              <table className="ma-ptable">
+                <thead>
+                  <tr>
+                    <th className="l">
+                      By provider
+                      {provs.length > 0 && <button className="ma-link" style={{ fontSize: 11, marginLeft: 10, textTransform: 'none', letterSpacing: 0 }} onClick={() => setOnlyProviders([])}>Show all</button>}
+                    </th>
+                    <th>Attempted</th>
+                    <th>Sent</th>
+                    <th className="l wide">Outcome</th>
+                    <th>Delivered</th>
+                    <th>Opened / Read</th>
+                    <th>Clicked</th>
+                    <th>Rejected</th>
+                    <th>Skipped</th>
+                    <th>Conv.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((p, i) => {
+                    const m = p.m; const rej = m.failed + m.bounced;
+                    const on = provs.includes(p.key);
+                    const opened = Math.min(m.opened, m.sent);
+                    const delivered = Math.max(0, Math.min(m.delivered, m.sent) - opened);
+                    const noReceipt = Math.max(0, m.sent - Math.max(m.delivered, m.opened));
+                    const base = Math.max(1, m.attempted);
+                    const seg = (v, c, t) => (v > 0 ? <i style={{ width: `${(v / base) * 100}%`, background: c }} title={`${t}: ${nf(v)}`} /> : null);
+                    const newGroup = i > 0 && rows[i - 1].channel !== p.channel;
+                    return (
+                      <tr key={p.key} className={newGroup ? 'grp' : undefined} style={{ '--c': providerColor(p.key) }} data-on={on ? '1' : undefined}
+                          tabIndex={0} aria-pressed={on} onClick={() => toggleProvider(p.key)}
+                          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleProvider(p.key); } }}
+                          title={on ? 'Click to remove this provider filter' : 'Click to filter the page to this provider'}>
+                        <td className="l">
+                          <span className="pn">
+                            <span className="ck" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={4} strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg></span>
+                            <span className="sw" />
+                            <b>{p.label}</b>
+                            <span className="ch" style={{ color: p.channel === 'whatsapp' ? '#059669' : '#6366f1' }}><ChannelIcon channel={p.channel} size={12} /></span>
+                          </span>
+                        </td>
+                        <td><span className="pv">{nf(m.attempted)}</span></td>
+                        <td><span className="pv big">{loadingFirst ? '…' : nf(m.sent)}</span><span className="pp">{pctText(m.sent, m.attempted)}</span></td>
+                        <td className="l wide">
+                          <span className="pbar">
+                            {seg(opened, METRIC.opened.color, p.channel === 'whatsapp' ? 'Read' : 'Opened')}
+                            {seg(delivered, METRIC.delivered.color, 'Delivered, not opened')}
+                            {seg(noReceipt, '#c7d2fe', 'Sent, no receipt yet')}
+                            {seg(rej, '#ef4444', 'Rejected')}
+                            {seg(m.skipped, '#cbd5e1', 'Skipped')}
+                          </span>
+                        </td>
+                        {p.untracked
+                          ? <td colSpan={3} style={{ textAlign: 'center' }}><span className="ma-nt">SMTP from contact@ (Freshdesk + refund / project emails) — only sent / failed, no delivery, open or click tracking</span></td>
+                          : <>
+                            {cell(m.delivered, m.sent, METRIC.delivered.color)}
+                            {cell(m.opened, m.sent, METRIC.opened.color)}
+                            {cell(m.clicked, m.sent, METRIC.clicked.color)}
+                          </>}
+                        {cell(rej, m.attempted, '#ef4444', true)}
+                        <td><span className="pv" style={m.skipped ? undefined : { color: '#cbd5e1' }}>{nf(m.skipped)}</span></td>
+                        <td><span className="pv" style={m.conversions ? { color: '#047857' } : { color: '#cbd5e1' }}>{nf(m.conversions)}</span></td>
+                      </tr>
+                    );
+                  })}
+                  {data && !rows.length && <tr><td className="l" colSpan={10} style={{ color: '#94a3b8' }}>No provider activity in this range</td></tr>}
+                </tbody>
+              </table>
+              <div className="ma-pchips">
+                <span className="lbl">Providers</span>
+                {rows.map(p => (
+                  <button key={p.key} className="ma-pchip ma-rip" onPointerDown={ripple} style={{ '--c': providerColor(p.key) }}
+                          data-on={provs.includes(p.key) ? '1' : undefined} onClick={() => toggleProvider(p.key)}>
+                    <span className="sw" /><b>{p.label}</b><span>{nf(p.m.sent)} sent</span>
+                  </button>
+                ))}
               </div>
             </div>
-          )}
-        </div>
-        <span className="ma-divider" />
-        <div className="ma-seg" aria-label="Channel">
-          {CHANNELS.map(c => (
-            <button key={c.key} onPointerDown={ripple} data-on={channel === c.key ? '1' : undefined} onClick={() => setParam({ channel: c.key === 'all' ? null : c.key })}>
-              {c.icon && <span className="ic" style={{ color: c.key === 'whatsapp' ? '#059669' : '#4f46e5' }}><ChannelIcon channel={c.icon} size={13} /></span>}{c.label}
-            </button>
-          ))}
-        </div>
-        <div className="ma-seg" aria-label="Source">
-          {SOURCES.map(c => (
-            <button key={c.key} onPointerDown={ripple} data-on={srcKind === c.key ? '1' : undefined} onClick={() => { setParam({ source: c.key === 'all' ? null : c.key }); setTableTab('all'); }}>
-              {c.icon && <span className="ic"><KindIcon kind={c.icon} /></span>}{c.label}
-            </button>
-          ))}
-        </div>
-        <span className="ma-rangechip">{Ic.cal} <b>{rangeText}</b> · {gran === 'hour' ? 'hourly' : 'daily'}</span>
+          );
+        })()}
       </div>
 
+      {/* ── Menus (portalled, so the sticky header never clips them) ── */}
+      {menu?.id === 'channel' && (
+        <Popover anchor={menu.el} onClose={closeMenu} width={210}>
+          {CHANNELS.map(c => (
+            <button key={c.key} className="ma-opt" data-on={channel === c.key ? '1' : undefined}
+                    onClick={() => { const patch = { channel: c.key === 'all' ? null : c.key }; if (c.key !== 'all') { const keep = provs.filter(k => PROVIDER[k].channel === c.key); if (keep.length !== provs.length) patch.prov = keep.join(',') || null; } setParam(patch); setMenu(null); }}>
+              <span className="radio" />
+              {c.key !== 'all' && <span style={{ color: c.key === 'whatsapp' ? '#059669' : '#4f46e5', display: 'inline-flex' }}><ChannelIcon channel={c.key} size={13} /></span>}
+              {c.key === 'all' ? 'All channels' : c.label}
+              <span className="cnt">{data ? nf(c.key === 'all' ? sumMetrics(STREAMS.filter(s => srcKind === 'all' || s.kind === srcKind).map(s => S[s.key] || ZERO)).sent : sumMetrics(STREAMS.filter(s => s.channel === c.key && (srcKind === 'all' || s.kind === srcKind)).map(s => S[s.key] || ZERO)).sent) : ''}</span>
+            </button>
+          ))}
+        </Popover>
+      )}
+      {menu?.id === 'source' && (
+        <Popover anchor={menu.el} onClose={closeMenu} width={220}>
+          {SOURCES.map(c => (
+            <button key={c.key} className="ma-opt" data-on={srcKind === c.key ? '1' : undefined}
+                    onClick={() => { setParam({ source: c.key === 'all' ? null : c.key }); setTableTab('all'); setMenu(null); }}>
+              <span className="radio" />
+              {c.key !== 'all' && <span style={{ display: 'inline-flex', color: '#64748b' }}><KindIcon kind={c.key} size={13} /></span>}
+              {c.key === 'all' ? 'Everything' : c.label}
+              <span className="cnt">{data ? nf(sumMetrics(STREAMS.filter(s => (c.key === 'all' || s.kind === c.key) && (channel === 'all' || s.channel === channel)).map(s => S[s.key] || ZERO)).sent) : ''}</span>
+            </button>
+          ))}
+        </Popover>
+      )}
+      {menu?.id === 'provider' && (
+        <Popover anchor={menu.el} onClose={closeMenu} width={270}>
+          {['email', 'whatsapp'].filter(ch => channel === 'all' || channel === ch).map(ch => (
+            <div key={ch}>
+              <div className="grp"><ChannelIcon channel={ch} size={11} />{ch === 'email' ? 'Email' : 'WhatsApp'}</div>
+              {provStats.filter(p => p.channel === ch).map(p => (
+                <button key={p.key} className="ma-opt" data-on={provs.includes(p.key) ? '1' : undefined} onClick={() => toggleProvider(p.key)}>
+                  <span className="box">{provs.includes(p.key) && tick}</span>
+                  <span className="dot" style={{ background: providerColor(p.key) }} />
+                  {p.label}
+                  <span className="cnt">{data ? `${nf(p.m.sent)} sent` : ''}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+          <div className="foot">
+            <button onClick={() => setOnlyProviders([])}>All providers</button>
+            <button onClick={() => setMenu(null)}>Done</button>
+          </div>
+        </Popover>
+      )}
+      {menu?.id === 'custom' && draft && (
+        <Popover anchor={menu.el} onClose={closeMenu} width={330} className="form">
+          <h4>Custom date &amp; time</h4>
+          <div className="times">
+            <label>From date<input type="date" value={draft.from} max={todayYmd()} onChange={e => setDraft(d => ({ ...d, from: e.target.value }))} /></label>
+            <label>From time<input type="time" step="1" value={draft.ft} onChange={e => setDraft(d => ({ ...d, ft: e.target.value || DAY_START }))} /></label>
+            <label>To date<input type="date" value={draft.to} max={todayYmd()} min={draft.from} onChange={e => setDraft(d => ({ ...d, to: e.target.value }))} /></label>
+            <label>To time<input type="time" step="1" value={draft.tt} onChange={e => setDraft(d => ({ ...d, tt: e.target.value || DAY_END }))} /></label>
+          </div>
+          <div className="hint">Whole day by default (00:00:00 – 23:59:59). Narrow the times for a window like 10:05 – 10:45.</div>
+          <div className="row">
+            <button className="ma-btn ma-rip" style={{ marginRight: 'auto' }} onPointerDown={ripple} onClick={() => setDraft(d => ({ ...d, ft: DAY_START, tt: DAY_END }))}>Whole day</button>
+            <button className="ma-btn ma-rip" onPointerDown={ripple} onClick={() => setMenu(null)}>Cancel</button>
+            <button className="ma-btn primary ma-rip" onPointerDown={ripple} onClick={applyCustom}>Apply</button>
+          </div>
+        </Popover>
+      )}
+      {provHover && createPortal(
+        <div className="ma-portal">
+          <div className="ma-provcard" style={{ left: Math.min(provHover.x, window.innerWidth - 250), top: provHover.y }}>
+            <div className="ma-tip">
+              <b>{provHover.p.label} · {rangeLabel(range)}</b>
+              {[['attempted', 'Attempted'], ['sent', 'Sent'], ['delivered', 'Delivered'], ['opened', provHover.p.channel === 'whatsapp' ? 'Read' : 'Opened'], ['clicked', 'Clicked'], ['failed', 'Failed'], ['bounced', 'Bounced'], ['skipped', 'Skipped'], ['conversions', 'Conversions']]
+                .filter(([k]) => k !== 'bounced' || provHover.p.channel === 'email')
+                .map(([k, l]) => (
+                  <div className="r" key={k}><i style={{ background: METRIC[k].color }} /><span>{l}</span>{nf(provHover.p.m[k])}
+                    {!['attempted', 'sent', 'conversions'].includes(k) && <em style={{ fontStyle: 'normal', color: '#94a3b8', width: 44, textAlign: 'right' }}>{pctText(provHover.p.m[k], ['failed', 'bounced', 'skipped'].includes(k) ? provHover.p.m.attempted : provHover.p.m.sent)}</em>}
+                  </div>
+                ))}
+              <div className="r tot"><span>{provs.includes(provHover.p.key) ? 'Click to remove filter' : 'Click to filter to this provider'}</span></div>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+
       {error && (
-        <div className="ma-card" style={{ padding: 16, marginBottom: 16, borderColor: '#fecaca', background: '#fef2f2', color: '#b91c1c', display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div className="ma-card" style={{ padding: 12, marginBottom: 14, borderColor: '#fecaca', background: '#fef2f2', color: '#b91c1c', display: 'flex', gap: 10, alignItems: 'center' }}>
           {Ic.alert}<span style={{ flex: 1 }}>{error}</span>
           <button className="ma-btn ma-rip" onPointerDown={ripple} onClick={() => load({ force: true })}>Try again</button>
         </div>
       )}
-
-      {/* ── KPI tiles ───────────────────────────────────────────── */}
-      <div className="ma-kpis">
-        {kpis.map((k, i) => {
-          const c = METRIC[k.key].color;
-          const tot = k.e + k.w;
-          return (
-            <button key={k.key} className="ma-card ma-kpi ma-rip ma-fade" onPointerDown={ripple} style={{ '--c': c, animationDelay: `${i * 35}ms` }}
-                    data-on={kpiFocus === k.key ? '1' : undefined}
-                    onClick={() => { const next = kpiFocus === k.key ? null : k.key; setKpiFocus(next); if (TREND_METRICS.includes(k.key)) setMetric(next ? k.key : 'sent'); }}
-                    title="Show this metric in the trend chart">
-              <span className="t"><i />{k.label}</span>
-              <span className="n">{loadingFirst ? <Skel w={90} h={26} /> : <CountUp value={k.value} />}</span>
-              <span className="r">{loadingFirst ? <Skel w={120} h={10} /> : k.sub}</span>
-              {channel === 'all' && (
-                <>
-                  <span className="split">
-                    <span style={{ width: `${rate(k.e, tot)}%`, background: '#4f46e5' }} />
-                    <span style={{ width: `${rate(k.w, tot)}%`, background: '#059669' }} />
-                  </span>
-                  <span className="split-l">
-                    <em><ChannelIcon channel="email" size={11} />{compact(k.e)}</em>
-                    <em>{compact(k.w)}<ChannelIcon channel="whatsapp" size={11} /></em>
-                  </span>
-                </>
-              )}
-            </button>
-          );
-        })}
-      </div>
 
       {data && !hasAny && !busy && <div className="ma-card" style={{ marginBottom: 16 }}><Empty sub={`Nothing was sent ${preset === 'today' ? 'today yet' : 'in this range'}${channel !== 'all' || srcKind !== 'all' ? ' for these filters' : ''}. Try a wider date range.`} /></div>}
 
@@ -338,7 +563,7 @@ export default function MessagingAnalytics() {
       <div className="ma-grid ma-g-trend">
         <div className="ma-card">
           <div className="ma-card-h">
-            <div><h3>{METRIC[metric].label} over time</h3><small>{gran === 'hour' ? 'Per hour' : 'Per day'}, stacked by channel and source</small></div>
+            <div><h3>{METRIC[metric].label} over time</h3><small>Per {granWord}, stacked by channel and source</small></div>
             <div className="ma-chips">
               {TREND_METRICS.map(k => (
                 <button key={k} className="ma-chip ma-rip" onPointerDown={ripple} style={{ '--c': METRIC[k].color }} data-on={metric === k ? '1' : undefined} onClick={() => setMetric(k)}>
@@ -347,8 +572,8 @@ export default function MessagingAnalytics() {
               ))}
             </div>
           </div>
-          <div className="ma-card-b" style={{ height: 300 }}>
-            {loadingFirst ? <Skel h={260} r={12} /> : (
+          <div className="ma-card-b" style={{ height: 250 }}>
+            {loadingFirst ? <Skel h={220} r={12} /> : (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={series} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
                   <defs>{STREAMS.map(s => (
@@ -428,14 +653,14 @@ export default function MessagingAnalytics() {
               <div className="ma-card-h">
                 <div className="ma-stream-h">
                   <span className="ma-stream-ic" style={{ background: `${s.color}26`, color: s.channel === 'whatsapp' ? '#047857' : '#4338ca' }}><ChannelIcon channel={s.channel} size={16} /></span>
-                  <div><h3>{s.label}</h3><small>{loadingFirst ? '…' : `${nf(tabCounts[s.key] || 0)} ${s.kind === 'journey' ? 'journeys' : 'campaigns'} active in range`}</small></div>
+                  <div><h3>{s.label}</h3><small>{loadingFirst ? '…' : `${nf(tabCounts[s.key] || 0)} ${s.kind === 'journey' ? 'journeys' : s.kind === 'support' ? 'agents' : s.kind === 'transactional' ? 'email types' : 'campaigns'} active in range`}</small></div>
                 </div>
                 <button className="ma-btn ma-rip" onPointerDown={ripple} style={{ height: 30, padding: '0 10px', fontSize: 12 }}
                         onClick={() => { setTableTab(s.key); document.getElementById('ma-sources')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>
                   View {Ic.arrow}
                 </button>
               </div>
-              <div className="ma-card-b">{loadingFirst ? <Skel h={170} r={10} /> : <Funnel m={m} isWa={s.channel === 'whatsapp'} color={s.channel === 'whatsapp' ? '#059669' : '#4f46e5'} />}</div>
+              <div className="ma-card-b">{loadingFirst ? <Skel h={170} r={10} /> : <Funnel m={m} isWa={s.channel === 'whatsapp'} untracked={s.untracked} color={s.kind === 'transactional' ? '#0f766e' : s.kind === 'support' ? '#0891b2' : s.channel === 'whatsapp' ? '#059669' : '#4f46e5'} />}</div>
             </div>
           );
         })}
@@ -454,7 +679,10 @@ export default function MessagingAnalytics() {
                 {providers.flatMap(p => {
                   const parts = Object.values(p.streams);
                   const row = (m, key, label, sub) => (
-                    <tr key={key} style={sub ? { background: '#fcfdff' } : undefined}>
+                    <tr key={key} style={sub ? { background: '#fcfdff' } : (provs.includes(p.provider) ? { background: '#eef2ff' } : undefined)}
+                        data-click={!sub && PROVIDER[p.provider] ? '1' : undefined}
+                        onClick={!sub && PROVIDER[p.provider] ? () => toggleProvider(p.provider) : undefined}
+                        title={!sub && PROVIDER[p.provider] ? (provs.includes(p.provider) ? 'Click to remove this provider filter' : 'Click to filter to this provider') : undefined}>
                       <td className="l" style={sub ? { paddingLeft: 34, fontSize: 12, color: '#64748b' } : undefined}>
                         {sub ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><KindIcon kind={STREAM[m.stream].kind} size={12} />{label}</span> : (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 9 }}>
@@ -556,7 +784,7 @@ export default function MessagingAnalytics() {
                         <div style={{ minWidth: 0 }}>
                           <b title={r.name}>{r.name}</b>
                           <div className="meta">
-                            <span className="ma-tag" style={{ background: r.kind === 'journey' ? '#f5f3ff' : '#f0f9ff', color: r.kind === 'journey' ? '#6d28d9' : '#0369a1' }}><KindIcon kind={r.kind} size={10} />{r.kind}</span>
+                            <span className="ma-tag" style={{ background: (KIND_TAG[r.kind] || KIND_TAG.campaign)[0], color: (KIND_TAG[r.kind] || KIND_TAG.campaign)[1] }}><KindIcon kind={r.kind} size={10} />{(KIND_TAG[r.kind] || KIND_TAG.campaign)[2]}</span>
                             <span>ID {r.id}</span>
                             {r.providers.length > 0 && <span title={r.providers.join(', ')}>· {r.providers.filter(p => !p.startsWith('Not sent')).join(', ') || '—'}</span>}
                           </div>
@@ -608,7 +836,12 @@ export default function MessagingAnalytics() {
         </div>
       </div>
 
-      {drawer && <SourceDrawer source={drawer} range={range} onClose={() => setDrawer(null)} />}
+      {statDrawer && (
+        <StatDrawer metric={statDrawer} channel={channel} source={srcKind} range={range} totals={totals} providers={provs}
+                    onClose={() => setStatDrawer(null)} onOpenSource={openSourceFromPerson} />
+      )}
+      {/* After the stat drawer, so a campaign opened from a person row stacks on top of it. */}
+      {drawer && <SourceDrawer source={drawer} range={range} providers={provs} onClose={() => setDrawer(null)} />}
     </div>
   );
 }

@@ -273,6 +273,82 @@ export const stats = {
   feed: (limit = 20) => get('fd_stats.php', { action: 'feed', limit }),
 };
 
+/* ============================================================== archive == */
+
+/*
+ * The mail archive: how far back the desk's own records go, what sits in a
+ * date range, and the whole selection as a sheet.
+ *
+ * `coverage` and `range` are ordinary JSON calls. `csvUrl` is deliberately NOT
+ * one: a CSV of the whole archive should stream straight from PHP to the disk,
+ * never through a fetch that first materialises tens of megabytes as a string
+ * in the tab. That means the browser makes the request itself and cannot attach
+ * an Authorization header — so the JWT rides in the querystring, which
+ * middleware/auth.php's get_bearer_token() accepts as its documented fallback
+ * (fd_contacts.php's customer export has worked this way since day one).
+ */
+export const archive = {
+  coverage: () => get('fd_export.php', { action: 'coverage' }),
+
+  /** One page of the selected window, plus the counts for the WHOLE window. */
+  range: ({ from = '', to = '', direction = 'all', search = '', page = 1, perPage = 50,
+            includeSpam = false, includeTrash = false } = {}) =>
+    get('fd_export.php', {
+      action: 'range', from, to, direction, search, page, per_page: perPage,
+      include_spam: includeSpam ? 1 : 0, include_trash: includeTrash ? 1 : 0,
+    }),
+
+  /**
+   * Counts straight from the IMAP server, per year, importing nothing.
+   * Slow by nature — it opens a mail session — so it is only ever called from
+   * an explicit button, never on mount.
+   */
+  mailbox: (years = 6) => get('fd_export.php', { action: 'mailbox', years }, { timeout: 120000 }),
+
+  /** @param format 'emails' | 'tickets' */
+  csvUrl({ from = '', to = '', direction = 'all', search = '', format = 'emails',
+           includeSpam = false, includeTrash = false } = {}) {
+    const qs = new URLSearchParams({
+      action: 'csv', format, from, to, direction, search,
+      include_spam: includeSpam ? '1' : '0',
+      include_trash: includeTrash ? '1' : '0',
+    });
+    let token = '';
+    try { token = localStorage.getItem('token') || ''; } catch { /* private mode */ }
+    if (token) qs.set('token', token);
+    return fdUrl(`fd_export.php?${qs.toString()}`);
+  },
+};
+
+/* ============================================================= backfill == */
+
+/*
+ * Importing the mailbox's history — the mail older than the day the desk went
+ * live, which the forward sync will never reach.
+ *
+ * `run` takes ONE batch and returns progress. The caller loops it; it is not a
+ * fire-and-forget "import everything" call, because a two-year mailbox cannot
+ * be imported inside one PHP request and pretending otherwise just produces a
+ * gateway timeout halfway through with no cursor to resume from.
+ */
+export const backfill = {
+  status: () => get('fd_backfill.php', { action: 'status' }),
+  /**
+   * How many messages a given start date would import. Talks IMAP: slow.
+   *
+   * Answers for BOTH settings of skipAuto regardless of what is passed, so the
+   * card can show what excluding bounces saves without a second round trip.
+   */
+  preview: (until, skipAuto = false) =>
+    get('fd_backfill.php', { action: 'preview', until, skip_auto: skipAuto ? 1 : 0 }, { timeout: 180000 }),
+  start: (until, skipAuto = false) =>
+    post('fd_backfill.php', { action: 'start', until, skip_auto: skipAuto ? 1 : 0 }, { timeout: 180000 }),
+  run: () => post('fd_backfill.php', { action: 'run' }, { timeout: 120000 }),
+  resume: () => post('fd_backfill.php', { action: 'resume' }, { timeout: 120000 }),
+  stop: () => post('fd_backfill.php', { action: 'stop' }),
+  reset: () => post('fd_backfill.php', { action: 'reset' }),
+};
+
 /* ============================================================= contacts == */
 
 export const contacts = {
@@ -341,4 +417,4 @@ export const settings = {
   log: (lines = 200) => get('fd_settings.php', { action: 'log', lines }),
 };
 
-export default { tickets, messages, attachments, realtime, sync, stats, contacts, settings, fdUrl };
+export default { tickets, messages, attachments, realtime, sync, stats, archive, backfill, contacts, settings, fdUrl };

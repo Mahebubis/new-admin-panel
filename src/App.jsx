@@ -319,6 +319,7 @@ import Monitoring from './pages/Monitoring/Monitoring';
 import Freshdesk from './pages/freshdesk/Freshdesk';
 import EnrollmentAudit from './pages/enrollment-audit/EnrollmentAudit';
 import ProfileMetrics from './pages/profile-metrics/ProfileMetrics';
+import CallerIQ from './pages/caller-iq/CallerIQ';
 
 // Helper to keep the route table readable
 const G = (perm, Element) => (
@@ -561,6 +562,9 @@ export default function App() {
 
         {/* Resume / Profile Metrics — profile, resume and hiring-portal activity, day by day */}
         <Route path="profile-metrics" element={G('profile_metrics', <ProfileMetrics />)} />
+
+        {/* Caller IQ — calls from counselors' Android phones (caller-IQ-project/), synced via api/caller-iq */}
+        <Route path="caller-iq" element={G('caller_iq', <CallerIQ />)} />
 
         {/* Enrollment Audit — upload an enrollment export, check it against users + store orders.
             Off the sidebar as of Sep 2026 (its slot went to Resume/Profile Metrics); the route

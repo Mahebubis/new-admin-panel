@@ -2678,6 +2678,90 @@ const Styles = () => (
     .ai-in input{flex:1;height:38px;border:1px solid var(--border);background:var(--surface-2);border-radius:11px;padding:0 13px;font-family:inherit;font-size:13px;color:var(--text);outline:0;transition:border .15s,background .15s}
     .ai-in input:focus{border-color:var(--primary);background:var(--surface)}
     @media(max-width:768px){.ai-fab{right:16px;bottom:16px}.ai-panel{right:16px;bottom:16px}}
+
+    /* ---- Mail Archive & Export (components/MailArchive.jsx) ----
+       Its own block because it is the only place on the dashboard that mixes a
+       coverage read-out, a range picker and a table in one card. */
+    .mar-body{padding:0 20px}
+    .mar-cov{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin-bottom:14px}
+    .mar-cov-cell{display:flex;align-items:center;gap:10px;padding:11px 13px;border:1px solid var(--border);border-radius:13px;background:var(--surface-2)}
+    .mar-cov-cell .ic{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;flex-shrink:0}
+    .mar-cov-cell .v{font-size:15px;font-weight:800;letter-spacing:-.02em;line-height:1.25}
+    .mar-cov-cell .k{font-size:11px;color:var(--muted);font-weight:600;margin-top:1px}
+
+    .mar-note{display:flex;gap:11px;padding:13px 15px;border-radius:14px;border:1px solid var(--border);margin-bottom:14px;font-size:12.8px;line-height:1.6}
+    .mar-note.warn{background:color-mix(in srgb, #F59E0B 8%, var(--surface));border-color:color-mix(in srgb, #F59E0B 30%, var(--border))}
+    .mar-note.ok{background:var(--success-soft);border-color:color-mix(in srgb, var(--success) 26%, var(--border))}
+    .mar-note .ic{flex-shrink:0;margin-top:1px}
+    .mar-note.warn .ic{color:#B45309}
+    .mar-note.ok .ic{color:var(--success)}
+    .mar-note .bd{flex:1;min-width:0}
+    .mar-note p{margin:0}
+    .mar-note-act{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}
+    .mar-note-act .hint{font-size:11.5px;color:var(--muted);font-weight:600}
+    .mar-scan-err{display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px;color:var(--danger);font-weight:600}
+    .mar-scan{margin-top:12px;padding-top:12px;border-top:1px dashed var(--border)}
+    .mar-scan-head{font-size:12.5px;margin-bottom:9px}
+    .mar-scan-years{display:flex;gap:8px;flex-wrap:wrap}
+    .mar-scan-years .yb{display:flex;flex-direction:column;align-items:center;min-width:76px;padding:8px 11px;border-radius:11px;background:var(--surface);border:1px solid var(--border)}
+    .mar-scan-years .yb b{font-size:15px;font-weight:800;letter-spacing:-.02em}
+    .mar-scan-years .yb i{font-style:normal;font-size:10.5px;color:var(--muted);font-weight:700;margin-top:2px}
+    .mar-scan-foot{margin:10px 0 0;font-size:11.5px;color:var(--muted);font-weight:500}
+
+    .mar-bf{margin-top:12px;padding-top:12px;border-top:1px dashed var(--border)}
+    .mar-bf-head{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:12.5px;color:var(--text)}
+    .mar-bf-head .hint{font-size:11.5px;color:var(--muted);font-weight:600}
+    .mar-bf-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:10px}
+    .mar-bf-row label{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;color:var(--muted)}
+    .mar-bf-row input{height:32px;border:1px solid var(--border);background:var(--surface);border-radius:9px;padding:0 9px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--text);outline:0;color-scheme:light dark}
+    .mar-bf-row input:focus{border-color:var(--primary)}
+    .mar-bf-prev{margin-top:10px;padding:10px 12px;border-radius:11px;background:var(--surface);border:1px solid var(--border);font-size:12.3px;line-height:1.6}
+    .mar-bf-prev .hi{color:var(--primary)}
+    .mar-bf-warn{margin-top:7px;font-size:11.5px;color:var(--muted);font-weight:500;line-height:1.55}
+    .mar-bf-note{margin-top:7px;padding-top:7px;border-top:1px dashed var(--border);font-size:11.5px;color:var(--muted);line-height:1.55}
+    .mar-bf-note b{color:var(--text)}
+    .mar-bf-skip{display:flex;gap:9px;align-items:flex-start;margin-top:9px;cursor:pointer;font-size:12.3px;font-weight:600}
+    .mar-bf-skip input{margin-top:2px;flex:none;width:14px;height:14px;accent-color:var(--primary);cursor:pointer}
+    .mar-bf-skip em{display:block;margin-top:2px;font-style:normal;font-size:11.4px;font-weight:500;color:var(--muted);line-height:1.55}
+    .mar-bf-skip code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.8px;padding:1px 4px;border-radius:4px;background:var(--surface-2,rgba(127,127,127,.12))}
+    .mar-bf-prog{margin-top:11px}
+    .mar-bf-bar{height:7px;border-radius:99px;background:var(--surface-2);overflow:hidden;border:1px solid var(--border)}
+    .mar-bf-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--primary),color-mix(in srgb, var(--primary) 60%, var(--accent)));transition:width .4s ease}
+    .mar-bf-stat{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:8px;font-size:12.3px}
+    .mar-bf-stat .bad{color:var(--danger)}
+    .mar-bf-stat .acts{display:flex;gap:7px}
+    .mar-bf-foot{margin:8px 0 0;font-size:11.5px;color:var(--muted);font-weight:500}
+
+    .mar-chart{margin-bottom:16px}
+    .mar-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+    .mar-dates{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}
+    .mar-dates label{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;color:var(--muted)}
+    .mar-dates input{height:34px;border:1px solid var(--border);background:var(--surface-2);border-radius:10px;padding:0 10px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--text);outline:0;transition:border .15s,background .15s;color-scheme:light dark}
+    .mar-dates input:focus{border-color:var(--primary);background:var(--surface)}
+    .mar-search{display:flex;align-items:center;gap:7px;flex:1;min-width:210px;height:34px;padding:0 11px;border:1px solid var(--border);background:var(--surface-2);border-radius:10px;color:var(--muted);transition:border .15s,background .15s}
+    .mar-search:focus-within{border-color:var(--primary);background:var(--surface)}
+    .mar-search input{flex:1;border:0;background:transparent;outline:0;font-family:inherit;font-size:12.5px;font-weight:500;color:var(--text);min-width:0}
+    .mar-dl{display:flex;gap:7px;flex-wrap:wrap}
+
+    .mar-counts{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:9px;margin-bottom:14px}
+    .mar-count{padding:10px 13px;border-radius:12px;background:var(--surface-2);border:1px solid var(--border)}
+    .mar-count b{display:block;font-size:17px;font-weight:800;letter-spacing:-.025em}
+    .mar-count span{font-size:11px;color:var(--muted);font-weight:600}
+    .mar-count.big{grid-column:span 2;background:linear-gradient(135deg,var(--primary-soft),color-mix(in srgb, var(--primary-soft) 35%, var(--surface)));border-color:color-mix(in srgb, var(--primary) 24%, var(--border))}
+    .mar-count.big b{font-size:24px;color:var(--primary)}
+
+    .mar-loading{display:flex;align-items:center;justify-content:center;gap:9px;padding:38px 0;color:var(--muted);font-size:13px;font-weight:600}
+    .mar-dir{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:8px;background:var(--surface-2);color:var(--muted);white-space:nowrap}
+    .mar-dir.inbound{background:var(--primary-soft);color:var(--primary)}
+    .mar-dir.outbound{background:var(--success-soft);color:var(--success)}
+    .mar-from .nm{display:block;font-size:12.8px;font-weight:600;line-height:1.35}
+    .mar-from .em{display:block;font-size:11px;color:var(--muted)}
+    @media(max-width:768px){
+      .mar-body{padding:0 12px}
+      .mar-dates{margin-left:0;width:100%}
+      .mar-count.big{grid-column:span 2}
+    }
+
     /* ---- stunning pass ---- */
     .page-head h1{font-size:24px;font-weight:800;letter-spacing:-.035em}
     .route{animation:routeIn .32s cubic-bezier(.25,.8,.35,1)}
