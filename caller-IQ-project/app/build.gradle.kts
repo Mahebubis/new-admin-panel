@@ -10,10 +10,22 @@ android {
         applicationId = "com.example.calliq"
         minSdk = 24
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 8
+        versionName = "1.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        /*
+         * The "this is the latest build" card shown when the app opens. Type anything into
+         * caller-IQ-project/BUILD_NOTE.txt before building — it is read on EVERY build, so the
+         * card always shows what was in the file when this APK was made. Leave the file empty to
+         * switch the card off. (Read through Gradle's own file API so the configuration cache
+         * notices when it changes.)
+         */
+        val buildNote = providers.fileContents(rootProject.layout.projectDirectory.file("BUILD_NOTE.txt"))
+            .asText.orNull.orEmpty().trim().take(300)
+        val javaLiteral = buildNote.replace("\\", "\\\\").replace("\"", "\\\"").replace("\r", "").replace("\n", "\\n")
+        buildConfigField("String", "BUILD_NOTE", "\"$javaLiteral\"")
     }
 
     buildTypes {

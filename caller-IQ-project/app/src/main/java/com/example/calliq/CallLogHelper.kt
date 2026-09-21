@@ -33,7 +33,7 @@ object CallLogHelper {
      * The SIM is resolved HERE rather than inside the worker: the worker can run minutes later,
      * on a different network, by which time the live "which SIM is busy" capture has expired.
      */
-    fun processAndEnqueueRecentCalls(context: Context): CallRecord? {
+    fun processAndEnqueueRecentCalls(context: Context, sinceOverride: Long? = null): CallRecord? {
         val contentResolver = context.contentResolver
         val prefs = context.getSharedPreferences(CallIqConfig.PREFS, Context.MODE_PRIVATE)
         val now = System.currentTimeMillis()
@@ -45,7 +45,8 @@ object CallLogHelper {
          * idempotency_key, so a re-sent call is harmless. First run looks back 3 days.
          */
         val lastQueued = prefs.getLong("LAST_QUEUED_CALL_TS", 0L)
-        val since = if (lastQueued > 0) maxOf(lastQueued - 10 * 60 * 1000, now - 7L * 24 * 3600 * 1000)
+        // sinceOverride: a one-off look further back, e.g. to re-send calls whose SIM was unknown.
+        val since = sinceOverride ?: if (lastQueued > 0) maxOf(lastQueued - 10 * 60 * 1000, now - 7L * 24 * 3600 * 1000)
                     else now - 3L * 24 * 3600 * 1000
         var newest = lastQueued
         var newestRecord: CallRecord? = null
@@ -96,7 +97,8 @@ object CallLogHelper {
                     val rawSimId = listOf(phoneAccountId, subId, subIdAlt, simIdOem, simIdOemAlt)
                         .firstOrNull { v -> !v.isNullOrBlank() } ?: ""
 
-                    val sim = SimResolver.resolve(context, rawSimId, component, date)
+                    val sim = SimResolver.resolve(context, rawSimId, component, date,
+                        oemIds = listOf(subId, subIdAlt, simIdOem, simIdOemAlt))
 
                     val callTypeStr = when (rawType) {
                         CallLog.Calls.INCOMING_TYPE -> "INCOMING"
@@ -142,6 +144,25 @@ object CallLogHelper {
     }
 
     /**
+     * When the newest call in the log started, or 0. Reads one column of one row, so the
+     * background catch-up can ask "anything new?" every few minutes for free — and only touch
+     * the network when the answer is yes. (No LIMIT in the sort order: Android 11+'s call-log
+     * provider rejects it; the cursor is read lazily, so taking the first row costs the same.)
+     */
+    fun newestCallAt(context: Context): Long = try {
+        context.contentResolver.query(
+            CallLog.Calls.CONTENT_URI, arrayOf(CallLog.Calls.DATE), null, null, "${CallLog.Calls.DATE} DESC"
+        )?.use { c -> if (c.moveToFirst()) c.getLong(0) else 0L } ?: 0L
+    } catch (e: Throwable) {
+        Log.w("CallLogHelper", "newestCallAt failed: ${e.message}")
+        0L
+    }
+
+    /** The newest call already handed to the uploader. */
+    fun lastQueuedAt(context: Context): Long =
+        context.getSharedPreferences(CallIqConfig.PREFS, Context.MODE_PRIVATE).getLong("LAST_QUEUED_CALL_TS", 0L)
+
+    /**
      * The call the popup is waiting for: the newest row at or after `sinceMs`, optionally for a
      * known number. Used to fill in a popup that opened before Android wrote the row.
      */
@@ -171,6 +192,8 @@ object CallLogHelper {
                 val date = it.getColumnIndex(CallLog.Calls.DATE).let { i -> if (i != -1) it.getLong(i) else System.currentTimeMillis() }
                 val account = it.getColumnIndex(CallLog.Calls.PHONE_ACCOUNT_ID).let { i -> if (i != -1) it.getString(i) ?: "" else "" }
                 val component = it.getColumnIndex(CallLog.Calls.PHONE_ACCOUNT_COMPONENT_NAME).let { i -> if (i != -1) it.getString(i) else null }
+                val oemIds = listOf("subscription_id", "sub_id", "simid", "sim_id")
+                    .map { c -> it.getColumnIndex(c).let { i -> if (i != -1) it.getString(i) else null } }
                 val callTypeStr = when (rawType) {
                     CallLog.Calls.INCOMING_TYPE -> "INCOMING"
                     CallLog.Calls.OUTGOING_TYPE -> "OUTGOING"
@@ -179,7 +202,7 @@ object CallLogHelper {
                     else -> "UNKNOWN_TYPE_$rawType"
                 }
                 return CallRecord(number, callTypeStr, duration, date, "${number}_${date}", account,
-                    SimResolver.resolve(context, account, component, date))
+                    SimResolver.resolve(context, account, component, date, oemIds = oemIds))
             }
         } catch (e: Throwable) {
             Log.e("CallLogHelper", "latestCall failed: ${e.message}", e)

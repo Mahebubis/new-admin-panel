@@ -23,15 +23,17 @@ const STATE_META = {
   ended: { label: 'Call ended', color: '#64748b', bg: '#f1f5f9', verb: 'lasted' },
 };
 /*
- * An outgoing call that is still running is shown as "Calling", with no timer.
+ * An outgoing call in progress: "Outgoing call", counting from when it was DIALLED — and saying so.
  *
- * Android tells an ordinary app one thing about an outgoing call — that the line is off hook — and
- * that covers dialling, ringing and talking alike. There is no signal for "they picked up". So a
- * counting timer here would be the time since DIALLING, dressed up as talk time. The card waits:
- * the moment the call ends the phone reads its real duration out of the call log and sends it, and
- * that is what this then shows.
+ * Android tells an app that is not the phone's own dialer exactly one thing about an outgoing
+ * call: the line is off hook. That one state covers dialling, ringing at the other end and talking
+ * alike — there is no "they picked up" signal for any such app, on any version. So this timer is
+ * labelled "since dialled", never presented as talk time; the moment the call ends the phone reads
+ * the real talk time out of the call log and the card switches to that (or to "Not answered").
  */
-const CALLING_META = { label: 'Ringing (outgoing)', color: '#4f46e5', bg: '#eef2ff', verb: 'calling' };
+const OUTGOING_META = { label: 'Outgoing call', color: '#4f46e5', bg: '#eef2ff', verb: 'since dialled' };
+const NOT_ANSWERED_META = { label: 'Not answered', color: '#b45309', bg: '#fffbeb', verb: 'rang for' };
+const MISSED_META = { label: 'Missed', color: '#b91c1c', bg: '#fef2f2', verb: 'rang for' };
 
 /** Fetches only when asked. Returns everything the strip needs to explain itself. */
 export function useLiveCalls() {
@@ -97,27 +99,35 @@ function LiveTimer({ baseSec, since, frozen, className }) {
 
 function LiveCard({ row, student, history, since, onOpenNumber }) {
   const isOut = row.direction === 'outgoing';
-  const dialling = isOut && row.state !== 'ended';
-  const meta = dialling ? CALLING_META : (STATE_META[row.state] || STATE_META.connected);
+  const outgoingLive = isOut && row.state !== 'ended';
+  const ended = row.state === 'ended';
+  /* A finished call that never connected says so: the call log's talk time is 0. An incoming
+     call that ended without ever being answered is a missed call. */
+  const neverConnected = ended && (isOut ? row.talk_sec === 0 : !row.answered_at && !row.talk_sec);
+  const meta = outgoingLive ? OUTGOING_META
+    : neverConnected ? (isOut ? NOT_ANSWERED_META : MISSED_META)
+      : (STATE_META[row.state] || STATE_META.connected);
   const type = isOut ? 'OUTGOING' : row.direction === 'incoming' ? 'INCOMING' : 'UNKNOWN';
   const t = TYPE[type] || TYPE.UNKNOWN;
   const hasNumber = !!row.number;
   const open = () => hasNumber && onOpenNumber({ number_norm: row.number_norm, number: row.number });
 
   /*
-   * Ringing counts the ring. A call being talked on — and a finished one — counts the talk time,
-   * never the time since it was dialled: for an outgoing call those differ by however long it rang,
-   * which is exactly the mistake this card is here to avoid. An outgoing call still in progress
-   * counts nothing at all; see CALLING_META.
+   * What the timer counts:
+   *  - ringing (incoming)          → how long it has rung
+   *  - on call (incoming)          → talk time, from the moment it was answered
+   *  - outgoing, in progress       → since dialled (labelled so; see OUTGOING_META)
+   *  - ended                       → the real talk time from the call log, once the phone sends it
+   *  - ended without connecting    → how long it rang
    */
-  const base = (row.talk_sec != null && (row.state === 'connected' || row.state === 'ended'))
-    ? row.talk_sec
-    : row.elapsed_sec;
+  const base = neverConnected ? row.elapsed_sec
+    : (row.talk_sec != null && (row.state === 'connected' || ended)) ? row.talk_sec
+      : row.elapsed_sec;
 
   return (
     <button className={`ciq-live-card ma-rip${hasNumber ? '' : ' no-click'}`} onPointerDown={ripple} onClick={open}
-            data-state={row.state} data-stale={row.stale ? '1' : undefined} data-dialling={dialling ? '1' : undefined}
-            title={hasNumber ? 'Open this number’s history' : 'Android only gives an outgoing call’s number once it ends'}>
+            data-state={row.state} data-stale={row.stale ? '1' : undefined}
+            title={hasNumber ? 'Open this number’s history' : 'This phone has not shared the number yet — it arrives with the call log when the call ends'}>
       <span className="ciq-live-state" style={{ background: meta.bg, color: meta.color }}>
         <i />{meta.label}
       </span>
@@ -133,8 +143,8 @@ function LiveCard({ row, student, history, since, onOpenNumber }) {
               ? <StudentChip student={student} number={row.number_norm} style={{ maxWidth: 150 }} />
               : hasNumber
                 ? <span>{history?.calls > 1 ? `${nf(history.calls)} earlier calls` : 'First call'}</span>
-                : <span>{isOut ? 'number appears when it ends' : 'the network did not share it'}</span>}
-            {dialling && hasNumber && <span>· waiting for an answer</span>}
+                : <span>{isOut ? 'number arrives when it ends' : 'the network did not share it'}</span>}
+            {outgoingLive && <span>· in progress</span>}
           </div>
         </div>
       </div>
@@ -148,10 +158,10 @@ function LiveCard({ row, student, history, since, onOpenNumber }) {
         </span>
         <span className="sim">{row.sim_slot ? row.sim_label || `SIM ${row.sim_slot}` : 'Unknown SIM'}{row.carrier ? ` · ${row.carrier}` : ''}</span>
         <span className="time">
-          {dialling
-            ? <span className="ciq-live-dialing" aria-label="calling"><i /><i /><i /></span>
-            : <LiveTimer baseSec={base} since={since} frozen={row.state === 'ended'} />}
-          <em>{meta.verb}</em>
+          <LiveTimer baseSec={base} since={since} frozen={ended} />
+          <em title={outgoingLive ? 'Android does not tell apps when an outgoing call is answered, so this includes the ringing. The exact talk time replaces it when the call ends.' : undefined}>
+            {meta.verb}
+          </em>
         </span>
       </div>
 
@@ -166,9 +176,9 @@ export default function LiveCallsBar({ onOpenNumber }) {
   const now = useNow(5000);
   const active = live.filter(r => r.state !== 'ended');
   const ringing = active.filter(r => r.state === 'ringing').length;
-  // An outgoing call in progress is "calling" until it ends — Android never says it was answered.
-  const calling = active.filter(r => r.direction === 'outgoing').length;
-  const talking = active.length - ringing - calling;
+  // Outgoing calls are counted on their own: Android never says when one was answered.
+  const outgoing = active.filter(r => r.direction === 'outgoing').length;
+  const talking = active.length - ringing - outgoing;
   const checkedAgo = fetchedAt && now ? Math.max(0, Math.round((now - fetchedAt) / 1000)) : 0;
 
   return (
@@ -184,7 +194,7 @@ export default function LiveCallsBar({ onOpenNumber }) {
           {hasFetched && !loading && !error && active.length === 0 && 'No calls in progress'}
           {hasFetched && !loading && !error && [
             ringing > 0 ? `${nf(ringing)} ringing in` : null,
-            calling > 0 ? `${nf(calling)} ringing out` : null,
+            outgoing > 0 ? `${nf(outgoing)} outgoing` : null,
             talking > 0 ? `${nf(talking)} on call` : null,
           ].filter(Boolean).join(' · ')}
         </span>

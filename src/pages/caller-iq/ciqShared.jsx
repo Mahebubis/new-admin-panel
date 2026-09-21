@@ -105,6 +105,9 @@ export const outcomeColor = o => (!o ? '#cbd5e1' : OUTCOME_COLOR[o] || '#64748b'
 export const SIM_SOURCES = {
   telecom: { label: 'Phone account', hint: 'Matched through Android telecom — exact', good: true },
   account: { label: 'Phone account', hint: 'Matched through Android telecom — exact', good: true },
+  exact: { label: 'Phone account', hint: 'Android’s own telephony matched the call to the SIM card — exact', good: true },
+  label: { label: 'SIM name', hint: 'The call’s phone account carries this SIM’s name, colour or number — and no other SIM’s', good: true },
+  oem: { label: 'Maker’s column', hint: 'The phone maker’s own SIM column in the call log', good: true },
   subid: { label: 'Subscription id', hint: 'The call log stored the subscription id', good: true },
   iccid: { label: 'SIM ICCID', hint: 'Matched on the SIM serial', good: true },
   live: { label: 'Live capture', hint: 'The SIM that was busy while the call was connected', good: true },
@@ -171,10 +174,13 @@ export function fmtDur(sec) {
   if (m) return r ? `${m}m ${r}s` : `${m}m`;
   return `${r}s`;
 }
+/** One call's length: "2s", "45s" under a minute; "02:04" from a minute; "1:02:04" from an hour. */
 export const fmtClock = sec => {
-  const s = Math.round(Number(sec || 0));
+  const s = Math.max(0, Math.round(Number(sec || 0)));
+  if (s < 60) return `${s}s`;
   const h = Math.floor(s / 3600); const m = Math.floor((s % 3600) / 60); const r = s % 60;
-  return `${h ? `${h}:` : ''}${String(m).padStart(h ? 2 : 1, '0')}:${String(r).padStart(2, '0')}`;
+  const two = n => String(n).padStart(2, '0');
+  return h ? `${h}:${two(m)}:${two(r)}` : `${two(m)}:${two(r)}`;
 };
 export const toDate = s => (s ? new Date(String(s).replace(' ', 'T')) : null);
 
@@ -713,6 +719,43 @@ button.ciq-outcome:active { transform:scale(.97); }
 .ciq-status[data-s="online"] { color:#047857; } .ciq-status[data-s="online"] i { background:#10b981; animation:ciq-pulse 2s infinite; }
 .ciq-status[data-s="idle"] { color:#b45309; } .ciq-status[data-s="idle"] i { background:#f59e0b; }
 .ciq-pend { display:inline-flex; align-items:center; gap:4px; height:20px; padding:0 7px; border-radius:6px; background:#fef2f2; color:#b91c1c; font-size:10.5px; font-weight:750; white-space:nowrap; }
+/* Phone setup — the chip on each Agents card and the checklist it opens. */
+.ciq-setup { display:inline-flex; align-items:center; gap:5px; height:22px; margin-top:5px; padding:0 8px; border:0; border-radius:7px; font:inherit; font-size:10.5px; font-weight:750; white-space:nowrap; max-width:100%; overflow:hidden; text-overflow:ellipsis; cursor:pointer; transition:filter .15s, box-shadow .15s, transform .1s; }
+.ciq-setup:hover { filter:brightness(.97); box-shadow:0 1px 3px rgba(15,23,42,.14); }
+.ciq-setup:active { transform:scale(.97); }
+.ciq-setup:focus-visible { outline:2px solid #6366f1; outline-offset:2px; }
+.ciq-setup i { width:6px; height:6px; border-radius:50%; flex:none; }
+.ciq-setup[data-tone="ok"] { background:#ecfdf5; color:#047857; } .ciq-setup[data-tone="ok"] i { background:#10b981; }
+.ciq-setup[data-tone="warn"] { background:#fffbeb; color:#b45309; } .ciq-setup[data-tone="warn"] i { background:#f59e0b; }
+.ciq-setup[data-tone="bad"] { background:#fef2f2; color:#b91c1c; } .ciq-setup[data-tone="bad"] i { background:#ef4444; }
+.ciq-setup[data-tone="muted"] { background:#f1f5f9; color:#64748b; } .ciq-setup[data-tone="muted"] i { background:#cbd5e1; }
+.ciq-checks { display:flex; flex-direction:column; gap:2px; margin:0 -4px; }
+.ciq-check { display:flex; gap:10px; align-items:flex-start; padding:9px 8px; border-radius:10px; }
+.ciq-check + .ciq-check { border-top:1px solid #f1f5f9; }
+.ciq-check-dot { flex:none; width:22px; height:22px; border-radius:50%; display:grid; place-items:center; font-size:12px; font-weight:800; margin-top:1px; }
+.ciq-check[data-s="done"] .ciq-check-dot, .ciq-check[data-s="confirmed"] .ciq-check-dot { background:#ecfdf5; color:#047857; }
+.ciq-check[data-s="todo"] .ciq-check-dot { background:#fef2f2; color:#b91c1c; }
+.ciq-check[data-s="unknown"] .ciq-check-dot { background:#fffbeb; color:#b45309; }
+.ciq-check b { display:block; font-size:13px; font-weight:700; color:var(--ink); }
+.ciq-check small { display:block; font-size:11.5px; color:#64748b; line-height:1.45; margin-top:2px; }
+.ciq-check em { font-style:normal; font-size:10px; font-weight:700; letter-spacing:.02em; text-transform:uppercase; color:#94a3b8; margin-left:6px; }
+.ciq-issue { display:flex; gap:9px; align-items:flex-start; padding:9px 11px; border-radius:10px; font-size:12px; line-height:1.45; }
+.ciq-issue + .ciq-issue { margin-top:6px; }
+.ciq-issue svg { flex:none; margin-top:2px; }
+.ciq-issue b { display:block; font-weight:750; font-size:12.5px; }
+.ciq-issue[data-l="bad"] { background:#fef2f2; color:#991b1b; }
+.ciq-issue[data-l="warn"] { background:#fffbeb; color:#92400e; }
+.ciq-issue[data-l="info"] { background:#f1f5f9; color:#475569; }
+.ciq-facts { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; }
+.ciq-facts > div { background:#f8fafc; border:1px solid #eef2f7; border-radius:10px; padding:8px 10px; min-width:0; }
+.ciq-facts span { display:block; font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:#94a3b8; }
+.ciq-facts b { display:block; font-size:13px; font-weight:700; color:var(--ink); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ciq-facts b[data-bad] { color:#b91c1c; }
+.ciq-sec { font-size:10.5px; font-weight:750; letter-spacing:.05em; text-transform:uppercase; color:#94a3b8; margin:16px 0 8px; }
+.ciq-attn { display:flex; flex-direction:column; gap:6px; }
+.ciq-attn button { all:unset; cursor:pointer; font-weight:750; text-decoration:underline; text-decoration-color:rgba(146,64,14,.35); text-underline-offset:2px; }
+.ciq-attn button:hover { text-decoration-color:currentColor; }
+.ciq-attn button:focus-visible { outline:2px solid #6366f1; outline-offset:2px; border-radius:3px; }
 .ciq-ok { display:inline-flex; align-items:center; gap:4px; height:20px; padding:0 7px; border-radius:6px; background:#ecfdf5; color:#047857; font-size:10.5px; font-weight:700; white-space:nowrap; }
 .ciq-student { display:inline-flex; align-items:center; gap:4px; font-size:10.5px; font-weight:650; color:#0369a1; background:#f0f9ff; border-radius:5px; padding:1px 6px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ciq-dur { display:inline-flex; flex-direction:column; align-items:flex-end; gap:3px; }

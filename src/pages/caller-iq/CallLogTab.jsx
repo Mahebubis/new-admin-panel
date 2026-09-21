@@ -160,6 +160,9 @@ export default function CallLogTab({ rangeBody, filters, fKey, deviceById, reloa
                     {r.duration_sec > 0 ? (
                       <span className="ciq-dur"><span>{fmtClock(r.duration_sec)}</span>
                         <span className="mini"><span style={{ width: `${Math.min(100, (r.duration_sec / 600) * 100)}%` }} /></span></span>
+                    ) : r.ring_sec > 0 ? (
+                      /* A missed call that rang — its ringing, never shown as talk time. */
+                      <span className="zero" title="How long it rang. Nobody spoke, so it counts as 0 talk time.">rang {fmtClock(r.ring_sec)}</span>
                     ) : <span className="zero">—</span>}
                   </td>
                   <td className="l" onClick={e => e.stopPropagation()}>

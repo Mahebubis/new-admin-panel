@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { nf, pctText, ripple, Skel, Empty } from '../netcore/analytics/maShared';
 import { ciqCached, errText, TYPE, Avatar, StatusDot, Sparkline, Delta, Ic, fmtDur, fmtAgo } from './ciqShared';
+import { phoneIssues, setupChip, osText } from './ciqHealth';
+import PhoneSetupModal from './PhoneSetupModal';
 
 /*
- * Every phone that has ever synced, including ones with no calls in this range — an agent who
- * went quiet is exactly what this tab should surface, so they sort last rather than disappear.
+ * Every phone the app is installed on — including ones that have not uploaded a call yet (app
+ * v1.4 checks in the moment it opens) and ones with no calls in this range. An agent who went
+ * quiet is exactly what this tab should surface, so they sort last rather than disappear.
  */
 
 const SORTS = [['total', 'Most calls'], ['talk', 'Most talk time'], ['rate', 'Best connect rate'], ['pending', 'Most pending callbacks'], ['name', 'Name']];
@@ -15,6 +18,7 @@ export default function AgentsTab({ rangeBody, filters, fKey, reloadTick, onOpen
   const [busy, setBusy] = useState(false);
   const [sort, setSort] = useState('total');
   const [showHidden, setShowHidden] = useState(false);
+  const [setupFor, setSetupFor] = useState(null);
   const req = useRef(0);
 
   const load = useCallback(async () => {
@@ -42,7 +46,14 @@ export default function AgentsTab({ rangeBody, filters, fKey, reloadTick, onOpen
     return [...list].sort((a, b) => (sort === 'name' ? a.label.localeCompare(b.label) : v(b) - v(a) || a.label.localeCompare(b.label)));
   }, [data, sort, showHidden]);
 
-  const popupOff = (data?.agents || []).filter(a => Number(a.popup_ok) === 0 && !Number(a.is_hidden));
+  /* Phones that need someone to pick them up, each with the one reason that matters most. Built
+     from the phone's own report — an old build that cannot report is told to update, never
+     shown as "popup off" (Number(null) is 0, which is how that false alarm used to happen). */
+  const attention = useMemo(() => (data?.agents || [])
+    .filter(a => a.device_id && !Number(a.is_hidden))
+    .map(a => ({ a, issues: phoneIssues(a) }))
+    .map(x => ({ ...x, top: x.issues.find(i => i.level === 'bad') || x.issues.find(i => i.level === 'warn') }))
+    .filter(x => x.top), [data]);
   const hiddenCount = (data?.agents || []).filter(a => Number(a.is_hidden)).length;
   const online = (data?.agents || []).filter(a => a.status === 'online' && !Number(a.is_hidden)).length;
   const unidentified = (data?.agents || []).find(a => a.device_id === '' && a.stats?.total);
@@ -53,7 +64,7 @@ export default function AgentsTab({ rangeBody, filters, fKey, reloadTick, onOpen
         <div style={{ fontSize: 13 }}>
           <b>{nf(agents.length)}</b> <span style={{ color: '#64748b' }}>{agents.length === 1 ? 'phone' : 'phones'}</span>
           <span style={{ color: '#cbd5e1', margin: '0 8px' }}>|</span>
-          <span className="ciq-status" data-s="online"><i />{nf(online)} synced in the last 3 hours</span>
+          <span className="ciq-status" data-s="online"><i />{nf(online)} active in the last 3 hours</span>
         </div>
         {busy && data && <span className="ma-dots"><i /><i /><i /></span>}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -73,14 +84,17 @@ export default function AgentsTab({ rangeBody, filters, fKey, reloadTick, onOpen
           <span><b>{nf(unidentified.stats.total)} calls</b> in this range came from phones on the original app build, which does not send a handset ID, so they are grouped as “Unidentified phone” and their SIM cannot be identified. Install app v1.3 on those phones to split them per agent and per SIM.</span>
         </div>
       )}
-      {popupOff.length > 0 && (
-        <div className="ma-note" style={{ marginBottom: 12 }}>
+      {attention.length > 0 && (
+        <div className="ma-note" style={{ marginBottom: 12, alignItems: 'flex-start' }}>
           {Ic.alert}
-          <span>
-            <b>{popupOff.map(a => a.label).join(', ')}</b> {popupOff.length === 1 ? 'cannot' : 'cannot'} show the post-call popup, so
-            {popupOff.length === 1 ? ' that counselor' : ' those counselors'} will not be tagging calls from the phone.
-            Open CallIQ on the phone and finish <b>Post-Call Popup Setup</b> (“Display over other apps”, plus the phone maker's own pop-up and autostart switches).
-          </span>
+          <div className="ciq-attn">
+            <span><b>{attention.length} {attention.length === 1 ? 'phone needs' : 'phones need'} attention</b> — click a phone to see exactly what is off and how to fix it.</span>
+            {attention.map(({ a, top }) => (
+              <span key={a.device_id}>
+                <button onClick={() => setSetupFor(a)}>{a.label}</button>: {top.title}
+              </span>
+            ))}
+          </div>
         </div>
       )}
       {error && <div className="ma-note" style={{ marginBottom: 12, background: '#fef2f2', borderColor: '#fecaca', color: '#b91c1c' }}>{error}</div>}
@@ -102,14 +116,19 @@ export default function AgentsTab({ rangeBody, filters, fKey, reloadTick, onOpen
                 <Avatar name={a.label} size={40} />
                 <div style={{ minWidth: 0, flex: 1, paddingRight: 30 }}>
                   <b>{a.label}</b>
-                  <small>{[a.team, a.agent_name && a.device_model, a.app_version && `v${a.app_version}`].filter(Boolean).join(' · ') || (a.device_id ? 'Name this agent →' : 'Original app build')}</small>
-                  {/* A phone that cannot show the post-call popup quietly stops tagging anything,
-                      so it is called out here rather than being noticed weeks later. */}
-                  {Number(a.popup_ok) === 0 && (
-                    <span className="ciq-pend" style={{ marginTop: 4 }} title="This phone reports that the post-call popup is off or not allowed. Open the app on that phone → Post-Call Popup Setup.">
-                      {Ic.alert} Popup off
-                    </span>
-                  )}
+                  <small title={osText(a)}>{[a.team, a.agent_name && a.device_model, a.os_release && `Android ${a.os_release}`, a.app_version && `v${a.app_version}`].filter(Boolean).join(' · ') || (a.device_id ? 'Name this agent →' : 'Original app build')}</small>
+                  {/* The phone's own setup report in one chip; the checklist opens on click. */}
+                  {a.device_id && (() => {
+                    const chip = setupChip(a);
+                    return (
+                      <button className="ciq-setup" data-tone={chip.tone} title="See this phone's setup"
+                              onPointerDown={e => e.stopPropagation()}
+                              onClick={e => { e.stopPropagation(); setSetupFor(a); }}
+                              onKeyDown={e => e.stopPropagation()}>
+                        <i />{chip.text}
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
               <div className="ciq-agent-kpis">
@@ -125,7 +144,7 @@ export default function AgentsTab({ rangeBody, filters, fKey, reloadTick, onOpen
               <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 10 }}>
                 <div className="ciq-agent-f" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 3 }}>
                   <StatusDot status={a.status} />
-                  <span>{s.total ? `last call ${fmtAgo(s.last_call_at)}` : `synced ${fmtAgo(a.last_seen_at)}`}</span>
+                  <span>{s.total ? `last call ${fmtAgo(s.last_call_at)}` : Number(a.all_calls) === 0 ? `installed · no calls yet` : `last call ${fmtAgo(a.last_call_at || a.last_seen_at)}`}</span>
                   <span>vs before: <Delta cur={s.total} prev={a.prev?.total || 0} /></span>
                 </div>
                 <Sparkline data={a.spark} color={s.total ? '#4f46e5' : '#cbd5e1'} width={120} height={38} />
@@ -134,6 +153,8 @@ export default function AgentsTab({ rangeBody, filters, fKey, reloadTick, onOpen
           );
         })}
       </div>
+
+      {setupFor && <PhoneSetupModal agent={setupFor} onClose={() => setSetupFor(null)} />}
     </>
   );
 }
