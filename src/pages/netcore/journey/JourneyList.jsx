@@ -137,6 +137,34 @@ tr:hover .jl-refresh,.jl-refresh:focus-visible,.jl-refresh[data-state]{opacity:1
 @media (prefers-reduced-motion:reduce){.jl-dot-load span{animation:none;opacity:.6}}
 `;
 
+/**
+ * Bounced, with the email and WhatsApp halves printed under the total.
+ *
+ * A journey's two channels fail for unrelated reasons — a mistyped address on one side, a number
+ * with no WhatsApp account on the other — and a combined figure tells you something is wrong
+ * without telling you where, which is the report asking you to go and find out.
+ */
+function Bounced({ row, isPct }) {
+  const by = row.byChannel || {};
+  const total = Number(row.bounced || 0);
+  const em = Number(by.email?.bounced || 0);
+  const wa = Number(by.whatsapp?.bounced || 0);
+  const show = (v, base) => (isPct ? pct(v, base) : nUS(v));
+  return (
+    <div>
+      <span className="jm-n" style={{ color: total ? (total > 0 ? '#b42318' : '#0f172a') : '#cbd5e1' }}>
+        {show(total, row.sent)}
+      </span>
+      {(em > 0 || wa > 0) && (
+        <div style={{ marginTop: 3, fontSize: 10.5, color: '#94a3b8', display: 'flex', gap: 7, justifyContent: 'center' }}>
+          <span title="Email addresses that bounced"><Mail size={10} strokeWidth={2.4} style={{ verticalAlign: '-1px' }} /> {show(em, by.email?.sent || 0)}</span>
+          <span title="WhatsApp numbers that could not receive"><MessageCircle size={10} strokeWidth={2.4} style={{ verticalAlign: '-1px' }} /> {show(wa, by.whatsapp?.sent || 0)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Metric({ row, k, isPct }) {
   const by = row.byChannel;
   const total = Number(row[k] || 0);
@@ -408,8 +436,11 @@ export default function JourneyList() {
   };
 
   const exportCsv = () => {
-    const head = ['ID', 'Name', 'Status', 'Sent', 'Delivered', 'Opened', 'Clicked', 'Conversions', 'Revenue'];
-    const lines = filtered.map(r => [r.id, `"${r.name}"`, r.status, r.sent, r.delivered, r.opened, r.clicked, r.conversions, r.revenue].join(','));
+    const head = ['ID', 'Name', 'Status', 'Sent', 'Delivered', 'Opened', 'Clicked',
+      'Bounced', 'Bounced (email)', 'Bounced (WhatsApp)', 'Conversions', 'Revenue'];
+    const lines = filtered.map(r => [r.id, `"${r.name}"`, r.status, r.sent, r.delivered, r.opened, r.clicked,
+      r.bounced || 0, r.byChannel?.email?.bounced || 0, r.byChannel?.whatsapp?.bounced || 0,
+      r.conversions, r.revenue].join(','));
     const blob = new Blob([[head.join(','), ...lines].join('\n')], { type: 'text/csv' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `journeys-${tab}.csv`; a.click(); URL.revokeObjectURL(a.href);
     toast.success(`Exported ${filtered.length} journeys`);
@@ -547,6 +578,7 @@ export default function JourneyList() {
                 ['Delivered', 'Messages the provider confirmed as delivered.'],
                 ['Opened / Read', 'Emails opened, WhatsApp messages read.'],
                 ['Clicked', 'Messages with at least one link tap.'],
+                ['Bounced', 'Messages that came back undeliverable — a dead address or a number that is not on WhatsApp. Email and WhatsApp are counted separately underneath.'],
                 ['Conversions', 'Students who did the goal event after clicking.'],
               ].map(([h, tip]) => (
                 <th key={h} style={th} title={tip}>{h}</th>
@@ -557,12 +589,12 @@ export default function JourneyList() {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={10} style={{ padding: '46px 16px', textAlign: 'center', color: '#94a3b8' }}>
+              <tr><td colSpan={11} style={{ padding: '46px 16px', textAlign: 'center', color: '#94a3b8' }}>
                 Loading journeys…
               </td></tr>
             )}
             {!loading && pageRows.length === 0 && (
-              <tr><td colSpan={10} style={{ padding: '46px 16px', textAlign: 'center', color: '#94a3b8' }}>
+              <tr><td colSpan={11} style={{ padding: '46px 16px', textAlign: 'center', color: '#94a3b8' }}>
                 No journeys here. <button onClick={() => { setTab('all'); setQ(''); }} style={{ border: 0, background: 'none', color: '#1e3a8a', fontWeight: 600, cursor: 'pointer' }}>Clear filters</button>
               </td></tr>
             )}
@@ -627,6 +659,10 @@ export default function JourneyList() {
                 <td style={cell}>{rowRefresh[r.id] === 'busy' ? <DotLoad /> : <Metric row={r} k="delivered" isPct={isPct} />}</td>
                 <td style={cell}>{rowRefresh[r.id] === 'busy' ? <DotLoad /> : <Metric row={r} k="opened" isPct={isPct} />}</td>
                 <td style={cell}>{rowRefresh[r.id] === 'busy' ? <DotLoad /> : <Metric row={r} k="clicked" isPct={isPct} />}</td>
+                {/* Bounces are the one number nobody wants as a single total: a dead email address
+                    and a number that is not on WhatsApp are different problems with different
+                    fixes, so both are on screen rather than hidden behind a hover. */}
+                <td style={cell}>{rowRefresh[r.id] === 'busy' ? <DotLoad /> : <Bounced row={r} isPct={isPct} />}</td>
                 <td style={cell}>{rowRefresh[r.id] === 'busy' ? <DotLoad /> : <Metric row={r} k="conversions" isPct={isPct} />}</td>
                 <td style={cell}>{rowRefresh[r.id] === 'busy' ? <DotLoad /> : (r.revenue ? nUS(r.revenue) : 0)}</td>
                 <td style={{ padding: '13px 14px', verticalAlign: 'top' }}>

@@ -436,12 +436,48 @@ export default function App() {
   const canGoBack = true;
   const resetTheme = () => { setTheme(null); try { localStorage.removeItem("helphive-theme"); } catch (e) {} const root = document.querySelector(".app"); if (root) root.removeAttribute("style"); };
   const themeApi = { theme: theme || (dark ? THEME_DARK : THEME_DEFAULT), setTheme, resetTheme, dark };
+  /*
+   * Prev / Next through the queue, and what "Close" hands off to.
+   *
+   * Three things here were wrong and produced the same visible bug — closing a
+   * ticket threw you back onto one you had already answered:
+   *
+   *   1. It moved activeTicket WITHOUT navigating, so the URL still named the
+   *      old ticket. The deep-link effect below re-reads the URL on every
+   *      `tickets` change — which is constantly, because every optimistic patch
+   *      and every poll replaces that array — sees activeTicket disagreeing
+   *      with the address bar, and snaps you back to the ticket you just left.
+   *      Going through openTicket() keeps the two in step.
+   *
+   *   2. It stepped by array position in a list sorted by last_message_at.
+   *      Replying bumps a ticket to index 0, so after answering two or three in
+   *      a row, "next" from the top walked straight into the one answered
+   *      before it.
+   *
+   *   3. It wrapped with % length, so Next from the last row silently became
+   *      the first row.
+   *
+   * Now: move forward to the next ticket that still needs an agent, skipping
+   * anything already Resolved/Closed and anything filed away, and stop at the
+   * end of the queue instead of wrapping.
+   */
   const step = (d) => {
     if (!tickets.length) return;
     const i = tickets.findIndex(t => t.id === (activeTicket && activeTicket.id));
     if (i < 0) return;
-    setActiveTicket(tickets[(i + d + tickets.length) % tickets.length]);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+
+    const needsWork = (t) => t
+      && !["Resolved", "Closed"].includes(t.status)
+      && !t.spam && !t.trash;
+
+    for (let j = i + d; j >= 0 && j < tickets.length; j += d) {
+      if (needsWork(tickets[j])) { openTicket(tickets[j]); return; }
+    }
+
+    /* Nothing left in that direction. The queue is the right place to land --
+       silently staying put reads as a dead button. */
+    push({ type: "success", title: "That is the end of the queue", desc: "Nothing left to answer this way." });
+    go("tickets");
   };
   /*
    * Deep links.
@@ -485,7 +521,23 @@ export default function App() {
     if (hit) setActiveCustomer(hit);
   }, [route, parsed.id, tickets]);
 
-  const active = activeTicket;
+  /*
+   * The open ticket, always as the working set currently has it.
+   *
+   * activeTicket is a SNAPSHOT taken when the row was clicked. Every later
+   * write — a status change, a reply bumping last_message_at, a poll — replaces
+   * the object inside `tickets` but leaves that snapshot untouched, so the
+   * detail screen could go on showing a status the list had already moved past.
+   * Re-reading it by id on each render means there is one copy of the truth.
+   *
+   * The fallback matters: a deep link to a ticket outside the 500-row working
+   * set is fetched on its own and is legitimately absent from `tickets`.
+   */
+  const active = useMemo(() => {
+    if (!activeTicket) return null;
+    const live = tickets.find((t) => Number(t.id) === Number(activeTicket.id));
+    return live || activeTicket;
+  }, [tickets, activeTicket]);
   return (
     <ToastCtx.Provider value={push}>
     <DeskCtx.Provider value={deskApi}>

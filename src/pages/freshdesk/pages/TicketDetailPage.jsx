@@ -1119,6 +1119,15 @@ const MessageEntry = memo(function MessageEntry({ m, onRetry, onDeleteNote, onPr
   const hasQuoted = !!(quotedHtml || quotedText);
 
   const files = useMemo(() => (m.attachments || []).filter((a) => !a.inline), [m.attachments]);
+  /* attCount is what the EMAIL carried; m.attachments is what survived storage.
+     A gap is not cosmetic — it is a file the customer sent and the agent will
+     otherwise never know about. Older rows predate attCount, so a missing or
+     zero value must never produce a warning. */
+  const missingFiles = useMemo(() => {
+    const parsed = Number(m.attCount || 0);
+    const kept = (m.attachments || []).length;
+    return parsed > kept ? parsed - kept : 0;
+  }, [m.attCount, m.attachments]);
   /* Pictures are shown; everything else stays a chip. A screenshot of the bug
      is the message half the time, and making the agent click to see it is a
      step that buys nothing. */
@@ -1191,6 +1200,18 @@ const MessageEntry = memo(function MessageEntry({ m, onRetry, onDeleteNote, onPr
                                 onView={() => onPreview && onPreview(files, files.indexOf(a))} />
               ))}
             </div>
+          </div>
+        )}
+
+        {/* The email carried files we did not keep — too large, over the
+            per-message budget, or storage refused them. Silence here is what
+            made an agent tell a customer "you didn't attach anything" when
+            they had. */}
+        {missingFiles > 0 && (
+          <div className="msg-blocked">
+            <AlertCircle size={13} />
+            {missingFiles} attached file{missingFiles === 1 ? " was" : "s were"} not stored — too large
+            or rejected by storage. Ask the sender to resend{missingFiles === 1 ? " it" : " them"} as a link.
           </div>
         )}
 

@@ -234,6 +234,13 @@ const PEOPLE_BUCKETS = [
   // Its own tab rather than folded into "Not sent": an address that does not exist is a data
   // problem, while everything else in that bucket is the journey deliberately holding back.
   { key: 'unverified', label: 'Invalid address' },
+  /*
+    Bounced and Rejected were one tab called "Rejected", and they are not the same event: a bounce
+    is the mailbox or number refusing the message (bad data), a rejection is the provider refusing
+    to send it at all (bad setup). Step n3 of journey 50 read "Rejected 608" when every one of
+    those 608 was a bounce.
+  */
+  { key: 'bounced',   label: 'Bounced' },
   { key: 'failed',    label: 'Rejected' },
 ];
 
