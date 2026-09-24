@@ -97,7 +97,9 @@ const Styles = () => (
     .content-frame .tickets-layout > *{min-height:0;overflow-y:auto}
     /* The content column is a column of its own: pager, select-all, then the
        one part that scrolls. */
-    .content-frame .tickets-layout > div:last-child{display:flex;flex-direction:column;overflow:hidden}
+    .content-frame .tickets-layout > .tl-main{display:flex;flex-direction:column;overflow:hidden}
+    /* The filter column scrolls its fields, not itself: head and Apply stay put. */
+    .content-frame .tickets-layout > .fsb{overflow:hidden}
     /* overflow-x hidden, not visible: a scroller cannot be visible on one axis,
        and left as auto a card's hover shadow raises a stray sideways scrollbar.
        The table layout does its own sideways scrolling inside .table-wrap. */
@@ -498,6 +500,20 @@ const Styles = () => (
     /* Closed the panel is not rendered at all and the grid is one column, so
        the list gets the full width -- not a narrow strip of leftover gutter. */
     .tickets-layout.nav-shut{grid-template-columns:minmax(0,1fr);gap:0}
+    /* The filters column: a third track on the right that the list gives up
+       width to, the way it does for the views column on the left. */
+    .tickets-layout.filters-open{grid-template-columns:236px minmax(0,1fr) 300px}
+    .tickets-layout.nav-shut.filters-open{grid-template-columns:minmax(0,1fr) 300px;gap:18px}
+    .fsb{display:flex;flex-direction:column;min-height:0;padding:0;overflow:hidden;animation:fsbIn .2s cubic-bezier(.4,0,.2,1)}
+    .fsb .drawer-head{padding:12px 14px}
+    .fsb .drawer-body{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:14px;gap:16px}
+    .fsb .fld input,.fsb .fld select{width:100%;min-width:0}
+    .fsb .drawer-foot{padding:12px 14px}
+    @keyframes fsbIn{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:none}}
+    /* Both side columns do not fit beside a readable list below this, so the
+       views column steps aside while the filters are open. */
+    @media(max-width:1280px){.tickets-layout.filters-open{grid-template-columns:minmax(0,1fr) 300px}
+                             .tickets-layout.filters-open > .tnav{display:none}}
 
     /* The toggle lives in the toolbar; small, and lit while the panel is open. */
     .icon-btn.sm{width:34px;height:34px;border-radius:9px}
@@ -904,10 +920,16 @@ const Styles = () => (
     .tactions button.danger:hover{color:var(--danger);border-color:var(--danger);background:#FEE2E2}
 
     .table-wrap{overflow-x:auto}
-    table{width:100%;border-collapse:collapse;font-size:13px;min-width:900px}
-    thead th{text-align:left;font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding:12px 14px;border-bottom:1px solid var(--border);white-space:nowrap}
-    tbody td{padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
-    tbody tr{transition:background .15s}tbody tr:hover{background:var(--hover)}tbody tr:last-child td{border-bottom:0}
+    /* The desk's own data tables. Kept out of email bodies (.msg-html): these
+       were bare element selectors, so every table in a customer's mail got
+       width:100% and min-width:900px -- which overrode the email's own column
+       widths and stretched a 26px step badge to 900px -- plus row borders and
+       a hover highlight. :where() keeps the specificity exactly what it was, so
+       nothing that used to override these stops doing so. */
+    table:where(:not(.msg-html table)){width:100%;border-collapse:collapse;font-size:13px;min-width:900px}
+    thead th:where(:not(.msg-html th)){text-align:left;font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding:12px 14px;border-bottom:1px solid var(--border);white-space:nowrap}
+    tbody td:where(:not(.msg-html td)){padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+    tbody tr:where(:not(.msg-html tr)){transition:background .15s}tbody tr:where(:not(.msg-html tr)):hover{background:var(--hover)}tbody tr:last-child td:where(:not(.msg-html td)){border-bottom:0}
     .cust{display:flex;align-items:center;gap:10px}
     .cust .a{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:11.5px;flex-shrink:0}
     .cust .nm{font-weight:600}.cust .em{font-size:11px;color:var(--muted)}
@@ -1120,6 +1142,29 @@ const Styles = () => (
        nothing and keeps the ticket identified while you read. */
     .td-grid > .td-convo{display:flex;flex-direction:column;min-height:0;overflow-y:auto;
       overscroll-behavior:contain;padding:0}
+    /* ---- Close & Next ----
+       The overlay rides at the top of whatever part of the conversation is on
+       screen: a sticky, zero-height wrapper as the column's first child, with
+       the overlay hung off it at the column's visible height (measured when
+       the button is pressed). The conversation behind it settles back so the
+       change reads as the ticket being put away, not as a spinner. */
+    .td-convo.is-closing > :not(.td-closing-wrap){transition:opacity .35s ease,transform .45s cubic-bezier(.4,0,.2,1);
+      opacity:.25;transform:scale(.985) translateY(6px);pointer-events:none}
+    .td-closing-wrap{position:sticky;top:0;height:0;z-index:30}
+    .td-closing{position:absolute;left:0;right:0;top:0;display:flex;flex-direction:column;align-items:center;
+      justify-content:center;gap:8px;text-align:center;padding:24px;
+      background:color-mix(in srgb,var(--surface) 55%,transparent);backdrop-filter:blur(2px);
+      animation:fdFadeIn .18s ease-out}
+    .td-closing b{font-size:16px;font-weight:750;color:var(--text)}
+    .td-closing span:last-child{font-size:12.5px;color:var(--muted)}
+    .td-closing-badge{width:58px;height:58px;border-radius:50%;display:grid;place-items:center;color:#fff;
+      background:var(--success);box-shadow:0 12px 30px -10px color-mix(in srgb,var(--success) 70%,transparent);
+      animation:tdStamp .5s cubic-bezier(.34,1.56,.64,1)}
+    @keyframes tdStamp{0%{transform:scale(.3) rotate(-18deg);opacity:0}60%{transform:scale(1.12) rotate(4deg);opacity:1}100%{transform:none}}
+    /* The rail's paging controls. */
+    .tq-more-btn{border:0;background:none;font:inherit;color:var(--primary);font-weight:650;cursor:pointer;padding:0}
+    button.tq-more.tq-more-btn{display:block;width:100%;padding:12px}
+    .tq-more-btn:hover{text-decoration:underline}
     .td-convo > .td-subj{flex:0 0 auto;
       padding:16px 18px 13px;margin:0;background:var(--surface);border-bottom:1px solid var(--border)}
     /* Room down the left so the conversation is not flush against the rule
@@ -1222,8 +1267,65 @@ const Styles = () => (
     .men-role{margin-left:auto;flex-shrink:0;font-size:9.5px;font-weight:700;letter-spacing:.03em;
       text-transform:uppercase;color:var(--faint);background:var(--surface-2);border-radius:4px;padding:1px 6px}
 
+    /* An @tag in a note or the note editor, and its hover card. */
+    .fd-mention{color:#2563EB;font-weight:600;background:rgba(37,99,235,.08);border-radius:4px;
+      padding:0 3px;cursor:default;white-space:nowrap}
+    .fd-mention:hover{background:rgba(37,99,235,.16)}
+    .men-tip{position:fixed;z-index:10050;transform:translateX(-50%);width:260px;pointer-events:none;
+      background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;
+      box-shadow:0 12px 32px rgba(15,23,42,.18),0 2px 6px rgba(15,23,42,.08);padding:12px 14px;
+      animation:menTipIn .14s ease-out}
+    .men-tip::after{content:"";position:absolute;left:50%;width:10px;height:10px;background:var(--surface);
+      border:1px solid var(--border);transform:translateX(-50%) rotate(45deg)}
+    .men-tip.up::after{bottom:-6px;border-top:0;border-left:0}
+    .men-tip.down::after{top:-6px;border-bottom:0;border-right:0}
+    @keyframes menTipIn{from{opacity:0;margin-top:4px}to{opacity:1;margin-top:0}}
+    .men-tip-head{display:flex;align-items:center;gap:10px;padding-bottom:10px;margin-bottom:8px;
+      border-bottom:1px solid var(--border)}
+    .men-tip .men-av{width:34px;height:34px;font-size:12px}
+    .men-tip-name{font-weight:700;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .men-tip-role{font-size:10px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:#2563EB;margin-top:1px}
+    .men-tip-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);padding:3px 0;min-width:0}
+    .men-tip-row svg{flex-shrink:0;color:var(--faint)}
+    .men-tip-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .men-tip-row b{color:var(--text)}
+    .men-tip-row.muted{font-style:italic}
+
+    /* The "/c" picker is a search box until something is typed; then one
+       title per row, the typed part in bold. */
+    .cp-search-only .cp-search{border-bottom:0}
+    .cp-search-only .cp-list{border-top:1px solid var(--border)}
+    .cp-item.cp-title{align-items:center;gap:10px;padding-top:9px;padding-bottom:9px}
+    .cp-title .cp-nm{font-weight:500}
+    .cp-hit{font-weight:700;color:var(--primary)}
+    .cp-title .cp-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .cp-eye{flex-shrink:0;width:28px;height:28px;display:grid;place-items:center;border:0;border-radius:7px;
+      background:transparent;color:var(--faint);cursor:pointer;transition:background .12s,color .12s}
+    .cp-eye:hover,.cp-item.hi .cp-eye{color:var(--primary)}
+    .cp-eye:hover{background:color-mix(in srgb,var(--primary) 12%,transparent)}
+    .cp-preview{border-top:1px solid var(--border)}
+    .cp-pv-head{display:flex;align-items:center;gap:8px;padding:8px 10px 8px 8px;border-bottom:1px solid var(--border)}
+    .cp-pv-title{flex:1;min-width:0;font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .cp-pv-body{max-height:260px;overflow-y:auto;padding:12px 14px;font-size:12.8px}
+    .cp-pv-body p{margin:0 0 6px}
+
     /* Folder headings inside the "/c" picker. */
     .cp-group{padding-bottom:2px}
+    /* The '/c' picker opens on folders; a folder row reads as a place to go. */
+    .cp-item.cp-fold{align-items:center;gap:10px}
+    .cp-fold-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .cp-count{flex-shrink:0;font-size:10.5px;font-weight:700;color:var(--muted);background:var(--surface-2);
+      border-radius:10px;padding:1px 7px;font-variant-numeric:tabular-nums}
+    .cp-fold-go{flex-shrink:0;color:var(--faint)}
+    .cp-item.cp-fold.hi .cp-fold-go{color:var(--primary)}
+    /* Inside a folder: back arrow, the folder, and how many it holds. */
+    .cp-crumb{display:flex;align-items:center;gap:7px;padding:8px 12px;border-bottom:1px solid var(--border);
+      font-size:12px;font-weight:700;color:var(--text)}
+    .cp-crumb svg{color:var(--primary);flex-shrink:0}
+    .cp-crumb-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .cp-back{display:grid;place-items:center;width:26px;height:26px;border:1px solid var(--border);border-radius:7px;
+      background:var(--surface);color:var(--text);cursor:pointer;flex-shrink:0}
+    .cp-back:hover{border-color:var(--primary);color:var(--primary);background:var(--primary-soft)}
     .cp-folder{display:flex;align-items:center;gap:6px;padding:8px 12px 4px;font-size:10px;font-weight:700;
       letter-spacing:.05em;text-transform:uppercase;color:var(--faint)}
     .cp-folder span{margin-left:auto;font-weight:600;letter-spacing:0;text-transform:none}
@@ -1289,23 +1391,63 @@ const Styles = () => (
     .msg-html hr{border:0;border-top:1px solid var(--border);margin:12px 0}
     /* Padding only -- most tables in email are layout scaffolding for a
        signature, and drawing borders on those turns them into spreadsheets. */
-    .msg-html td,.msg-html th{padding:3px 7px;vertical-align:top}
+    /* ...and only on tables that carry no layout of their own. A designed
+       mail (cellpadding / cellspacing / role=presentation) already says how
+       its cells sit; forcing padding and top-alignment over that is what
+       pushed logos, badges and icon rows out of place. */
+    .msg-html table:not([cellpadding]):not([cellspacing]):not([role="presentation"]) :is(td,th){padding:3px 7px;vertical-align:top}
     /* A customer's mail can contain a 2000px-wide table; it scrolls inside its
        own box rather than stretching the whole ticket page sideways. */
-    .msg-html table{max-width:100%;display:block;overflow-x:auto;border-collapse:collapse}
+    /* A table stays a table: display:block broke every layout table in a
+       newsletter (icons in a row stacked, centred blocks slid left). Wide ones
+       scroll inside the message instead. */
+    .msg-html{overflow-x:auto}
+    .msg-html table{max-width:100%;border-collapse:collapse}
     /* An inline picture in the message body: a soft frame while it loads, so a
        slow image reads as "coming" rather than as a hole in the email. */
-    .msg-html img[data-fd-loading]{min-width:120px;min-height:90px;
+    .msg-img img[data-fd-loading]{min-width:120px;min-height:90px;
       background:linear-gradient(90deg,var(--surface-2) 0%,var(--hover) 50%,var(--surface-2) 100%);
       background-size:200% 100%;animation:attshimmer 1.1s ease-in-out infinite;
       border:1px solid var(--border)}
-    .msg-html img[data-fd-failed]{min-width:160px;min-height:64px;padding:12px;
+    .msg-img img[data-fd-failed]{min-width:160px;min-height:64px;padding:12px;
       border:1px dashed var(--border);background:var(--surface-2);
       border-radius:8px;object-fit:contain}
-    .msg-html img{max-width:100%;height:auto;border-radius:6px}
+    .msg-html img{max-width:100%;height:auto}
+    .msg-img img{border-radius:6px}
+    /* A sender's picture that will not load: say so quietly in its own space,
+       not with a big box -- and not at all when it had nothing to say. */
+    .msg-html img[data-fd-failed]:not([alt]),.msg-html img[data-fd-failed][alt=""]{display:none}
+    .msg-html img[data-fd-failed]{font-size:11px;color:var(--faint)}
     .msg-html blockquote{margin:8px 0;padding-left:12px;border-left:3px solid var(--border);color:var(--muted)}
     .msg-html a{color:var(--primary);text-decoration:underline}
     .msg-html pre{white-space:pre-wrap;overflow-x:auto;background:var(--surface-2, #f6f7fb);padding:10px;border-radius:8px}
+    /*
+     * Gmail's Google Drive chip -- a LINK to a file in the sender's Drive, not
+     * an attachment, so it never appears in the file strip.
+     *
+     * Gmail draws it with a fixed height:18px/max-height:18px and a width the
+     * tidy pass strips; left like that it rendered as a thin empty bar with the
+     * file name spilling out underneath. The !important is there to beat those
+     * inline styles. Gmail's own icon is a remote image (blocked until "Show
+     * images"), so it is hidden and a local file glyph is drawn instead.
+     */
+    /* Its own row, the way Gmail lays it out -- inline, it ran on from the
+       line of text before it ("hi [chip]"). */
+    .msg-html .gmail_chip{display:flex!important;align-items:center;width:fit-content!important;min-width:260px;
+      max-width:min(460px,100%);height:auto!important;max-height:none!important;box-sizing:border-box;
+      margin:10px 0 4px!important;padding:10px 14px!important;border:1px solid var(--border)!important;
+      border-radius:8px;background:var(--surface-2)!important;line-height:1.4!important;
+      transition:border-color .15s,box-shadow .15s}
+    .msg-html .gmail_chip:hover{border-color:color-mix(in srgb,var(--primary) 45%,var(--border))!important;
+      box-shadow:0 1px 3px rgba(15,23,42,.08)}
+    .msg-html .gmail_chip a{display:flex!important;align-items:center;gap:12px;min-width:0;flex:1;
+      width:auto!important;overflow:hidden;white-space:nowrap;text-decoration:none!important}
+    /* A filled Docs-style file icon, drawn here so the chip never waits on
+       the remote Google image. */
+    .msg-html .gmail_chip a::before{content:"";flex-shrink:0;width:20px;height:20px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%234285F4' d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/%3E%3Cpath fill='%23A1C2FA' d='M14 2v6h6z'/%3E%3Crect fill='%23fff' x='7.5' y='12' width='9' height='1.6' rx='.8'/%3E%3Crect fill='%23fff' x='7.5' y='15.4' width='6' height='1.6' rx='.8'/%3E%3C/svg%3E") center/contain no-repeat}
+    .msg-html .gmail_chip img{display:none!important}
+    .msg-html .gmail_chip span{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:13.5px;
+      font-weight:500;color:var(--text)!important}
     .entry-note{background:color-mix(in srgb, #F59E0B 7%, transparent);border-radius:12px;padding:12px;margin:8px 0}
     .entry-failed{background:color-mix(in srgb, #EF4444 6%, transparent);border-radius:12px;padding:12px;margin:8px 0}
     .msg-blocked{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);background:var(--surface-2, #f6f7fb);
@@ -1476,6 +1618,9 @@ const Styles = () => (
 
     .icon-btn.sm{width:26px;height:26px}
     .icon-btn.on{background:var(--primary-soft);color:var(--primary)}
+    /* The filter opener's count: primary, not the alert red the bell uses --
+       an applied filter is a state, not something wrong. */
+    .fd-filter-toggle .dot{background:var(--primary);top:-5px;right:-5px}
 
     /* ======================================================================
        TOP BAR — back, expanding search, notifications, theme
@@ -1539,7 +1684,11 @@ const Styles = () => (
     .rte-body{padding:14px 16px;font-size:14px;line-height:1.65;color:var(--text);outline:none;
       overflow-y:auto;max-height:52vh}
     .rte-body:empty::before,.rte-body[data-empty]::before{content:attr(data-placeholder);color:var(--faint);pointer-events:none}
-    .rte-body p{margin:0 0 10px}
+    /* One line per paragraph, the same as the message renders in the thread and
+       (via tightParagraphs) in the customer's inbox. With a 10px margin here a
+       reply looked spaced while typing and arrived jammed together. A blank
+       line is a real <p><br></p>, which is what Enter makes. */
+    .rte-body p{margin:0}
     .rte-body h2{font-size:19px;font-weight:700;margin:14px 0 8px}
     .rte-body h3{font-size:16px;font-weight:700;margin:12px 0 6px}
     .rte-body ul,.rte-body ol{margin:8px 0 12px;padding-left:26px}
@@ -1597,6 +1746,17 @@ const Styles = () => (
        player the agent already uses presents one. */
     .ap-media audio{margin-top:8px}
     .ap-video{max-width:100%;max-height:100%;background:#000;border-radius:8px;outline:0}
+    /* A converted .docx, laid out like a page so it reads as a document. */
+    .ap-doc-wrap{width:100%;height:100%;overflow:auto;padding:24px;display:flex;justify-content:center}
+    .ap-doc{width:min(820px,100%);background:#fff;color:#1f2937;padding:48px 56px;border-radius:6px;
+      box-shadow:0 2px 12px rgba(15,23,42,.12);font-size:14px;line-height:1.6;height:fit-content}
+    .ap-doc img{max-width:100%;height:auto}
+    .ap-doc table{border-collapse:collapse;margin:10px 0}
+    .ap-doc td,.ap-doc th{border:1px solid #d1d5db;padding:5px 8px}
+    .ap-doc h1,.ap-doc h2,.ap-doc h3{margin:18px 0 8px;line-height:1.3}
+    .ap-doc p{margin:0 0 10px}
+    .ap-office{width:100%;height:100%;display:flex;flex-direction:column}
+    .ap-office .ap-frame{flex:1}
     .ap-nav{position:absolute;top:50%;transform:translateY(-50%);width:40px;height:40px;border-radius:50%;
       border:0;background:rgba(20,22,34,.55);color:#fff;display:grid;place-items:center;cursor:pointer;
       transition:background .15s}
@@ -1839,6 +1999,51 @@ const Styles = () => (
     .tagbox{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
     .tagbox .tg{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:4px 9px;border-radius:8px;background:var(--primary-soft);color:var(--primary)}
     .tagbox .tg button{border:0;background:transparent;color:inherit;cursor:pointer;display:grid;place-items:center;padding:0}
+    /* ---- the details column, sized for height ----
+       Everything an agent edits has to be on screen without scrolling at a
+       normal window height, so: tight padding, 34px controls, fields two to a
+       row, and one line per SLA clock. */
+    .qf{display:flex;flex-direction:column;gap:6px;padding:10px 12px}
+    .qf-l{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+    /* Three equal segments that can never outgrow the card: each may shrink,
+       and the count is compacted (32.8k) rather than allowed to widen it. */
+    .qf-seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px}
+    /* Label over count, not beside it: side by side, "Closed" plus a five-digit
+       count needs more than a third of the column and the label got cut. */
+    .qf-seg button{flex-direction:column;justify-content:center;gap:2px;min-width:0;padding:5px 4px;font-size:12px;line-height:1.2}
+    .qf-lab{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .qf-n{flex-shrink:0;font-size:10px;font-weight:700;padding:1px 5px;border-radius:10px;
+      background:var(--primary-soft);color:var(--primary);font-variant-numeric:tabular-nums}
+    .qf-seg button:not(.on) .qf-n{background:var(--surface);color:var(--muted)}
+
+    .pp-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;
+      border-bottom:1px solid var(--border)}
+    .pp-title{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+    .pp-status{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;white-space:nowrap}
+    .pp-sla{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--border)}
+    .pp-clock{display:flex;gap:7px;align-items:flex-start;padding:8px 12px;min-width:0;color:var(--warning)}
+    .pp-clock + .pp-clock{border-left:1px solid var(--border)}
+    .pp-clock.ok{color:var(--success)}
+    .pp-clock.bad{color:var(--danger)}
+    .pp-clock svg{flex-shrink:0;margin-top:2px}
+    .pp-clock span{display:flex;flex-direction:column;min-width:0;font-size:11.5px;line-height:1.35;color:var(--muted);
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .pp-clock b{font-size:11px;font-weight:650;color:var(--text)}
+    .pp-clock.bad span{color:var(--danger)}
+    .pp-body{display:flex;flex-direction:column;gap:10px;padding:10px 14px 14px}
+    .pp-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:9px 10px}
+    .pp-f{display:flex;flex-direction:column;gap:4px;min-width:0}
+    .pp-f.wide{grid-column:1 / -1}
+    .pp-l{font-size:11px;font-weight:600;color:var(--muted)}
+    .pp-l i{font-style:normal;color:var(--danger);margin-left:2px}
+    .pp select,.pp input{width:100%;min-width:0;height:34px;font-family:inherit;font-size:12.5px;color:var(--text);
+      background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:0 9px;cursor:pointer}
+    .pp input{cursor:text}
+    .pp select:focus,.pp input:focus{outline:0;border-color:var(--primary)}
+    .pp .tagbox{margin-top:6px}
+    .pp-save{width:100%;justify-content:center}
+    /* Collapsed contact card: the header is the whole card, so less padding. */
+    .cp-compact .who-btn{padding:10px 12px}
     /* thread entry variants */
     /* 18px top AND bottom on every entry, plus a rule, put roughly a blank
        line between each message and the next. 13px reads as one conversation
@@ -1871,6 +2076,19 @@ const Styles = () => (
     .cp-compact .wa{width:34px;height:34px;font-size:12px;flex-shrink:0}
     .cp-compact .wn{display:block;font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .cp-compact .wm{display:block;font-size:11px;color:var(--muted);margin-top:1px}
+    /* Email and phone in the collapsed header -- see ContactPanel. One line
+       each, ellipsised: a long address must not push the caret off the card. */
+    /* A sibling of the header button now (see CopyLine), indented to sit
+       under the name: 12px padding + 36px avatar + 10px gap. */
+    .who-reach{display:flex;flex-direction:column;gap:2px;padding:0 12px 10px 58px;margin-top:-4px}
+    .who-copy{flex-shrink:0;display:grid;place-items:center;width:22px;height:22px;margin-left:auto;
+      border:0;border-radius:6px;background:transparent;color:var(--faint);cursor:pointer;
+      transition:background .15s,color .15s}
+    .who-copy:hover{background:var(--primary-soft);color:var(--primary)}
+    .who-copy.done{color:var(--success)}
+    .who-line{display:flex;align-items:center;gap:6px;min-width:0;font-size:11.5px;color:var(--text)}
+    .who-line svg{flex-shrink:0;color:var(--faint)}
+    .who-val{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:text}
 
     /* The ticket's own chips, moved here from above the conversation. */
     .cp-badges{display:flex;flex-wrap:wrap;gap:5px;padding:0 14px 12px;border-bottom:1px solid var(--border)}
@@ -1971,6 +2189,11 @@ const Styles = () => (
     .toast{display:flex;align-items:flex-start;gap:11px;min-width:280px;max-width:380px;background:var(--surface);border:1px solid var(--border);border-left-width:4px;border-radius:12px;box-shadow:var(--shadow-lg);padding:13px 15px;animation:toastIn .28s cubic-bezier(.4,0,.2,1)}
     @keyframes toastIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:none}}
     .toast .tc{flex-shrink:0;margin-top:1px}
+    /* The Undo countdown: a bar along the bottom that runs out with the toast. */
+    .toast{position:relative;overflow:hidden}
+    .toast .t-timer{position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--primary);
+      opacity:.55;transform-origin:left;animation:toastTimer linear forwards}
+    @keyframes toastTimer{from{transform:scaleX(1)}to{transform:scaleX(0)}}
     .toast .tt{font-size:13px;font-weight:700}
     .toast .td{font-size:12px;color:var(--muted);margin-top:2px;line-height:1.45}
     .toast .tx{margin-left:auto;border:0;background:transparent;color:var(--faint);cursor:pointer;padding:0;display:grid;place-items:center}
@@ -2121,24 +2344,39 @@ const Styles = () => (
        the page colour and normal weight. */
     /* Unread: white, bold, a solid border and its priority bar at full strength. */
     .tcard.slim.unread{background:var(--surface);border-color:var(--border)}
+    /* The ticket the agent opened last (see rememberListPosition): marked when
+       they come back, so they can see where they left off. Kept until they
+       open another. */
+    .tcard.slim.recent{position:relative;border-color:color-mix(in srgb,var(--primary) 55%,var(--border));
+      background:color-mix(in srgb,var(--primary) 5%,var(--surface));
+      box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 14%,transparent)}
+    .tcard.slim.recent::after{content:"Last opened";position:absolute;top:-9px;left:56px;padding:1px 8px;
+      border-radius:6px;background:var(--primary);color:#fff;font-size:10px;font-weight:700;letter-spacing:.02em}
+    /* ...and it reads as that row at a glance: a clear blue wash and the row's
+       own text in blue. Status chips (Breached, Customer replied, new) keep
+       their colours -- those are facts about the ticket, not the highlight. */
+    .card.tcard.slim.recent{--recent-ink:#2563EB;background:color-mix(in srgb,#2563EB 9%,var(--surface));
+      border-color:#2563EB;box-shadow:inset 4px 0 0 #2563EB,0 0 0 3px rgba(37,99,235,.16)}
+    .card.tcard.slim.recent::after{background:#2563EB}
+    .card.tcard.slim.recent :is(.slim-subj,.slim-id,.slim-who,.slim-meta>span:not([class]),.sm,.read-by,.slim-ctl button){color:var(--recent-ink)}
+    .card.tcard.slim.recent .slim-subj{font-weight:700}
+    .card.tcard.slim.recent .tag-read{color:var(--recent-ink);background:rgba(37,99,235,.12)}
+    .card.tcard.slim.recent .slim-ctl svg{color:var(--recent-ink)}
+    tr.recent td{background:color-mix(in srgb,#2563EB 9%,var(--surface));color:#2563EB}
+    tr.recent td *:not([class*="badge"]):not([class*="chip"]):not([class*="pill"]){color:inherit}
+    tr.recent td:first-child{box-shadow:inset 4px 0 0 #2563EB}
+    .inbox-row.recent{background:color-mix(in srgb,#2563EB 9%,var(--surface));box-shadow:inset 4px 0 0 #2563EB;color:#2563EB}
+    .inbox-row.recent :is(b,strong,span:not([class*="badge"]):not([class*="chip"]):not(.newct):not(.replied)){color:#2563EB}
     .tcard.slim.unread .slim-subj{font-weight:700;color:var(--text)}
     .tcard.slim.unread .slim-who{color:var(--text)}
 
-    /* Read: on the page colour, so the row stops being a card and recedes into
-       the background the way a read mail does. */
-    .tcard.slim.read{background:var(--bg);border-color:transparent;box-shadow:none}
-    .tcard.slim.read .slim-subj{font-weight:400;color:var(--muted)}
-    .tcard.slim.read .slim-who{color:var(--faint)}
-    .tcard.slim.read .slim-meta{color:var(--faint)}
-    .tcard.slim.read .slim-av{opacity:.5;filter:saturate(.55)}
-    .tcard.slim.read .slim-id{opacity:.6}
-    .tcard.slim.read::before{opacity:.22}
-    .tcard.slim.read .badge-xs,.tcard.slim.read .rsel-btn{opacity:.72}
-    /* Hovering lifts it back to full strength so it is still readable. */
-    .tcard.slim.read:hover{background:var(--surface);border-color:var(--border)}
-    .tcard.slim.read:hover .slim-subj{color:var(--text)}
-    .tcard.slim.read:hover .slim-av{opacity:1;filter:none}
-    .tcard.slim.read:hover .badge-xs,.tcard.slim.read:hover .rsel-btn{opacity:1}
+    /* Read: the same white card as unread -- the grey page-colour fill and
+       the washed-out avatar and controls read as disabled rather than as
+       read. What says read now is the type: normal weight instead of bold,
+       the READ tag, and "Read by" on the meta line. */
+    .tcard.slim.read{background:var(--surface);border-color:var(--border)}
+    .tcard.slim.read .slim-subj{font-weight:400;color:var(--text)}
+    .tcard.slim.read .slim-who{color:var(--muted)}
 
     /* ---- the two row tags ---- */
     .tag-read{flex-shrink:0;font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;

@@ -4,6 +4,20 @@ import api from '../../api/axios';
 
 const API = '/api/netcore/user_timeline.php';
 
+/*
+  One request per contact, however many times the effect runs. StrictMode mounts twice in dev, and
+  two parallel timeline requests queue behind each other on the server — the page then waits for the
+  slower second one. Dropped once settled, so coming back to the page still loads fresh data.
+*/
+const inflight = new Map();
+function loadTimeline(params) {
+  const key = JSON.stringify(params);
+  if (!inflight.has(key)) {
+    inflight.set(key, api.get(API, { params }).finally(() => setTimeout(() => inflight.delete(key), 0)));
+  }
+  return inflight.get(key);
+}
+
 const EVENT_LABELS = {
   register: 'Register',
   signin: 'Signin',
@@ -49,6 +63,8 @@ const EVENT_LABELS = {
   whatsapp_bounced: 'WhatsApp undelivered',
   whatsapp_failed: 'WhatsApp failed',
   whatsapp_held_back: 'WhatsApp held back',
+
+  ad_visit: 'Ad visit',
 };
 
 /*
@@ -57,6 +73,8 @@ const EVENT_LABELS = {
   would be simply untrue of a message we sent.
 */
 const isMessageEvent = (ev) => /^(email|whatsapp)_/.test(String(ev || ''));
+/* An arrival from an ad (api/lib/AdJourney.php) — also self-describing. */
+const isAdEvent = (ev) => ev === 'ad_visit';
 
 /*
   Colour by OUTCOME, not by channel.
@@ -75,6 +93,11 @@ const eventTone = (ev) => {
 const MailIcon = (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
     <rect x="2" y="4" width="20" height="16" rx="2" /><path d="m22 7-10 6L2 7" />
+  </svg>
+);
+const AdIcon = (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+    <path d="m3 11 18-5v12L3 14v-3z" /><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
   </svg>
 );
 const ChatIcon = (
@@ -224,7 +247,7 @@ export default function NetcoreUserTimeline() {
     let cancelled = false;
     setLoading(true); setError('');
     const params = userId ? { action: 'timeline', user_id: userId } : { action: 'timeline', email };
-    api.get(API, { params }).then(res => {
+    loadTimeline(params).then(res => {
       if (cancelled) return;
       if (res.data.status === 'success') {
         setProfile(res.data.profile);
@@ -255,6 +278,29 @@ export default function NetcoreUserTimeline() {
       journey, which step, how many opens. Asking the server would mean a request that can only come
       back "unknown event", because event_detail only knows the activity tables.
     */
+    if (isAdEvent(ev.event)) {
+      const a = ev.ad || {};
+      setPopData({
+        Ad: a.ad_label,
+        Source: a.source,
+        Campaign: a.campaign || a.utm_campaign,
+        'Ad set': a.adset || a.utm_term,
+        'Ad name': a.ad || a.utm_content,
+        'Campaign ID': a.campaign_id,
+        'Click ID': [a.has_fbclid && 'fbclid', a.has_gclid && 'gclid'].filter(Boolean).join(', ') || null,
+        'Matched by': a.match_type === 'device'
+          ? 'Same browser (reliable)'
+          : `Same network, IPv${a.ip_version} (a hint: shared Wi-Fi and mobile networks can mix people up)`,
+        'IP address': a.ip_address,
+        Device: a.device,
+        'Before signup': a.before_register === true ? 'Yes' : a.before_register === false ? 'No' : null,
+        'Landing URL': a.landing_url,
+        Referrer: a.referrer,
+        When: ev.timestamp,
+      });
+      setPopLoading(false);
+      return;
+    }
     if (isMessageEvent(ev.event)) {
       setPopData({
         Channel: ev.channel === 'whatsapp' ? 'WhatsApp' : 'Email',
@@ -440,8 +486,9 @@ export default function NetcoreUserTimeline() {
                   : visibleEvents.map((e, i) => {
                     const label = EVENT_LABELS[e.event] || e.event;
                     const lower = label.toLowerCase();
-                    const isMsg = isMessageEvent(e.event);
-                    const tone = isMsg ? eventTone(e.event) : { bg: '#dbeafe', fg: '#1e3a8a' };
+                    const isAd = isAdEvent(e.event);
+                    const isMsg = isMessageEvent(e.event) || isAd;
+                    const tone = isAd ? { bg: '#fdf4ff', fg: '#a21caf' } : isMsg ? eventTone(e.event) : { bg: '#dbeafe', fg: '#1e3a8a' };
                     return (
                       <div key={`${e.event}-${e.timestamp}-${i}`} className="nc-tl-row"
                         onClick={() => openEvent(e)}
@@ -456,7 +503,7 @@ export default function NetcoreUserTimeline() {
                             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
                             color: tone.fg
                           }}>
-                            {isMsg
+                            {isAd ? AdIcon : isMsg
                               ? (e.channel === 'whatsapp' ? ChatIcon : MailIcon)
                               : (
                                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
@@ -485,7 +532,7 @@ export default function NetcoreUserTimeline() {
                         {/* platform — empty placeholder */}
                         <div></div>
                         {/* device */}
-                        <div><DeviceIcon device={device} /></div>
+                        <div><DeviceIcon device={isAd ? e.ad?.device : device} /></div>
                         {/* received on */}
                         <div style={{ color: '#475569', fontSize: 12.5 }}>{fmtDt(e.timestamp)}</div>
                       </div>

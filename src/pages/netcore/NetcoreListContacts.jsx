@@ -20,6 +20,8 @@ export default function NetcoreListContacts({ basePath = '/netcore/lists', idOve
   const [listName, setListName] = useState('');
   const [rows, setRows]       = useState([]);
   const [total, setTotal]     = useState(0);
+  // Where the blocked addresses came from — sent by the API with the blocklist only.
+  const [cleanup, setCleanup] = useState(null);
   const [page, setPage]       = useState(1);
   const [perPage, setPerPage] = useState(25);
   const [pages, setPages]     = useState(1);
@@ -55,6 +57,7 @@ export default function NetcoreListContacts({ basePath = '/netcore/lists', idOve
       if (res.data.success) {
         setRows(res.data.data.members || []);
         setTotal(res.data.data.total || 0);
+        setCleanup(res.data.data.bounce_cleanup || null);
         setPage(res.data.data.page); setPages(res.data.data.pages); setPerPage(res.data.data.per_page);
       }
     } finally { setLoading(false); }
@@ -88,6 +91,29 @@ export default function NetcoreListContacts({ basePath = '/netcore/lists', idOve
   return (
     <div style={{ padding: 24, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
       <style>{`@keyframes nc_spin { to { transform: rotate(360deg); } }`}</style>
+
+      {/*
+        WHY THESE PEOPLE ARE BLOCKED.
+        Thousands of rows nobody remembers adding is alarming rather than reassuring, and the
+        answer — the mail servers' own "this account does not exist" replies — is not visible in
+        any single row. Shown only on the blocklist, and only once the cleanup has actually run.
+      */}
+      {isBlocklist && cleanup && cleanup.hard_bounce_total > 0 && (
+        <div style={{ flexShrink: 0, marginBottom: 12, padding: '11px 14px', borderRadius: 10,
+                      background: cleanup.all_done ? '#f0fdf4' : '#fffbeb',
+                      border: '1px solid ' + (cleanup.all_done ? '#bbf7d0' : '#fde68a'),
+                      fontSize: 12.5, color: '#334155', lineHeight: 1.55 }}>
+          <strong style={{ color: cleanup.all_done ? '#15803d' : '#b45309' }}>
+            {cleanup.all_done ? 'Bounce cleanup complete' : 'Bounce cleanup in progress'}
+          </strong>
+          {' — '}
+          <strong>{cleanup.hard_bounce_total.toLocaleString()}</strong> of these addresses were blocked automatically
+          because the receiving mail server said the account does not exist. Read from
+          {' '}<strong>{cleanup.phases.reduce((n, p) => n + p.messages, 0).toLocaleString()}</strong> delivery reports
+          in the contact@ mailbox{cleanup.all_done ? '.' : ' (still reading…).'}
+          {' '}A mailbox that was merely full is never blocked.
+        </div>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14, flexShrink: 0 }}>
         <button onClick={() => nav(basePath)} style={{ border: 'none', background: '#f1f5f9', borderRadius: 8, width: 34, height: 34, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#334155' }}>

@@ -5,14 +5,14 @@
  * note / forward composer with S3-backed attachments, and the ticket's
  * properties.
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, AlertCircle, ArrowUpDown, AtSign, BadgeCheck, Bold, BookOpen, Briefcase, Building2, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, Code, Copy, CornerUpLeft, Download, Eye, Folder, FolderInput, Forward, GraduationCap, Heading1, Heading2, History, Image as ImageIcon, Italic, Link2, List, ListOrdered, Lock, Mail, Maximize2, MessageSquareText, Minus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRight, PanelRightClose, PanelRightOpen, Paperclip, Pencil, PhoneCall, Plus, PlusCircle, Printer, RefreshCw, Reply, Save, Search, Send, ShieldX, Sparkles, Star, Table as TableIcon, Tag as TagIcon, Ticket, Timer, Trash2, Type, Underline, UserPlus, X } from "lucide-react";
-import { ConfirmDialog, EmptyState, PrioBadge, Spinner, StatusBadge, Switch, fireConfetti, humanBytes, kvGetSync, kvSet, useClickAway, useDesk, useToast } from "../fdShared";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Phone, Hash, Activity, AlertCircle, ArrowUpDown, AtSign, BadgeCheck, Bold, BookOpen, Briefcase, Building2, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, Code, Copy, CornerUpLeft, Download, Eye, Folder, FolderInput, Forward, GraduationCap, Heading1, Heading2, History, Image as ImageIcon, Italic, Link2, List, ListOrdered, Lock, Mail, Maximize2, MessageSquareText, Minus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRight, PanelRightClose, PanelRightOpen, Paperclip, Pencil, PhoneCall, Plus, PlusCircle, Printer, RefreshCw, Reply, Save, Search, Send, ShieldX, Sparkles, Star, Table as TableIcon, Tag as TagIcon, Ticket, Timer, Trash2, Type, Underline, UserPlus, X } from "lucide-react";
+import { ConfirmDialog, EmptyState, Portal, PrioBadge, Spinner, StatusBadge, Switch, humanBytes, kvGetSync, kvSet, useClickAway, useDesk, useToast } from "../fdShared";
 import { attachments as fdAttachments, fdUrl, messages as fdMessages, tickets as fdTicketsApi } from "../fdApi";
 import RichEditor from "../components/RichEditor";
 import RecipientInput from "../components/RecipientInput";
 import AttachmentPreview, { ICON as ATT_ICON, KIND_COLOR as ATT_COLOR, kindOf } from "../components/AttachmentPreview";
-import { AGENTS, DEPTS, SOURCE_ICON, STU_DOMAINS, STU_ENUMS, TAG_BANK, avColor, bodyFor, initials, slaStyle, stuDateDisplay, stuDomainLabel, stuMachine, stuPills, hasStudentContext } from "../fdConstants";
+import { AGENTS, DEPTS, SOURCE_ICON, STU_DOMAINS, STU_ENUMS, TAG_BANK, avColor, bodyFor, initials, slaStyle, statusStyle, stuDateDisplay, stuDomainLabel, stuMachine, stuPills, hasStudentContext } from "../fdConstants";
 import { getCallsSeed } from "../fdStore";
 import { CANNED_SEED } from "./AutomationPage";
 import { currentAgentProfile, getSigSettings, resolveSignature } from "../fdAgent";
@@ -122,96 +122,267 @@ function MentionPopup({ query, setQuery, onPick, onClose }) {
   );
 }
 
-function CannedPopup({ query, setQuery, onPick, onClose }) {
+/*
+ * "@Name" in a note, drawn as a blue tag with a hover card.
+ *
+ * New mentions are inserted as <span class="fd-mention" data-uid>, but notes
+ * written before that are plain "@Name" text, so saved notes are also scanned
+ * for "@" + a teammate's name and those runs are wrapped the same way. The
+ * card looks the person up by data-uid, else by the name.
+ */
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function decorateMentions(root, agents) {
+  if (!root || !root.textContent.includes("@")) return;
+  const names = (agents || []).map((a) => a.name).filter((n) => n && n !== "Unassigned")
+    .sort((x, y) => y.length - x.length);                 // "Aniket Bhosale" before "Aniket"
+  if (!names.length) return;
+  const re = new RegExp("@(" + names.map(escRe).join("|") + ")(?![\\p{L}\\p{N}_])", "giu");
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (n.parentElement && n.parentElement.closest(".fd-mention, a, code, pre")
+      ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  const hits = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) if (n.nodeValue.includes("@")) hits.push(n);
+  hits.forEach((node) => {
+    const text = node.nodeValue; let last = 0; let m; const frag = document.createDocumentFragment();
+    re.lastIndex = 0;
+    while ((m = re.exec(text))) {
+      if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+      const span = document.createElement("span");
+      span.className = "fd-mention"; span.textContent = m[0];
+      frag.appendChild(span); last = m.index + m[0].length;
+    }
+    if (!last) return;
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    node.parentNode.replaceChild(frag, node);
+  });
+}
+
+/*
+ * Hover card for every .fd-mention inside the given element(s).
+ *
+ * The card's state lives in ONE <MentionTipHost>, not in the message that
+ * holds the tag: re-rendering a message re-applies its HTML, which replaced the
+ * very tag under the mouse -- a fresh mouseover each time, and never the
+ * mouseout that should have hidden the card.
+ */
+const tipBus = { set: null };
+
+function useMentionTips(getRoots, agents, deps) {
+  const agentsRef = useRef(agents); agentsRef.current = agents;
+  useEffect(() => {
+    const roots = getRoots().filter(Boolean);
+    if (!roots.length) return undefined;
+    const find = (el) => {
+      const list = agentsRef.current || [];
+      const uid = el.getAttribute("data-uid");
+      const name = el.textContent.replace(/^@/, "").trim().toLowerCase();
+      return (uid && list.find((a) => String(a.id) === uid))
+        || list.find((a) => String(a.name || "").toLowerCase() === name)
+        || { name: el.textContent.replace(/^@/, "").trim() };
+    };
+    const over = (e) => {
+      const el = e.target.closest && e.target.closest(".fd-mention");
+      if (!el || !tipBus.set) return;
+      const r = el.getBoundingClientRect();
+      tipBus.set({ agent: find(el), x: r.left + r.width / 2, top: r.top, bottom: r.bottom, el });
+    };
+    const out = (e) => {
+      const el = e.target.closest && e.target.closest(".fd-mention");
+      if (el && !(e.relatedTarget && el.contains(e.relatedTarget)) && tipBus.set) tipBus.set(null);
+    };
+    roots.forEach((r) => { r.addEventListener("mouseover", over); r.addEventListener("mouseout", out); });
+    return () => roots.forEach((r) => { r.removeEventListener("mouseover", over); r.removeEventListener("mouseout", out); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+}
+
+function MentionTipHost() {
+  const [tip, setTip] = useState(null);
+  useEffect(() => {
+    tipBus.set = setTip;
+    return () => { if (tipBus.set === setTip) tipBus.set = null; };
+  }, []);
+  useEffect(() => {
+    if (!tip) return undefined;
+    const hide = () => setTip(null);
+    window.addEventListener("scroll", hide, true);
+    // The tag can leave the page (note deleted, ticket switched) under the mouse.
+    const gone = setInterval(() => { if (!tip.el.isConnected) hide(); }, 400);
+    return () => { window.removeEventListener("scroll", hide, true); clearInterval(gone); };
+  }, [tip]);
+  return tip ? <Portal><MentionCard tip={tip} /></Portal> : null;
+}
+function MentionCard({ tip }) {
+  const a = tip.agent;
+  // Above the tag, unless that would leave the top of the screen.
+  const above = tip.top > 170;
+  const style = { left: Math.min(Math.max(tip.x, 150), window.innerWidth - 150),
+                  ...(above ? { bottom: window.innerHeight - tip.top + 8 } : { top: tip.bottom + 8 }) };
+  return (
+    <div className={`men-tip ${above ? "up" : "down"}`} style={style} role="tooltip">
+      <div className="men-tip-head">
+        <span className="men-av" style={{ background: avColor(a.name || "?") }}>{initials(a.name || "?")}</span>
+        <div style={{ minWidth: 0 }}>
+          <div className="men-tip-name">{a.name}</div>
+          {a.role && <div className="men-tip-role">{a.role}</div>}
+        </div>
+      </div>
+      {a.id == null && !a.email ? (
+        <div className="men-tip-row muted">Not on the current team list</div>
+      ) : (<>
+        <div className="men-tip-row"><Mail size={12} /> <span>{a.email || "No email"}</span></div>
+        <div className="men-tip-row"><Phone size={12} /> <span>{a.phone || "No phone on file"}</span></div>
+        <div className="men-tip-row"><Hash size={12} /> <span>User ID <b>{a.id}</b></span></div>
+      </>)}
+    </div>
+  );
+}
+
+/* A response's body as HTML for the preview, through the same cleaning as mail. */
+const previewHtml = (body) => {
+  const b = String(body || "");
+  return withApiUrls(/<[a-z][\s\S]*>/i.test(b) ? b : `<p>${escHtml(b).replace(/\n/g, "<br>")}</p>`);
+};
+
+/*
+ * The "/c" picker: a search box, and the canned responses whose TITLE matches.
+ *
+ * Nothing is listed until something is typed -- agents know the reply they
+ * want by name, and a wall of sixty rows (or a folder tree to click through)
+ * was slower than typing three letters. Only titles are matched, so "refund"
+ * finds the replies called that, not every reply that mentions a refund.
+ * Titles that START with the text come first. Arrows + Enter or a click pick
+ * one; it goes in where the cursor was. Esc closes.
+ */
+function CannedPopup({ query, setQuery, onPick, onClose, style }) {
   const [hi, setHi] = useState(0);
+  const [preview, setPreview] = useState(null);          // the response being read before inserting
   const ref = useRef(null);
   const inputRef = useRef(null);
+  const listRef = useRef(null);
   const { rows, loading, error } = useCanned();
-  const list = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
-      (r.name + " " + r.folder + " " + r.shortcut + " " + r.body).toLowerCase().includes(q));
-  }, [rows, query]);
 
-  /*
-   * Grouped by folder for display, but the flat list is what survives, so the
-   * arrow keys and the highlighted index keep working across the whole result.
-   */
-  const groups = useMemo(() => {
-    const out = [];
-    const seen = new Map();
-    list.forEach((r, i) => {
-      const key = r.folder || "Unfiled";
-      if (!seen.has(key)) { seen.set(key, out.length); out.push({ folder: key, items: [] }); }
-      out[seen.get(key)].items.push({ r, i });
+  const q = query.trim().toLowerCase();
+  const list = useMemo(() => {
+    if (!q) return [];
+    const starts = [], has = [];
+    rows.forEach((r) => {
+      const name = String(r.name || "").toLowerCase();
+      if (name.startsWith(q)) starts.push(r); else if (name.includes(q)) has.push(r);
     });
-    return out;
-  }, [list]);
+    const byName = (x, y) => String(x.name).localeCompare(String(y.name), undefined, { sensitivity: "base" });
+    return [...starts.sort(byName), ...has.sort(byName)];
+  }, [rows, q]);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
-  useEffect(() => { setHi(0); }, [query]);
+  useEffect(() => { setHi(0); setPreview(null); }, [query]);
   useEffect(() => {
     const h = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [onClose]);
+  // Keep the highlighted row in view as the arrows move it.
+  useEffect(() => {
+    const el = listRef.current && listRef.current.querySelector(".cp-item.hi");
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+  }, [hi]);
 
   const onKey = (e) => {
+    if (preview) {
+      if (e.key === "Escape" || e.key === "ArrowLeft") { e.preventDefault(); setPreview(null); inputRef.current?.focus(); }
+      else if (e.key === "Enter") { e.preventDefault(); onPick(preview); }
+      return;
+    }
     if (e.key === "Escape") { e.preventDefault(); onClose(); }
-    else if (e.key === "ArrowDown") { e.preventDefault(); setHi(i => Math.min(i + 1, list.length - 1)); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setHi(i => Math.max(i - 1, 0)); }
+    else if (e.key === "ArrowRight" && list[hi] && e.target.selectionStart === query.length) { e.preventDefault(); setPreview(list[hi]); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); setHi((i) => Math.min(i + 1, list.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setHi((i) => Math.max(i - 1, 0)); }
     else if (e.key === "Enter") { e.preventDefault(); if (list[hi]) onPick(list[hi]); }
   };
 
+  /* The typed text in bold inside the title, so it is obvious why it matched. */
+  const mark = (name) => {
+    const s = String(name || ""); const i = s.toLowerCase().indexOf(q);
+    if (i < 0) return s;
+    return <>{s.slice(0, i)}<b className="cp-hit">{s.slice(i, i + q.length)}</b>{s.slice(i + q.length)}</>;
+  };
+
   return (
-    <div className="canned-pop" ref={ref} onKeyDown={onKey}>
+    <div className="canned-pop cp-search-only" ref={ref} onKeyDown={onKey} style={style}>
       <div className="cp-search">
         <Search size={16} color="var(--muted)" />
-        <input ref={inputRef} placeholder="Search for canned responses" value={query} onChange={(e) => setQuery(e.target.value)} />
-        <button className="icon-btn" style={{ width: 28, height: 28 }} onClick={onClose}><X size={14} /></button>
+        <input ref={inputRef} value={query} onChange={(e) => setQuery(e.target.value)}
+               placeholder="Search canned responses by title" />
+        <button className="icon-btn" style={{ width: 28, height: 28 }} onClick={onClose} title="Close (Esc)"><X size={14} /></button>
       </div>
-      <div className="cp-lab">{query.trim() ? "Results" : "Most used"}</div>
-      <div className="cp-list">
-        {loading ? (
-          <div className="cp-empty"><Spinner size={14} /> Loading your saved replies…</div>
-        ) : error ? (
-          <div className="cp-empty">Could not load canned responses: {error}</div>
-        ) : list.length ? groups.map((g) => (
-          <div key={g.folder} className="cp-group">
-            <div className="cp-folder"><Folder size={11} /> {g.folder} <span>{g.items.length}</span></div>
-            {g.items.map(({ r, i }) => (
-              <div key={r.id ?? r.name} className={`cp-item ${i === hi ? "hi" : ""}`}
-                   onMouseEnter={() => setHi(i)} onClick={() => onPick(r)}>
-                <MessageSquareText size={15} color="var(--primary)" style={{ marginTop: 2, flexShrink: 0 }} />
-                <div style={{ minWidth: 0 }}>
-                  <div className="cp-nm">
-                    {r.name}
-                    {r.shortcut ? <code className="cp-sc">/{r.shortcut}</code> : null}
-                  </div>
-                  {/* The first line of the reply, so a name like "Refund policy"
-                      does not have to be trusted blind. */}
-                  <div className="cp-pv">{String(r.body || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 90)}</div>
-                </div>
+
+      {preview ? (
+        /* Read it before it goes in: the whole response, as the customer will
+           see it. Insert puts it at the cursor; Back returns to the results. */
+        <div className="cp-preview">
+          <div className="cp-pv-head">
+            <button className="cp-back" onMouseDown={(e) => { e.preventDefault(); setPreview(null); inputRef.current?.focus(); }}
+                    title="Back to results (Esc)" aria-label="Back to results"><ChevronLeft size={16} /></button>
+            <span className="cp-pv-title">{preview.name}</span>
+            <button className="btn btn-primary btn-sm" onMouseDown={(e) => { e.preventDefault(); onPick(preview); }}>Insert</button>
+          </div>
+          <div className="cp-pv-body msg-html" dangerouslySetInnerHTML={{ __html: previewHtml(preview.body) }} />
+        </div>
+      ) : (q || loading || error) && (
+        <div className="cp-list" ref={listRef}>
+          {loading ? (
+            <div className="cp-empty"><Spinner size={14} /> Loading your saved replies…</div>
+          ) : error ? (
+            <div className="cp-empty">Could not load canned responses: {error}</div>
+          ) : !list.length ? (
+            <div className="cp-empty">No canned response titled “{query}”.</div>
+          ) : (
+            list.map((r, i) => (
+              <div key={r.id ?? r.name} className={`cp-item cp-title ${i === hi ? "hi" : ""}`}
+                   onMouseEnter={() => setHi(i)}
+                   // mousedown, not click: keep focus from bouncing before the insert.
+                   onMouseDown={(e) => { e.preventDefault(); onPick(r); }}>
+                <MessageSquareText size={15} color="var(--primary)" style={{ flexShrink: 0 }} />
+                <span className="cp-nm">{mark(r.name)}</span>
+                <button className="cp-eye" title="Preview" aria-label={`Preview ${r.name}`}
+                        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setPreview(r); }}>
+                  <Eye size={15} />
+                </button>
               </div>
-            ))}
-          </div>
-        )) : (
-          <div className="cp-empty">
-            {rows.length === 0
-              ? "No canned responses saved yet — add them under Automation."
-              : `No canned responses match “${query}”.`}
-          </div>
-        )}
-      </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-function ReplyComposer({ ticket, onSend, mode, focusTick, onClose, lastAgentReply }) {
+/*
+ * One line per paragraph, in the customer's mail client exactly as in the
+ * editor.
+ *
+ * Mail clients give <p> their own margins -- Outlook about 1em, Gmail next to
+ * none -- so the same reply arrived double-spaced in one inbox and jammed
+ * together in another, and neither matched what the agent saw while typing.
+ * With margin:0 on every paragraph, the blank lines the agent left are the only
+ * spacing there is, everywhere. A paragraph that already has a style (pasted
+ * markup) is left alone.
+ */
+function tightParagraphs(html) {
+  return String(html || "").replace(/<p(\s[^>]*)?>/gi, (m, attrs = "") => (
+    /\bstyle\s*=/i.test(attrs) ? m : `<p${attrs} style="margin:0">`
+  ));
+}
+
+function ReplyComposer({ ticket, onSend, mode, focusTick, onClose, lastAgentReply, restore, onTabChange }) {
   const push = useToast();
   const [tab, setTab] = useState("Reply");
   useEffect(() => { if (mode) setTab(mode); }, [mode]);
+  // The parent needs the live tab: its own mode is a one-shot signal.
+  useEffect(() => { if (onTabChange) onTabChange(tab); }, [tab, onTabChange]);
   const sigSettings = getSigSettings();
   const sigText = resolveSignature(sigSettings, ticket.dept);
   /*
@@ -238,8 +409,13 @@ function ReplyComposer({ ticket, onSend, mode, focusTick, onClose, lastAgentRepl
    * did not exist and the caret ended up against the signature.
    */
   const BLANK = "<p><br></p>";
-  const sigHtml = sigText
-    ? `${BLANK}<p>${esc(sigText).replace(/\n/g, "<br>")}</p>`
+  /* No blank line inside the signature: "Regards," sits directly on the name.
+     A blank line there comes from the template's "\n\n" (and from templates
+     saved before that default changed), so it is folded here rather than
+     trusted. */
+  const sigTight = sigText ? String(sigText).replace(/\n[ \t]*(?:\n[ \t]*)+/g, "\n").trim() : "";
+  const sigHtml = sigTight
+    ? `${BLANK}<p>${esc(sigTight).replace(/\n/g, "<br>")}</p>`
     : "";
   //   0 greeting · 1 blank · 2 CARET · 3 blank · 4 signature
   const initialBody = `<p>Hi ${esc(firstName)},</p>${BLANK}${BLANK}${sigHtml}`;
@@ -287,6 +463,33 @@ function ReplyComposer({ ticket, onSend, mode, focusTick, onClose, lastAgentRepl
   }, [focusTick, tab]);
   /* Where the caret was when "/c" or "@" fired -- see pick()/pickMention(). */
   const savedRange = useRef(null);
+  const fromSlashRef = useRef(false);       // opened by typing "/c" (which pick() removes)
+  const [cpPos, setCpPos] = useState(null);  // where the picker sits: at the "/c", or null = its default spot
+  /*
+   * The picker opens where "/c" was typed, not in a fixed corner: just under
+   * that line, or just above it when there is more room above. Positions are
+   * relative to the composer, which is what the popup is placed inside.
+   */
+  const placeAtCaret = (range) => {
+    const root = rootRef.current;
+    if (!root || !range) return null;
+    let r = range.getClientRects()[0] || range.getBoundingClientRect();
+    if (!r || (!r.width && !r.height && !r.top)) {
+      // An empty line has no text box to measure; use the line it is on.
+      const n = range.startContainer;
+      const el = n && (n.nodeType === 1 ? n : n.parentElement);
+      r = el ? el.getBoundingClientRect() : null;
+    }
+    if (!r) return null;
+    const box = root.getBoundingClientRect();
+    const W = Math.min(400, box.width - 32);
+    // Line the box up with the start of the "/c", about two characters back.
+    const left = Math.max(16, Math.min(r.left - box.left - 14, box.width - W - 16));
+    const below = box.bottom - r.bottom, above = r.top - box.top;
+    return below >= 260 || below >= above
+      ? { left, top: r.bottom - box.top + 6, bottom: "auto" }
+      : { left, top: "auto", bottom: box.bottom - r.top + 6 };
+  };
   const [menOpen, setMenOpen] = useState(false);
   const [menQ, setMenQ] = useState("");
 
@@ -312,7 +515,12 @@ function ReplyComposer({ ticket, onSend, mode, focusTick, onClose, lastAgentRepl
       }
       // Remove the "@" that opened the picker.
       try { document.execCommand("delete"); } catch { /* nothing to delete */ }
-      try { document.execCommand("insertText", false, text); } catch { el.innerHTML += text; }
+      // A tag, not loose text: drawn blue, removed by one Backspace, and it
+      // carries the user id for the hover card. Still plain "@Name" as text, so
+      // the note's mention notification reads it as before.
+      const tag = `<span class="fd-mention" contenteditable="false"${agent.id != null ? ` data-uid="${escHtml(agent.id)}"` : ""}>${escHtml("@" + (agent.name || agent.email))}</span>&nbsp;`;
+      try { if (!document.execCommand("insertHTML", false, tag)) throw new Error("no insertHTML"); }
+      catch { try { document.execCommand("insertText", false, text); } catch { el.innerHTML += text; } }
       setValue(el.innerHTML);
     } else {
       setValue((b) => b + text);
@@ -332,6 +540,7 @@ function ReplyComposer({ ticket, onSend, mode, focusTick, onClose, lastAgentRepl
    * whatever the agent has typed since.
    */
   const [draftInfo, setDraftInfo] = useState(null);
+  const restoredRef = useRef(false);
   const draftLoaded = useRef(false);
   useEffect(() => {
     if (draftLoaded.current) return undefined;
@@ -341,6 +550,7 @@ function ReplyComposer({ ticket, onSend, mode, focusTick, onClose, lastAgentRepl
       .then((r) => {
         const d = r && r.draft;
         if (!alive || !d || !d.body) return;
+        if (restoredRef.current) return;   // an undone send is newer than any saved draft
         setDraftInfo({ at: d.at, mode: d.mode || "Reply" });
         if ((d.mode || "Reply") === "Reply") setBody(d.body);
         else if (d.mode === "Note") setNote(d.body);
@@ -361,6 +571,7 @@ function ReplyComposer({ ticket, onSend, mode, focusTick, onClose, lastAgentRepl
   const [cpQ, setCpQ] = useState("");
   const [trigIdx, setTrigIdx] = useState(-1);
   const [saved, setSaved] = useState(false);
+  const [wipeTick, setWipeTick] = useState(0);
   const [full, setFull] = useState(false);
   useEffect(() => {
     if (!full) return;
@@ -370,6 +581,9 @@ function ReplyComposer({ ticket, onSend, mode, focusTick, onClose, lastAgentRepl
     return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = ""; };
   }, [full]);
   const rootRef = useRef(null);
+  // Hover card for the @tags typed into this note.
+  const deskForTags = useDesk();
+  useMentionTips(() => [rootRef.current], deskForTags.agents, []);
   /* Kept in sync with the conversation column, which is the scroller the
      composer lives in. The composer stops 72px short of filling it, so the
      end of the last message stays visible behind the editor. */
@@ -490,14 +704,23 @@ function ReplyComposer({ ticket, onSend, mode, focusTick, onClose, lastAgentRepl
           sel.addRange(range);
         } catch { /* the DOM moved under us; carry on at wherever focus landed */ }
       }
-      // Remove the "/c" that triggered the picker before inserting.
-      try { document.execCommand("delete"); document.execCommand("delete"); } catch { /* nothing to delete */ }
+      else {
+        // Opened from the toolbar before the editor was ever clicked: the end.
+        const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
+        const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      }
+      // Remove the "/c" that opened the picker -- only when it was typed. From
+      // the toolbar icon there is nothing to remove, and deleting anyway ate
+      // the two characters before the cursor.
+      if (fromSlashRef.current) {
+        try { document.execCommand("delete"); document.execCommand("delete"); } catch { /* nothing to delete */ }
+      }
       try { document.execCommand("insertHTML", false, html); } catch { el.innerHTML += html; }
       setValue(el.innerHTML);
     } else {
       setValue((b) => b + html);
     }
-    savedRange.current = null;
+    savedRange.current = null; fromSlashRef.current = false;
     setCpOpen(false); setTrigIdx(-1);
   };
   const closePop = () => { setCpOpen(false); setTrigIdx(-1); taRef.current?.focus(); };
@@ -525,6 +748,25 @@ function ReplyComposer({ ticket, onSend, mode, focusTick, onClose, lastAgentRepl
    * happens after this function has already finished, so the composer clears
    * and folds away in the same frame as the click.
    */
+  /*
+   * An undone send comes back here exactly as it was written: text,
+   * recipients and staged files. Applied during render rather than in an
+   * effect, so the editor is re-seeded with the restored text in the same
+   * commit as the focus bump that re-seeds it -- an effect would seed the old
+   * text first and the restored one would never reach the box.
+   */
+  const [appliedRestore, setAppliedRestore] = useState(null);
+  if (restore && restore.ticketId === ticket.id && restore.tick !== appliedRestore) {
+    setAppliedRestore(restore.tick);
+    restoredRef.current = true;
+    setTab(restore.mode);
+    if (restore.mode === "Forward") { setFwdNote(restore.body || ""); setFwdTo(restore.to || ""); }
+    else { setBody(restore.body || initialBody); setTo(restore.to || ticket.email); }
+    setCc(restore.cc || ""); setBcc(restore.bcc || "");
+    if (restore.cc || restore.bcc) setShowCc(true);
+    setFiles(restore.files || []);
+  }
+
   const send = () => {
     /*
      * A forward with no covering note is normal -- the point is the thread
@@ -538,13 +780,13 @@ function ReplyComposer({ ticket, onSend, mode, focusTick, onClose, lastAgentRepl
     if (uploadsPending) { push({ type: "info", title: "Still uploading", desc: "Wait for the attachments to finish." }); return; }
 
     if (isNote) {
-      onSend({ type: "note", body: note, isHtml: true });
+      onSend({ type: "note", body: tightParagraphs(note), isHtml: true });
       setNote("");
     } else if (isFwd) {
-      onSend({ type: "forward", body: fwdNote, to: fwdTo, cc, bcc, keepThread, attachmentIds, isHtml: true });
+      onSend({ type: "forward", body: tightParagraphs(fwdNote), to: fwdTo, cc, bcc, keepThread, attachmentIds, files, isHtml: true });
       setFwdNote(""); setFwdTo(""); setFiles([]);
     } else {
-      onSend({ type: "reply", body, to, cc, bcc, attachmentIds, isHtml: true });
+      onSend({ type: "reply", body: tightParagraphs(body), to, cc, bcc, attachmentIds, files, isHtml: true });
       setBody(initialBody); setFiles([]);
     }
     setSaved(false);
@@ -631,7 +873,7 @@ function ReplyComposer({ ticket, onSend, mode, focusTick, onClose, lastAgentRepl
           editorRef={taRef}
           /* Re-seeded only when the ticket or the tab changes -- never on a
              keystroke, or the caret jumps to the start of the box. */
-          resetKey={`${ticket.id}:${tab}:${focusTick}`}
+          resetKey={`${ticket.id}:${tab}:${focusTick}:${wipeTick}`}
           /* Not on a forward that still has no recipient: the To field is
              about to be focused instead, and two grabs would fight. */
           autoFocus={!!focusTick && !(isFwd && !fwdTo.trim())}
@@ -644,6 +886,8 @@ function ReplyComposer({ ticket, onSend, mode, focusTick, onClose, lastAgentRepl
             // to take focus away from the editor.
             const sel = window.getSelection();
             savedRange.current = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+            fromSlashRef.current = true;
+            setCpPos(placeAtCaret(savedRange.current));
             setTrigIdx(-1); setCpQ(""); setCpOpen(true);
           }}
           /* "@" on a note offers the team. Notes are internal, so tagging a
@@ -669,7 +913,7 @@ function ReplyComposer({ ticket, onSend, mode, focusTick, onClose, lastAgentRepl
 
       {/* Anchored to the composer rather than the editor, so they sit above the
           action bar and outside the scroller that would clip them. */}
-      {cpOpen && <CannedPopup query={cpQ} setQuery={setCpQ} onPick={pick} onClose={closePop} />}
+      {cpOpen && <CannedPopup query={cpQ} setQuery={setCpQ} onPick={pick} onClose={closePop} style={cpPos || undefined} />}
       {menOpen && <MentionPopup query={menQ} setQuery={setMenQ} onPick={pickMention}
                                 onClose={() => { setMenOpen(false); taRef.current?.focus(); }} />}
 
@@ -681,7 +925,16 @@ function ReplyComposer({ ticket, onSend, mode, focusTick, onClose, lastAgentRepl
         <input ref={fileRef} type="file" multiple style={{ display: "none" }} onChange={onFiles} />
         {!isNote && (
           <button type="button" title="Canned responses"
-                  onClick={() => { setTrigIdx(-1); setCpQ(""); setCpOpen(true); }}><MessageSquareText size={16} /></button>
+                  /* mousedown + preventDefault keeps the editor's cursor where it
+                     is, so the reply goes in there rather than at the top. */
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    const sel = window.getSelection();
+                    const inEditor = sel && sel.rangeCount && taRef.current && taRef.current.contains(sel.anchorNode);
+                    savedRange.current = inEditor ? sel.getRangeAt(0).cloneRange() : null;
+                    fromSlashRef.current = false;
+                  }}
+                  onClick={() => { setCpPos(null); setTrigIdx(-1); setCpQ(""); setCpOpen(true); }}><MessageSquareText size={16} /></button>
         )}
       </div>
 
@@ -748,7 +1001,9 @@ function ReplyComposer({ ticket, onSend, mode, focusTick, onClose, lastAgentRepl
             } catch (err) { push({ type: "error", title: "Could not save the draft", desc: err.message }); }
           }}><Save size={14} /> Save Draft</button>
           <button className="icon-btn" title="Discard draft" onClick={async () => {
-            setValue(""); setSaved(false);
+            // The editor keeps its own DOM (see RichEditor), so clearing the
+            // state alone left the text on screen: re-seed it, empty.
+            setValue(""); setSaved(false); setWipeTick((n) => n + 1);
             try { await fdMessages.discardDraft(ticket.id); } catch (err) { /* nothing was stored */ }
           }}><Trash2 size={16} /></button>
           {/* Only the upload is worth waiting for: the ids have to exist before
@@ -844,6 +1099,65 @@ function AttachmentCard({ att, onView }) {
  * at the same time: the remote-image block exists to stop tracking pixels, and
  * a picture served by this desk is not one.
  */
+/*
+ * Images from our own site. The campaign mailer serves both pictures (the
+ * logo) and tracking endpoints (the open-pixel, click redirects) from the same
+ * domains, so "ours" is not enough on its own -- a tracker must never load from
+ * this screen, or an agent reading the ticket is counted as the student
+ * opening the campaign.
+ */
+const OWN_SITE = /^https:\/\/(?:[a-z0-9-]+\.)*internshipstudio\.com\//i;
+const OWN_TRACKER = /\/campaigns\/track-|\/track(?:ing)?[-_/.]|[?&]rid=|\/pixel|\/open\.(?:gif|png)/i;
+const isOwnSiteImage = (url) => OWN_SITE.test(url) && !OWN_TRACKER.test(url);
+const isOwnTracker = (url) => OWN_SITE.test(url) && OWN_TRACKER.test(url);
+
+/*
+ * A read-receipt pixel, not a picture: our own campaign open-pixel, anything
+ * drawn at 1-2px or hidden, and the open-tracking paths the big senders use
+ * (SendGrid /wf/open, Mailchimp /track/open, Netcore/Pepipost /o/, Mailgun
+ * /o/, HubSpot /e2t/to, "pixel", "beacon"...). Better to lose a real 1px
+ * spacer than to confirm to a sender that the mail was opened.
+ */
+const TRACKER_URL = /\/wf\/open|\/track(?:ing)?\/open|\/open(?:\.(?:gif|png|php|aspx?))?(?:[?/]|$)|[/.]pixel|beacon|\/trk\/|\/e2t\/to|\/(?:e\/)?o\/[a-z0-9_-]{8,}|[?&](?:open|opened)=|mailtrack|emltrk|\/imp(?:ression)?[?/]/i;
+function isTrackingPixel(tag, url) {
+  if (isOwnTracker(url) || TRACKER_URL.test(url)) return true;
+  const dim = (k) => {
+    const a = new RegExp(`\\s${k}\\s*=\\s*["']?(\\d+)`, "i").exec(tag);
+    const s = new RegExp(`${k}\\s*:\\s*(\\d+)px`, "i").exec(tag);
+    return a ? Number(a[1]) : s ? Number(s[1]) : null;
+  };
+  const w = dim("width"), h = dim("height");
+  if ((w !== null && w <= 2) || (h !== null && h <= 2)) return true;
+  return /display\s*:\s*none|visibility\s*:\s*hidden/i.test(tag);
+}
+
+/*
+ * Our campaign's tracked links, pointed straight at where they lead.
+ *
+ * The campaign mailer rewrites every link in a mail -- the logo included -- to
+ * campaigns/track-click.php?rid=<that recipient>&u=<destination>. A student
+ * who replies quotes the whole campaign back, tracked links and all, so an
+ * agent clicking the logo in a ticket was recorded as THAT student clicking:
+ * the recipient's click count, the campaign's clicks and unique clicks, and a
+ * landing URL carrying campaign_id/attr_window that could credit a later
+ * conversion to the campaign. The destination is already in `u`, so the desk
+ * links to it directly and the tracker never hears about it.
+ */
+function untrackOwnLinks(html) {
+  return html.replace(/(\shref\s*=\s*)(["'])(https?:\/\/(?:[a-z0-9-]+\.)*internshipstudio\.com\/[^"']*\/campaigns\/track-click\.php\?[^"']*)\2/gi,
+    (whole, attr, q, tracked) => {
+      try {
+        const dest = new URL(tracked.replace(/&amp;/g, "&")).searchParams.get("u");
+        // Only a real web address; anything else keeps the link unclickable
+        // rather than trusting whatever the parameter says.
+        if (!dest || !/^https?:\/\//i.test(dest)) return `${attr}${q}#${q}`;
+        return `${attr}${q}${dest.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}${q}`;
+      } catch {
+        return `${attr}${q}#${q}`;
+      }
+    });
+}
+
 function withApiUrls(html) {
   if (!html) return html;
 
@@ -868,6 +1182,19 @@ function withApiUrls(html) {
   out = out.replace(/(href|src|action|background|formaction)\s*=\s*(["']?)\s*(javascript|vbscript)\s*:/gi,
                     "$1=$2#blocked:");
 
+  out = untrackOwnLinks(out);
+
+  /*
+   * Newsletter-width layouts fill the message column. Campaign and newsletter
+   * templates pin their outer table to width="600" (or 640, 700...) for
+   * phone-sized inboxes, which left a campaign quoted in a ticket sitting in
+   * half the column. Only big fixed widths are widened: the small ones are
+   * real design -- a 32px step-number column, a 26px badge -- and stretching
+   * those is what broke "Steps to Complete" before.
+   */
+  out = out.replace(/<(table|td)\b([^>]*?)\swidth\s*=\s*(["']?)(\d{3,4})(?:px)?\3/gi,
+    (whole, tag, before, q, n) => (Number(n) >= 480 ? `<${tag}${before} width="100%"` : whole));
+
   // `tag`, not `out`: the outer name is already taken, and shadowing it here
   // is how a one-line change ends up editing the whole body by accident.
   return out.replace(/<img\b[^>]*>/gi, (tag) => {
@@ -881,6 +1208,37 @@ function withApiUrls(html) {
         .replace(/\sdata-fd-blocked\s*=\s*(["'])?[^\s"'>]*\1?/i, "")
         .replace(/^<img/i, `<img src="${fdUrl(parked[2])}"`);
       return frameImage(restored, attIdOf(parked[2]));
+    }
+
+    /* Our own site's pictures -- the logo in every campaign mail a student
+       replies to. The block is there to stop strangers learning an address is
+       live; these come from us. Tracking endpoints stay parked: loading the
+       campaign open-pixel would record the AGENT reading the ticket as the
+       student opening the mail. */
+    const site = /\sdata-fd-src\s*=\s*(["'])(https:\/\/(?:[a-z0-9-]+\.)*internshipstudio\.com\/[^"']*)\1/i.exec(tag);
+    if (site && isOwnSiteImage(site[2])) {
+      return tag
+        .replace(site[0], "")
+        .replace(/\ssrc\s*=\s*(["'])[^"']*\1/i, "")
+        .replace(/\sdata-fd-blocked\s*=\s*(["'])?[^\s"'>]*\1?/i, "")
+        .replace(/^<img/i, `<img src="${site[2]}"`);
+    }
+
+    /*
+     * Everyone else's pictures load straight away, the way Gmail shows them --
+     * a logo, a banner, social icons. Only tracking pixels stay out: they are
+     * dropped entirely (see isTrackingPixel), so nothing an agent opens tells a
+     * sender the mail was read. no-referrer keeps the ticket URL private too.
+     */
+    const remote = /\sdata-fd-src\s*=\s*(["'])(https?:\/\/[^"']+)\1/i.exec(tag);
+    if (remote) {
+      const url = remote[2].replace(/&amp;/g, "&");
+      if (isTrackingPixel(tag, url)) return "";
+      return tag
+        .replace(remote[0], "")
+        .replace(/\ssrc\s*=\s*(["'])[^"']*\1/i, "")
+        .replace(/\sdata-fd-blocked\s*=\s*(["'])?[^\s"'>]*\1?/i, "")
+        .replace(/^<img/i, `<img src="${remote[2]}" referrerpolicy="no-referrer" loading="lazy"`);
     }
 
     /* Or already a plain src pointing at our endpoint, just relative. */
@@ -981,7 +1339,6 @@ function fullStamp(iso, fallback) {
  */
 const MessageEntry = memo(function MessageEntry({ m, onRetry, onDeleteNote, onPreview, isFirst }) {
   const [showQuoted, setShowQuoted] = useState(false);
-  const [showImages, setShowImages] = useState(false);
   const isNote = m.who === "note";
   const isCust = m.who === "cust";
   const failed = m.status === "failed";
@@ -1001,23 +1358,29 @@ const MessageEntry = memo(function MessageEntry({ m, onRetry, onDeleteNote, onPr
   const bodyHtml = useMemo(() => withApiUrls(m.html), [m.html]);
   const quotedHtml = useMemo(() => withApiUrls(m.quoted || ""), [m.quoted]);
 
+  /* "@Name" in a note: blue tag + hover card (see decorateMentions). */
+  const desk = useDesk();
+  const hasAt = isNote && String(m.html || "").includes("@");
+  useEffect(() => { if (hasAt && desk.ensureAgents) desk.ensureAgents(); }, [hasAt, desk]);
+  // On the string, not the live DOM: a re-render re-applies the markup and
+  // would wipe tags added to the page afterwards.
+  const shownHtml = useMemo(() => {
+    if (!hasAt || !(desk.agents || []).length) return bodyHtml;
+    const tpl = document.createElement("template");
+    tpl.innerHTML = bodyHtml;
+    decorateMentions(tpl.content, desk.agents);
+    return tpl.innerHTML;
+  }, [hasAt, bodyHtml, desk.agents]);
+  useMentionTips(() => [bodyRef.current], desk.agents, [shownHtml, hasAt]);
   /*
-   * "Show images" un-blocks the genuinely remote ones. Our own were restored
-   * in withApiUrls() before this markup was ever injected, so what is left
-   * parked here is exactly what the agent has not agreed to load yet: merely
-   * opening a ticket must never fire a spammer's tracking pixel and confirm
-   * the address is live.
+   * The SAME object each render. React re-applies innerHTML whenever the
+   * dangerouslySetInnerHTML object is a new one -- so any re-render (a hover,
+   * a store update) replaced the message's DOM: images restarted loading and
+   * anything marked on the live nodes was lost.
    */
-  useEffect(() => {
-    if (!showImages) return;
-    [bodyRef.current, quoteRef.current].filter(Boolean).forEach((el) =>
-      el.querySelectorAll("img[data-fd-blocked]").forEach((img) => {
-        const parked = img.getAttribute("data-fd-src");
-        if (!parked) return;
-        img.src = parked;
-        img.removeAttribute("data-fd-blocked");
-      }));
-  }, [showImages, showQuoted, m.id]);
+  const bodyInner = useMemo(() => ({ __html: shownHtml }), [shownHtml]);
+  const quotedInner = useMemo(() => ({ __html: quotedHtml }), [quotedHtml]);
+
 
   /*
    * One listener per message, bound to the container rather than to the
@@ -1097,21 +1460,8 @@ const MessageEntry = memo(function MessageEntry({ m, onRetry, onDeleteNote, onPr
     }));
 
     return () => cleanups.forEach((fn) => fn());
-  }, [bodyHtml, quotedHtml, showQuoted, showImages]);
+  }, [bodyHtml, quotedHtml, showQuoted]);
 
-  /*
-   * Only genuinely remote images count. One of our own attachment URLs parked
-   * in data-fd-src is shown regardless, so counting it would put a "1 remote
-   * image blocked" bar above a picture that is plainly visible.
-   */
-  const blockedCount = useMemo(() => {
-    if (!m.html) return 0;
-    const parked = m.html.match(/data-fd-src=["'][^"']*["']/g) || [];
-    return parked.filter((a) => a.indexOf("fd_attachments.php") === -1
-                             && a.indexOf("data:image/") === -1
-                             // An empty one is residue, not a blocked image.
-                             && !/data-fd-src=["']\s*["']/.test(a)).length;
-  }, [m.html]);
 
   /* The server sends the quoted chain separately now; rows written before that
      only have the plain-text fallback, so both are still supported. */
@@ -1163,15 +1513,9 @@ const MessageEntry = memo(function MessageEntry({ m, onRetry, onDeleteNote, onPr
           </div>
         )}
 
-        {blockedCount > 0 && !showImages && (
-          <div className="msg-blocked">
-            <ShieldX size={13} /> {blockedCount} remote image{blockedCount === 1 ? "" : "s"} blocked
-            <button className="btn btn-ghost btn-sm" onClick={() => setShowImages(true)}>Show images</button>
-          </div>
-        )}
 
         {bodyHtml
-          ? <div className="msg-body msg-html" ref={bodyRef} dangerouslySetInnerHTML={{ __html: bodyHtml }} />
+          ? <div className="msg-body msg-html" ref={bodyRef} dangerouslySetInnerHTML={bodyInner} />
           : <div className="msg-body">{m.msg}</div>}
 
         {/* Freshdesk's "···": the quoted thread is one click away and takes up
@@ -1185,7 +1529,7 @@ const MessageEntry = memo(function MessageEntry({ m, onRetry, onDeleteNote, onPr
           </button>
         )}
         {showQuoted && (quotedHtml
-          ? <div className="msg-quoted msg-html" ref={quoteRef} dangerouslySetInnerHTML={{ __html: quotedHtml }} />
+          ? <div className="msg-quoted msg-html" ref={quoteRef} dangerouslySetInnerHTML={quotedInner} />
           : <div className="msg-quoted quote">{quotedText}</div>)}
 
         {files.length > 0 && (
@@ -1253,16 +1597,15 @@ const MessageEntry = memo(function MessageEntry({ m, onRetry, onDeleteNote, onPr
  * It scrolls on its own so the conversation keeps the page's scrollbar, and it
  * centres itself on the open ticket whenever you arrive from anywhere.
  */
-const QUEUE_PAGE = 30;
+const QUEUE_PAGE = 40;
 
+/* `api` is the sort name fd_sort_sql() understands; the rail sorts on the
+   server now, so these have to be the server's words. */
 const QUEUE_SORTS = [
-  { k: "created",  label: "Date created" },
-  { k: "modified", label: "Last modified" },
-  { k: "priority", label: "Priority" },
+  { k: "created",  label: "Date created",  api: "Created Date" },
+  { k: "modified", label: "Last modified", api: "Updated Date" },
+  { k: "priority", label: "Priority",      api: "Priority" },
 ];
-/* High first when sorting by priority: "descending" on an ordered scale means
-   the most urgent, not the alphabetically last. */
-const PRIO_RANK = { Urgent: 4, Critical: 4, High: 3, Medium: 2, Low: 1 };
 
 /*
  * What the queue rail shows, chosen from the properties column.
@@ -1272,11 +1615,16 @@ const PRIO_RANK = { Urgent: 4, Critical: 4, High: 3, Medium: 2, Low: 1 };
  * everything that is not finished rather than the status literally called
  * Open -- the same line the desk's Unresolved view draws, and the reason a
  * Pending ticket does not vanish out from under the agent reading it.
+ *
+ * `view` is the server view each one maps to (fd_view_where). The rail used to
+ * filter the desk's 500-row working set, so "Closed" and "All" topped out at
+ * whatever of those 500 happened to match -- the 497 and 500 the panel showed
+ * were the size of the cache, not of the mailbox.
  */
 const QUEUE_FILTERS = [
-  { key: "open",   label: "Open" },
-  { key: "closed", label: "Closed" },
-  { key: "all",    label: "All" },
+  { key: "open",   label: "Open",   view: "unresolved" },
+  { key: "closed", label: "Closed", view: "resolved" },
+  { key: "all",    label: "All",    view: "all" },
 ];
 const isFinished = (t) => t.status === "Closed" || t.status === "Resolved";
 const queueMatches = (t, key) => {
@@ -1286,77 +1634,123 @@ const queueMatches = (t, key) => {
   return true;
 };
 
-function TicketQueue({ tickets, currentId, onOpen, onCollapse, filter = "open" }) {
+/*
+ * The rail's rows, paged from the server for one filter and one order.
+ *
+ * `patch` is how this tab's own actions show up before any refetch: closing a
+ * ticket patches its status here, the row stops matching "Open", and it drops
+ * out of the rail on the spot. Only patched rows are re-tested against the
+ * filter -- the server already filtered the rest, and knows fields the panel
+ * does not.
+ *
+ * A new filter or a new order is a new question, so it starts again at page 1
+ * and forgets the patches: the answer comes from the server, which by then has
+ * the change.
+ */
+function useQueueRows(filter, sortKey, sortDesc) {
+  const view = (QUEUE_FILTERS.find((f) => f.key === filter) || QUEUE_FILTERS[0]).view;
+  const sort = (QUEUE_SORTS.find((s) => s.k === sortKey) || QUEUE_SORTS[0]).api;
+  const dir = sortDesc ? "DESC" : "ASC";
+
+  const [state, setState] = useState({ rows: [], total: 0, page: 0, loading: true, error: null });
+  const [patches, setPatches] = useState({});
+  const seq = useRef(0);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  const fetchPage = useCallback(async (page) => {
+    const my = ++seq.current;
+    setState((s) => ({ ...s, loading: true, error: null }));
+    try {
+      // Its own abort scope, so paging the rail can never cancel the list page
+      // or the desk's working-set load that share this endpoint.
+      const res = await fdTicketsApi.list({ view, page, perPage: QUEUE_PAGE, sort, sortDir: dir, scope: "queue" });
+      if (my !== seq.current) return;
+      const got = res.tickets || [];
+      setState((s) => {
+        // Rows can shift between pages while the agent works, so a ticket may
+        // come back twice; keep the first sighting.
+        const base = page === 1 ? [] : s.rows;
+        const seen = new Set(base.map((t) => t.id));
+        return {
+          rows: [...base, ...got.filter((t) => !seen.has(t.id))],
+          total: res.total || 0, page, loading: false, error: null,
+        };
+      });
+    } catch (err) {
+      if (err.canceled || my !== seq.current) return;
+      setState((s) => ({ ...s, loading: false, error: err.message }));
+    }
+  }, [view, sort, dir]);
+
+  useEffect(() => { setPatches({}); fetchPage(1); }, [fetchPage]);
+
+  const loadMore = useCallback(() => {
+    const s = stateRef.current;
+    if (s.loading || s.rows.length >= s.total) return;
+    fetchPage(s.page + 1);
+  }, [fetchPage]);
+
+  const patch = useCallback((id, fields) => {
+    setPatches((p) => ({ ...p, [id]: { ...(p[id] || {}), ...fields } }));
+  }, []);
+
+  const rows = useMemo(() => state.rows
+    .map((t) => (patches[t.id] ? { ...t, ...patches[t.id] } : t))
+    .filter((t) => !patches[t.id] || queueMatches(t, filter)),
+  [state.rows, patches, filter]);
+
+  return {
+    rows,
+    // The server's count, less what this tab has since taken out of it.
+    total: Math.max(0, state.total - (state.rows.length - rows.length)),
+    loading: state.loading,
+    error: state.error,
+    hasMore: state.rows.length < state.total,
+    loadMore,
+    patch,
+    reload: () => fetchPage(1),
+  };
+}
+
+/*
+ * The ticket after `currentId` in the rail, as the agent sees it ordered.
+ *
+ * When the open ticket is not in the rail at all -- opened from search, or
+ * from a filter that excludes it -- the answer is the top of the rail rather
+ * than nothing. Returning nothing there is what made Close sometimes close the
+ * ticket and then just sit on it.
+ */
+function neighbourIn(rows, currentId, dir = 1) {
+  const i = rows.findIndex((t) => t.id === currentId);
+  if (i < 0) return dir > 0 ? (rows.find((t) => t.id !== currentId) || null) : null;
+  const j = i + dir;
+  return j >= 0 && j < rows.length ? rows[j] : null;
+}
+
+function TicketQueue({ queue, currentId, onOpen, onCollapse, filter, sortKey, setSortKey, sortDesc, setSortDesc }) {
   const listRef = useRef(null);
-  const [sortKey, setSortKey] = useState("created");
-  const [sortDesc, setSortDesc] = useState(true);
   const [sortOpen, setSortOpen] = useState(false);
   const sortRef = useRef(null);
   useClickAway(sortRef, () => setSortOpen(false));
 
-  /*
-   * Filtered against the working set rather than refetched, which is what
-   * makes closing a ticket drop it out of the rail on the spot: the desk
-   * patches the ticket's status optimistically, and this recomputes.
-   */
-  const pool = useMemo(
-    () => tickets.filter((t) => queueMatches(t, filter)),
-    [tickets, filter]
-  );
-
-  /*
-   * Sorted here rather than refetched: this is the working set the page
-   * already holds, and a round trip to reorder thirty rows the browser is
-   * looking at would be slower and could disagree with the list behind it.
-   */
-  const ordered = useMemo(() => {
-    const key = (t) => {
-      if (sortKey === "priority") return PRIO_RANK[t.priority] || 0;
-      const raw = sortKey === "modified" ? (t.updatedAt || t.lastMessageAt || t.createdAt) : t.createdAt;
-      const ms = raw ? Date.parse(String(raw).replace(" ", "T")) : NaN;
-      return Number.isNaN(ms) ? 0 : ms;
-    };
-    const out = [...pool].sort((a, b) => key(a) - key(b));
-    return sortDesc ? out.reverse() : out;
-  }, [pool, sortKey, sortDesc]);
-
-  const idx = ordered.findIndex((t) => t.id === currentId);
+  const { rows, total, loading, error, hasMore, loadMore } = queue;
+  const idx = rows.findIndex((t) => t.id === currentId);
   const sortLabel = (QUEUE_SORTS.find((x) => x.k === sortKey) || QUEUE_SORTS[0]).label;
-
-  /*
-   * How many rows are actually in the DOM.
-   *
-   * Enough to include the open ticket -- arriving at #400 and finding the rail
-   * scrolled to nothing would be worse than the lag this fixes -- then thirty
-   * more each time the scroll gets near the end.
-   */
-  const [limit, setLimit] = useState(() =>
-    Math.min(ordered.length, Math.max(QUEUE_PAGE, (idx >= 0 ? idx + 1 : 0) + 10)));
-
-  // A different ticket -- or a different order -- resets the window.
-  useEffect(() => {
-    setLimit(Math.min(ordered.length, Math.max(QUEUE_PAGE, (idx >= 0 ? idx + 1 : 0) + 10)));
-  }, [currentId, ordered.length, idx, sortKey, sortDesc]);
-
-  const shown = useMemo(() => ordered.slice(0, limit), [ordered, limit]);
 
   const onScroll = useCallback((e) => {
     const el = e.currentTarget;
-    // 300px of runway, so the next batch is already there when you reach it.
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 300) {
-      setLimit((n) => (n >= ordered.length ? n : Math.min(ordered.length, n + QUEUE_PAGE)));
-    }
-  }, [ordered.length]);
+    // 300px of runway, so the next page is already there when you reach it.
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 300) loadMore();
+  }, [loadMore]);
 
   useEffect(() => {
     const el = listRef.current?.querySelector('[data-cur="1"]');
     scrollWithin(el, listRef.current, "center");
-    // Deliberately NOT keyed on the window size: growing it must never move
-    // the scroll position, or loading more throws you back to the top.
+    // Keyed on the ticket only: a page arriving must never move the scroll
+    // position, or loading more throws you back to the open ticket.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentId]);
-
-  if (!tickets.length) return null;
 
   return (
     <div className="tq">
@@ -1383,7 +1777,7 @@ function TicketQueue({ tickets, currentId, onOpen, onCollapse, filter = "open" }
             </div>
           )}
         </div>
-        <span className="tq-count">{idx >= 0 ? `${idx + 1}/${ordered.length}` : ordered.length}</span>
+        <span className="tq-count">{idx >= 0 ? `${idx + 1}/${total}` : total}</span>
         {onCollapse && (
           <button className="icon-btn tq-toggle" title="Hide the ticket list" onClick={onCollapse}>
             <PanelLeftClose size={16} />
@@ -1392,7 +1786,7 @@ function TicketQueue({ tickets, currentId, onOpen, onCollapse, filter = "open" }
       </div>
 
       <div className="tq-list" ref={listRef} onScroll={onScroll}>
-        {shown.map((t) => (
+        {rows.map((t) => (
           <button key={t.id} data-cur={t.id === currentId ? "1" : undefined}
                   className={`tq-item ${t.id === currentId ? "on" : ""}`}
                   onClick={() => t.id !== currentId && onOpen(t)}>
@@ -1419,12 +1813,17 @@ function TicketQueue({ tickets, currentId, onOpen, onCollapse, filter = "open" }
 
           </button>
         ))}
-        {limit < ordered.length && (
-          <div className="tq-more">Loading {Math.min(QUEUE_PAGE, ordered.length - limit)} more…</div>
+        {loading && <div className="tq-more"><Spinner size={13} /> Loading tickets…</div>}
+        {!loading && !error && hasMore && (
+          <button className="tq-more tq-more-btn" onClick={loadMore}>Load more</button>
         )}
-        {/* The filter can empty the rail even when the desk has tickets, so
-            this says which filter did it rather than leaving a blank column. */}
-        {ordered.length === 0 && (
+        {error && !loading && (
+          <div className="tq-more">
+            Could not load this list. <button className="tq-more-btn" onClick={queue.reload}>Retry</button>
+          </div>
+        )}
+        {/* Says which filter emptied it, rather than leaving a blank column. */}
+        {!loading && !error && rows.length === 0 && (
           <div className="tq-more">
             No {filter === "all" ? "" : `${filter} `}tickets in this list.
           </div>
@@ -1558,23 +1957,69 @@ function addressText(list) {
  * The counts come off the same working set the rail lists, so they move the
  * moment a status changes rather than at the next reload.
  */
+/* 32834 -> "32.8k". Three segments share a 300px column, and a five-digit
+   count pushed the last one out of the card; the exact number is on hover. */
+function compactCount(n) {
+  if (n == null) return "…";
+  const v = Number(n) || 0;
+  if (v < 1000) return String(v);
+  const k = v / 1000;
+  return (k >= 100 ? Math.round(k) : Math.round(k * 10) / 10) + "k";
+}
+
 function QueueFilterPanel({ value, onChange, counts }) {
   return (
-    <div className="card">
-      <div className="props-body">
-        <div className="plab">Ticket list</div>
-        <div className="seg">
-          {QUEUE_FILTERS.map((f) => (
-            <button key={f.key} className={value === f.key ? "on" : ""}
-                    style={{ flex: 1, justifyContent: "center", gap: 5 }}
-                    title={`Show ${f.label.toLowerCase()} tickets in the list on the left`}
-                    onClick={() => onChange(f.key)}>
-              {f.label}
-              <span className="count-badge" style={{ fontSize: 10, padding: "0 6px" }}>{counts[f.key]}</span>
-            </button>
-          ))}
-        </div>
+    <div className="card qf">
+      <span className="qf-l">Ticket list</span>
+      <div className="seg qf-seg">
+        {QUEUE_FILTERS.map((f) => (
+          <button key={f.key} className={value === f.key ? "on" : ""}
+                  title={counts[f.key] == null ? f.label
+                    : f.label + ": " + Number(counts[f.key]).toLocaleString("en-IN") + " tickets"}
+                  onClick={() => onChange(f.key)}>
+            <span className="qf-lab">{f.label}</span>
+            <span className="qf-n">{compactCount(counts[f.key])}</span>
+          </button>
+        ))}
       </div>
+    </div>
+  );
+}
+
+/*
+ * One line of the collapsed contact card: the value, and a button that copies
+ * it. The toast says what was copied, so an agent pasting into a call sheet
+ * knows they have the number and not the address.
+ */
+function CopyLine({ icon: Ic, label, value, empty }) {
+  const push = useToast();
+  const [done, setDone] = useState(false);
+  const copy = async () => {
+    let ok = false;
+    try { await navigator.clipboard.writeText(value); ok = true; }
+    catch {
+      // Clipboard API refused (older browser, or no focus): the textarea route.
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = value; ta.setAttribute("readonly", ""); ta.style.cssText = "position:fixed;opacity:0";
+        document.body.appendChild(ta); ta.select(); ok = document.execCommand("copy"); ta.remove();
+      } catch { ok = false; }
+    }
+    if (!ok) { push({ type: "error", title: `Could not copy the ${label.toLowerCase()}` }); return; }
+    setDone(true);
+    setTimeout(() => setDone(false), 1500);
+    push({ type: "success", title: `${label} copied`, desc: value });
+  };
+  return (
+    <div className="who-line">
+      <Ic size={11} />
+      <span className="who-val">{value || empty}</span>
+      {value && (
+        <button type="button" className={`who-copy ${done ? "done" : ""}`} onClick={copy}
+                title={`Copy ${label.toLowerCase()}`} aria-label={`Copy ${label.toLowerCase()}`}>
+          {done ? <Check size={12} /> : <Copy size={12} />}
+        </button>
+      )}
     </div>
   );
 }
@@ -1582,24 +2027,22 @@ function QueueFilterPanel({ value, onChange, counts }) {
 function ContactPanel({ ticket, badges }) {
   const t = ticket;
   /*
-   * Closed on arrival.
+   * Collapsed on every ticket, and deliberately not remembered: the ticket's
+   * own properties -- status, priority, tags, the SLA clocks -- are what an
+   * agent touches while working it, and a card that reopened itself pushed
+   * them below the fold on every ticket after the first.
    *
-   * Who the person is matters once; the ticket's own properties -- status,
-   * priority, tags, the SLA clocks -- are what an agent actually touches while
-   * working it. Opening the column on the contact card pushed all of that below
-   * the fold. The choice still sticks once it is made.
+   * Collapsed still answers "how do I reach them": the email and phone sit in
+   * the header. Expanded, they move into the card's contact block and leave
+   * the header, so nothing is shown twice.
    */
-  const [open, setOpen] = useState(() => {
-    try { return localStorage.getItem("hh-contact-open") === "1"; } catch { return false; }
-  });
-  const toggle = () => setOpen((v) => {
-    const n = !v;
-    try { localStorage.setItem("hh-contact-open", n ? "1" : "0"); } catch { /* private window */ }
-    return n;
-  });
+  const [open, setOpen] = useState(false);
+  useEffect(() => { setOpen(false); }, [t.id]);
+  const toggle = () => setOpen((v) => !v);
+  const tel = t.phone ? String(t.phone).replace(/[^\d+]/g, "") : "";
 
   return (
-    <div className="card cp-compact" style={{ marginBottom: 14 }}>
+    <div className="card cp-compact">
       <button className="who who-btn" onClick={toggle} aria-expanded={open}>
         <span className="wa" style={{ background: avColor(t.name) }}>{initials(t.name)}</span>
         <span style={{ minWidth: 0, flex: 1, textAlign: "left" }}>
@@ -1609,6 +2052,16 @@ function ContactPanel({ ticket, badges }) {
         {t.registered && <BadgeCheck size={15} color="var(--success)" style={{ flexShrink: 0 }} />}
         <ChevronDown size={14} className={`grp-caret ${open ? "" : "shut"}`} style={{ flexShrink: 0, color: "var(--faint)" }} />
       </button>
+
+      {/* Below the header rather than inside it: the header is one toggle
+          button, and a copy button nested in a button is invalid markup that
+          browsers resolve by firing the toggle instead. */}
+      {!open && (
+        <div className="who-reach">
+          <CopyLine icon={AtSign} label="Email" value={t.email || ""} empty="No email" />
+          <CopyLine icon={PhoneCall} label="Phone number" value={tel ? String(t.phone) : ""} empty="No phone number" />
+        </div>
+      )}
 
       {!open ? null : (<>
 
@@ -1702,7 +2155,7 @@ function ContactPanel({ ticket, badges }) {
   );
 }
 
-function PropertiesPanel({ ticket }) {
+function PropertiesPanel({ ticket, onSave, busy = false }) {
   const desk = useDesk();
   /*
    * The real assignable agents, not the five invented names this offered
@@ -1725,39 +2178,109 @@ function PropertiesPanel({ ticket }) {
   const [type, setType] = useState(ticket.type || "—");
   const [tq, setTq] = useState("");
   const addTag = (e) => { if (e.key === "Enter" && tq.trim()) { setTags(t => t.includes(tq.trim()) ? t : [...t, tq.trim()]); setTq(""); } };
+  /* A change made elsewhere to THIS ticket (Undo, a realtime update) shows up
+     here too, unless the agent is mid-edit of that very field. */
+  useEffect(() => { setStatus(ticket.status); }, [ticket.status]);
+  useEffect(() => { setPrio(ticket.priority); }, [ticket.priority]);
+  useEffect(() => { setAgent(ticket.agent); }, [ticket.agent]);
+
+  /* Only what the agent actually changed is sent. Group and Tags are not:
+     Group lists sample departments and Tags shows the category, not the
+     ticket's real tags, so saving either would write the wrong thing. */
+  const changes = {};
+  if (status && status !== ticket.status) changes.status = status;
+  if (prio && prio !== ticket.priority) changes.priority = prio;
+  if (agent && agent !== ticket.agent) changes.agent = agent;
+  if (type && type !== "—" && type !== (ticket.type || "—")) changes.type = type;
+  const dirty = Object.keys(changes).length > 0;
+  const finishing = !!changes.status && (changes.status === "Closed" || changes.status === "Resolved");
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!dirty || saving || busy || !onSave) return;
+    setSaving(true);
+    try { await onSave(changes); } finally { setSaving(false); }
+  };
+
   const overdue = ticket.sla === "Breached";
+  const st = statusStyle(status);
+  /* The real due time, on hover. The line under each clock used to be a fixed
+     sample date ("Sat 18 Jul 2026") that matched no ticket. */
+  const dueTitle = (iso) => {
+    if (!iso) return undefined;
+    const d = new Date(String(iso).replace(" ", "T"));
+    return Number.isNaN(d.getTime()) ? undefined
+      : d.toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+  };
+  /*
+   * Built for the column's height, not its width.
+   *
+   * The old card spent its first third on a 19px status heading, a panel
+   * button that did nothing, and two stacked SLA rows each with a made-up
+   * date -- so the first field an agent actually edits started below the fold.
+   * Now: one header line with the status as a pill, both clocks on a single
+   * row, and the fields two to a row in the order they are used (status first,
+   * tags last). Every field fits on screen at a normal window height.
+   */
   return (
-    <div className="card">
-      <div className="props-head"><h3>{status}</h3><button className="icon-btn" style={{ width: 32, height: 32 }}><PanelRight size={16} /></button></div>
-      <div className="sla-row">
-        <span className="si" style={{ background: overdue ? "var(--danger-soft)" : "var(--warning-soft)", color: overdue ? "var(--danger)" : "var(--warning)" }}><CornerUpLeft size={14} /></span>
-        <div><div className="st">First response {overdue ? "overdue by an hour" : `due ${ticket.firstResp}`}</div><div className="sd">Sat 18 Jul 2026, 03:11 pm</div></div>
+    <div className="card pp">
+      <div className="pp-head">
+        <span className="pp-title">Properties</span>
+        <span className="pp-status" style={{ background: st.bg, color: st.fg }}>{status}</span>
       </div>
-      <div className="sla-row">
-        <span className="si" style={{ background: "var(--success-soft)", color: "var(--success)" }}><Timer size={14} /></span>
-        <div><div className="st">Resolution due {ticket.resolution}</div><div className="sd">Mon 20 Jul 2026, 03:11 pm</div></div>
-      </div>
-      <div className="props-body">
-        <div className="plab">Properties</div>
-        <div>
-          <label style={{ display: "block", marginBottom: 7, fontSize: 12, fontWeight: 600 }}>Tags</label>
-          <input placeholder="Search tags to add" value={tq} onChange={(e) => setTq(e.target.value)} onKeyDown={addTag} />
-          <div className="tagbox">{tags.map(t => (<span className="tg" key={t}><TagIcon size={11} /> {t}<button onClick={() => setTags(x => x.filter(y => y !== t))}><X size={11} /></button></span>))}</div>
+      <div className="pp-sla">
+        <div className={`pp-clock ${overdue ? "bad" : ""}`} title={dueTitle(ticket.firstResponseDue)}>
+          <CornerUpLeft size={13} />
+          <span><b>First response</b>{overdue ? "Overdue" : `Due ${ticket.firstResp}`}</span>
         </div>
-        {[
-          ["Type", ["—", "Question", "Incident", "Problem", "Feature Request", "Refund"], type, setType],
-          ["Status", ["New", "Open", "Pending", "Overdue", "Resolved", "Closed"], status, setStatus],
-          ["Priority", ["Low", "Medium", "High", "Urgent", "Critical"], prio, setPrio],
-          ["Group", ["—", "Student Success", "Payments", "Tech Support", "Placements"], null, null],
-          ["Agent", agentOptions, agent, setAgent],
-        ].map(([lab, opts, val, set]) => (
-          <div key={lab}>
-            <label style={{ display: "block", marginBottom: 7, fontSize: 12, fontWeight: 600 }}>{lab}{lab === "Status" && <span style={{ color: "var(--danger)" }}> *</span>}</label>
-            {set ? <select value={val} onChange={(e) => set(e.target.value)}>{opts.map(o => <option key={o}>{o}</option>)}</select>
-                 : <select defaultValue={opts[0]}>{opts.map(o => <option key={o}>{o}</option>)}</select>}
+        <div className="pp-clock ok" title={dueTitle(ticket.resolutionDue)}>
+          <Timer size={13} />
+          <span><b>Resolution</b>{`Due ${ticket.resolution}`}</span>
+        </div>
+      </div>
+      <div className="pp-body">
+        <div className="pp-grid">
+          <label className="pp-f">
+            <span className="pp-l">Status<i>*</i></span>
+            <select value={status} onChange={(e) => setStatus(e.target.value)}>
+              {["New", "Open", "Pending", "Overdue", "Resolved", "Closed"].map((o) => <option key={o}>{o}</option>)}
+            </select>
+          </label>
+          <label className="pp-f">
+            <span className="pp-l">Priority</span>
+            <select value={prio} onChange={(e) => setPrio(e.target.value)}>
+              {["Low", "Medium", "High", "Urgent", "Critical"].map((o) => <option key={o}>{o}</option>)}
+            </select>
+          </label>
+          <label className="pp-f wide">
+            <span className="pp-l">Agent</span>
+            <select value={agent} onChange={(e) => setAgent(e.target.value)}>
+              {agentOptions.map((o) => <option key={o}>{o}</option>)}
+            </select>
+          </label>
+          <label className="pp-f">
+            <span className="pp-l">Type</span>
+            <select value={type} onChange={(e) => setType(e.target.value)}>
+              {["—", "Question", "Incident", "Problem", "Feature Request", "Refund"].map((o) => <option key={o}>{o}</option>)}
+            </select>
+          </label>
+          <label className="pp-f">
+            <span className="pp-l">Group</span>
+            <select defaultValue="—">
+              {["—", "Student Success", "Payments", "Tech Support", "Placements"].map((o) => <option key={o}>{o}</option>)}
+            </select>
+          </label>
+          <div className="pp-f wide">
+            <span className="pp-l">Tags</span>
+            <input placeholder="Add a tag and press Enter" value={tq} onChange={(e) => setTq(e.target.value)} onKeyDown={addTag} />
+            {tags.filter(Boolean).length > 0 && (
+              <div className="tagbox">{tags.filter(Boolean).map((t) => (<span className="tg" key={t}><TagIcon size={11} /> {t}<button onClick={() => setTags((x) => x.filter((y) => y !== t))}><X size={11} /></button></span>))}</div>
+            )}
           </div>
-        ))}
-        <button className="btn btn-primary" style={{ justifyContent: "center", marginTop: 4 }}>Update</button>
+        </div>
+        <button className="btn btn-primary btn-sm pp-save" onClick={save} disabled={!dirty || saving || busy}
+                title={finishing ? "Save, then open the next ticket" : dirty ? "Save these changes" : "Nothing has changed"}>
+          {saving || busy ? "Saving…" : finishing ? "Update & Next" : "Update"}
+        </button>
       </div>
     </div>
   );
@@ -2004,7 +2527,7 @@ const CONTACT_FIELDS = ["phone", "contactId", "registered", "blocked", "userId",
                         "program", "enrollId", "totalTickets", "joined", "notes", "meta",
                         "studentContext"];
 
-function TicketDetailPage({ ticket: listTicket, onBack, onPrev, onNext, tickets, setTickets, onOpenTicket, initialCompose }) {
+function TicketDetailPage({ ticket: listTicket, onBack, tickets, setTickets, onOpenTicket, initialCompose }) {
   /*
    * The contact half of the ticket, from the single-ticket endpoint. Null
    * until it arrives, and cleared whenever a different ticket is opened so one
@@ -2034,27 +2557,45 @@ function TicketDetailPage({ ticket: listTicket, onBack, onPrev, onNext, tickets,
   const [threadError, setThreadError] = useState(null);
 
   const ticketId = ticket ? ticket.id : null;
+  /*
+   * Which ticket is open NOW, read after each await. A response that lands
+   * after the agent has moved on belongs to a ticket no longer on screen:
+   * Close & Next made this common -- the closed ticket's refresh answered
+   * after the next ticket's, and painted the previous customer's conversation
+   * under the new ticket's header.
+   */
+  const openIdRef = useRef(ticketId);
+  openIdRef.current = ticketId;
+  /* Set further down, once the rail exists; read by loadThread. */
+  const onWalkArrivedRef = useRef(null);
 
   const loadThread = useCallback(async (opts = {}) => {
     if (!ticket || !ticket.id) return;
+    const wanted = ticket.id;
     if (!opts.silent) setThreadLoading(true);
     try {
-      const res = await fdTicketsApi.get(ticket.id);
+      const res = await fdTicketsApi.get(wanted);
+      if (openIdRef.current !== wanted) return;      // moved on; see openIdRef
       // A merged ticket answers with a redirect instead of a conversation.
       if (res.redirect_to) {
         push({ type: "info", title: "Ticket was merged", desc: `Showing #${res.redirect_to} instead.` });
         setThread([]);
         return;
       }
+      // Reached with an arrow or Close & Next, but closed meanwhile by someone
+      // else: skip on instead of showing it (see onWalkArrivedRef).
+      if (res.ticket && onWalkArrivedRef.current && onWalkArrivedRef.current(wanted, res.ticket)) return;
       setThread(res.convo || []);
       // The half of the ticket only this endpoint returns -- see CONTACT_FIELDS.
       if (res.ticket) setDetail(res.ticket);
       setThreadError(null);
     } catch (err) {
-      if (err.canceled) return;
+      if (err.canceled || openIdRef.current !== wanted) return;
       setThreadError(err.message);
     } finally {
-      if (!opts.silent) setThreadLoading(false);
+      // Not for a ticket we have left: that would clear the NEW ticket's
+      // spinner while its own load is still in flight.
+      if (!opts.silent && openIdRef.current === wanted) setThreadLoading(false);
     }
     // Plain value, not `ticket && ticket.id`: a computed expression in a
     // dependency array cannot be checked statically, and this one changed
@@ -2105,10 +2646,41 @@ function TicketDetailPage({ ticket: listTicket, onBack, onPrev, onNext, tickets,
    * with a Retry button. Putting the words back into a box the agent has
    * already moved on from loses them more often than it saves them.
    */
-  const add = (entry) => {
+  /*
+   * Undo send.
+   *
+   * An email cannot be recalled once it has left, so a reply or forward waits
+   * UNDO_SEND_MS before it goes: it shows in the thread as "Sending…" with an
+   * Undo on the toast, and Undo puts the text back in the editor untouched.
+   * Notes are internal and never leave the desk, so they post at once.
+   *
+   * The wait survives moving to another ticket -- Close & Next straight after a
+   * reply is the usual case -- because this component stays mounted. Leaving
+   * the ticket screen altogether sends anything still waiting immediately
+   * rather than dropping it, and closing the tab while one is waiting asks
+   * first.
+   */
+  const UNDO_SEND_MS = 10000;
+  const pendingSends = useRef(new Map());          // tempId -> { timer, fire }
+  const [restore, setRestore] = useState(null);    // what Undo hands back to the composer
+
+  useEffect(() => {
+    const warn = (e) => { if (pendingSends.current.size) { e.preventDefault(); e.returnValue = ""; } };
+    window.addEventListener("beforeunload", warn);
+    const pending = pendingSends.current;
+    return () => {
+      window.removeEventListener("beforeunload", warn);
+      // Leaving the ticket screen: send now rather than lose the message.
+      pending.forEach(({ timer, fire }) => { clearTimeout(timer); fire(); });
+      pending.clear();
+    };
+  }, []);
+
+  const add = (entry, { immediate = false } = {}) => {
     // Negative id, so an optimistic row can never collide with a real one.
     const tempId = -Date.now();
     const me = currentAgentProfile();
+    const forTicket = ticket;                      // the ticket this was written on
 
     setThread((t) => [...t, {
       id: tempId,
@@ -2134,49 +2706,81 @@ function TicketDetailPage({ ticket: listTicket, onBack, onPrev, onNext, tickets,
     // The composer's work is done the moment the message is in the thread.
     setComposerOpen(false);
     setMode(null);
-    if (entry.type !== "note") setStatus((st) => (st === "New" ? "Pending" : st));
 
-    /*
-     * Fired, not awaited. sendMessage() raises its own toasts for both the
-     * success and the two kinds of failure, so nothing is swallowed here.
-     */
-    (async () => {
-      try {
-        const res = await desk.sendMessage({
-          ticketId: ticket.id,
-          type: entry.type,
-          body: entry.body,
-          to: parseAddressList(entry.to),
-          cc: parseAddressList(entry.cc),
-          bcc: parseAddressList(entry.bcc),
-          attachmentIds: entry.attachmentIds || [],
-          includeAttachments: entry.keepThread !== false,
-        });
+    const fire = () => {
+      pendingSends.current.delete(tempId);
+      const here = openIdRef.current === forTicket.id;
+      if (entry.type !== "note" && here) setStatus((st) => (st === "New" ? "Pending" : st));
+      /*
+       * Fired, not awaited. sendMessage() raises its own toasts for both the
+       * success and the two kinds of failure, so nothing is swallowed here.
+       */
+      (async () => {
+        try {
+          await desk.sendMessage({
+            ticketId: forTicket.id,
+            type: entry.type,
+            body: entry.body,
+            to: parseAddressList(entry.to),
+            cc: parseAddressList(entry.cc),
+            bcc: parseAddressList(entry.bcc),
+            attachmentIds: entry.attachmentIds || [],
+            includeAttachments: entry.keepThread !== false,
+          });
+          /*
+           * res.sent === false is the soft failure: the message WAS stored, the
+           * mail server just would not take it. Refetching is still right --
+           * the stored row comes back with a real id and its own failed state,
+           * so Retry goes through the server's own retry path. The refetch also
+           * swaps the optimistic row for the authoritative copy. loadThread
+           * ignores the answer if the agent has moved to another ticket.
+           */
+          await loadThread({ silent: true });
+        } catch (err) {
+          // Nothing reached the server, so there is nothing to refetch. Mark the
+          // row the agent is already looking at, and undo the optimistic status.
+          setThread((t) => t.map((m) => (m.id === tempId
+            ? { ...m, status: "failed", pending: false,
+                error: err.message || "Could not reach the server." }
+            : m)));
+          if (entry.type !== "note" && openIdRef.current === forTicket.id) setStatus(forTicket.status);
+        }
+      })();
+    };
 
-        /*
-         * res.sent === false is the soft failure: the message WAS stored, the
-         * mail server just would not take it. Refetching is still right --
-         * the stored row comes back with a real id and its own failed state,
-         * so Retry goes through the server's own retry path.
-         *
-         * The refetch also removes the optimistic row, which is not in the
-         * response, and replaces it with the authoritative copy carrying the
-         * real id, the stored attachments and the delivery status.
-         */
-        await loadThread({ silent: true });
-      } catch (err) {
-        // Nothing reached the server, so there is nothing to refetch. Mark the
-        // row the agent is already looking at, and undo the status the send
-        // optimistically moved the ticket to.
-        setThread((t) => t.map((m) => (m.id === tempId
-          ? { ...m, status: "failed", pending: false,
-              error: err.message || "Could not reach the server." }
-          : m)));
-        if (entry.type !== "note") setStatus(ticket.status);
-      }
-    })();
+    if (immediate || entry.type === "note") { fire(); return true; }
 
+    const timer = setTimeout(fire, UNDO_SEND_MS);
+    pendingSends.current.set(tempId, { timer, fire });
+    push({
+      type: "info",
+      title: entry.type === "forward" ? "Forwarding…" : "Sending reply…",
+      desc: "It goes out in 10 seconds.",
+      duration: UNDO_SEND_MS,
+      action: { label: "Undo", run: () => undoSend(tempId, entry, forTicket) },
+    });
     return true;
+  };
+
+  const undoSend = (tempId, entry, forTicket) => {
+    const held = pendingSends.current.get(tempId);
+    if (!held) {
+      push({ type: "info", title: "Already sent", desc: "An email cannot be recalled once it has gone." });
+      return;
+    }
+    clearTimeout(held.timer);
+    pendingSends.current.delete(tempId);
+    const mode = entry.type === "forward" ? "Forward" : "Reply";
+    setRestore({ ...entry, mode, ticketId: forTicket.id, tick: Date.now() });
+    if (openIdRef.current === forTicket.id) {
+      setThread((t) => t.filter((m) => m.id !== tempId));
+      focusComposer(mode);
+    } else if (onOpenTicket) {
+      // Written on a ticket the agent has since left: go back to it. The
+      // ticket-change reset below reopens the composer with the text.
+      onOpenTicket(forTicket);
+    }
+    push({ type: "info", title: "Not sent", desc: "Your message is back in the editor." });
   };
 
   /*
@@ -2206,7 +2810,7 @@ function TicketDetailPage({ ticket: listTicket, onBack, onPrev, onNext, tickets,
         return;
       }
       setThread((t) => t.filter((x) => x.id !== m.id));   // the resend adds a fresh row
-      addRef.current(m.retryPayload);
+      addRef.current(m.retryPayload, { immediate: true });   // a retry has already waited
       return;
     }
 
@@ -2237,12 +2841,15 @@ function TicketDetailPage({ ticket: listTicket, onBack, onPrev, onNext, tickets,
 
   /*
    * The most recent outbound reply, for the composer's collision warning.
-   * Notes are excluded: they never reach the customer.
+   * Notes and forwards are excluded: they never reach the customer. Only a
+   * reply the customer has NOT written back to since counts -- once they
+   * answer, replying again is the normal next step, not a double answer.
    */
   const lastAgentReply = useMemo(() => {
     for (let i = thread.length - 1; i >= 0; i--) {
       const m = thread[i];
-      if (m.who === "agent" && m.type !== "note") {
+      if (m.who === "cust") return null;
+      if (m.who === "agent" && m.type !== "note" && m.type !== "forward") {
         return { who: m.sentBy || m.from || "Another agent", when: m.ago || m.at || "earlier" };
       }
     }
@@ -2253,9 +2860,28 @@ function TicketDetailPage({ ticket: listTicket, onBack, onPrev, onNext, tickets,
   const [status, setStatus] = useState(ticket.status);
   const [mode, setMode] = useState(null);                    // "Reply" | "Note" | "Forward"
   const [composerOpen, setComposerOpen] = useState(false);   // hidden until Reply/Note/Forward is clicked
+  const [composerTab, setComposerTab] = useState("Reply");  // the tab the open composer is on
   const [focusTick, setFocusTick] = useState(0);
   const [confirm, setConfirm] = useState(null);
   const [stuEdit, setStuEdit] = useState(false);
+  /*
+   * A different ticket: drop the previous one's conversation and status in
+   * THIS render, not in an effect.
+   *
+   * An effect runs after the browser paints, so for one frame the new ticket's
+   * header sat over the previous customer's thread with the previous status on
+   * the Close button -- visible on every Close & Next. Setting state during
+   * render makes React redo the render before anything is painted. The
+   * open-ticket effect below still does the loading; this only clears.
+   */
+  const [shownId, setShownId] = useState(ticketId);
+  if (shownId !== ticketId) {
+    setShownId(ticketId);
+    setThread([]); setDetail(null); setThreadError(null); setThreadLoading(true);
+    setStatus(ticket.status); setStarred(false); setMode(null); setComposerOpen(false);
+    // Back on a ticket whose send was just undone: open the editor with the text.
+    if (restore && restore.ticketId === ticketId) { setComposerOpen(true); setMode(restore.mode); setFocusTick((n) => n + 1); }
+  }
   const saveStudentCtx = async (next) => {
     const prev = ticket.studentContext || {};
     const FIELD_LBL = { registrationStatus: "Registration Status", domain: "Domain", examStatus: "Exam Status", startDate: "Start Date", projectStatus: "Project Status", refundEligibility: "Refund Eligibility", batch: "Batch", enrollmentStatus: "Enrollment Status" };
@@ -2290,6 +2916,23 @@ function TicketDetailPage({ ticket: listTicket, onBack, onPrev, onNext, tickets,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialCompose, ticket.id]);
 
+  /*
+   * Reply, but first say so if the customer's last message has already been
+   * answered -- two agents on one ticket otherwise send two answers. Asked
+   * only when opening the reply, not when the editor is already in Reply.
+   */
+  const startReply = () => {
+    if (lastAgentReply && !(composerOpen && composerTab === "Reply")) {
+      setConfirm({
+        title: `Already replied by ${lastAgentReply.who}`,
+        msg: `${lastAgentReply.who} already replied to this ticket ${lastAgentReply.when}, and the customer has not written back since. Check the thread before replying, so the customer does not get two answers.`,
+        label: "Reply anyway",
+        run: () => focusComposer("Reply"),
+      });
+      return;
+    }
+    focusComposer("Reply");
+  };
   const focusComposer = (which) => {
     setComposerOpen(true);
     setMode(which);
@@ -2326,71 +2969,177 @@ function TicketDetailPage({ ticket: listTicket, onBack, onPrev, onNext, tickets,
   };
 
   /*
-    * Close, with no confirmation step.
-    *
-    * Closing is not destructive -- the ticket keeps every message and reopens
-    * by itself the moment the customer writes again -- so a dialog in front of
-    * it was pure friction on the single most-used button on this screen. The
-    * toast carries an Undo instead, which is the right shape for a reversible
-    * action.
-    *
-    * Then leave: an agent who has just closed a ticket is done with it, and
-    * staying on a screen whose only remaining action is "reopen" is a dead end.
-    */
-  const closeTicket = async () => {
-    if (status === "Closed") return;
-    const was = status;
-    setStatus("Closed");
-    try {
-      await saveField({ status: "Closed" });
-      fireConfetti();
-      push({
-        type: "success",
-        title: `#${ticket.id} closed`,
-        desc: "Moving to the next ticket.",
-        action: {
-          label: "Undo",
-          run: async () => { setStatus(was); await saveField({ status: was }); },
-        },
-      });
-      /*
-       * Straight on to the next one in the queue rather than back to the list.
-       * Closing tickets is done in a run; bouncing out to the list after each
-       * one means finding your place again every time.
-       */
-      if (onNext) onNext(); else if (onBack) onBack();
-    } catch (err) {
-      setStatus(was);            // saveField raised its own toast
-    }
-  };
-  /*
-   * The properties column is closed on arrival, every time. Not remembered:
-   * the conversation is the reason this screen exists, and a panel that
-   * reopens itself is one the agent closes again on every ticket.
+   * The student and ticket details are open on arrival; the queue rail is not.
+   * The details are what an agent reads before replying, and the rail is a
+   * "what's next" list that Close & Next walks for them anyway. Neither is
+   * remembered -- a panel that restores itself is one the agent fights on
+   * every ticket.
    */
-  const [propsOpen, setPropsOpen] = useState(false);
+  const [propsOpen, setPropsOpen] = useState(true);
+  const [queueOpen, setQueueOpen] = useState(false);
   /*
-   * The queue collapses the same way the properties panel does. Not persisted:
-   * it is a "give me room for a moment" gesture, and a list that stayed hidden
-   * across visits would look like the queue had broken.
-   */
-  const [queueOpen, setQueueOpen] = useState(true);
-  /*
-   * Which tickets the rail lists. Open by default -- see QUEUE_FILTERS. It
-   * lives here rather than in the rail because the control that changes it
-   * sits in the properties column, on the other side of the conversation.
+   * Which tickets the rail lists, and in what order. Open by default -- see
+   * QUEUE_FILTERS. It lives here rather than in the rail because the filter is
+   * set from the properties column, and because Close & Next and the arrows
+   * walk the rail's order even while the rail itself is collapsed.
    */
   const [queueFilter, setQueueFilter] = useState("open");
-  /* What each segment of that control says. Off the same working set the rail
-     lists, so closing a ticket moves both the list and the numbers at once. */
+  const [queueSort, setQueueSort] = useState("created");
+  const [queueDesc, setQueueDesc] = useState(true);
+  const queue = useQueueRows(queueFilter, queueSort, queueDesc);
+  const { patch: patchQueue, rows: queueRows, hasMore: queueHasMore, loadMore: queueLoadMore } = queue;
+
+  /* Opening a ticket reads it, so its "new" badge in the rail goes too. */
+  useEffect(() => { patchQueue(ticket.id, { newReplies: 0 }); }, [ticket.id, patchQueue]);
+
+  /* Keep the next page loaded before the agent reaches the end of this one, so
+     Close & Next on the last loaded row still has somewhere to go. */
+  useEffect(() => {
+    const i = queueRows.findIndex((t) => t.id === ticket.id);
+    if (i >= 0 && i >= queueRows.length - 3 && queueHasMore) queueLoadMore();
+  }, [ticket.id, queueRows, queueHasMore, queueLoadMore]);
+
+  /*
+   * What each segment of the filter says: the desk's own counts, which come
+   * from the whole table rather than from what the rail has loaded. The
+   * segment being shown uses the rail's figure instead, because that one has
+   * this tab's closes already taken out of it.
+   */
   const queueCounts = useMemo(() => {
-    const list = tickets || [];
-    return {
-      open: list.filter((t) => queueMatches(t, "open")).length,
-      closed: list.filter((t) => queueMatches(t, "closed")).length,
-      all: list.filter((t) => queueMatches(t, "all")).length,
-    };
-  }, [tickets]);
+    const c = desk.counts || {};
+    const out = { open: c.unresolved, closed: c.resolved, all: c.all };
+    if (!queue.loading && !queue.error) out[queueFilter] = queue.total;
+    return out;
+  }, [desk.counts, queue.loading, queue.error, queue.total, queueFilter]);
+
+  /* The counts after a change, so the filter and the sidebar badges agree
+     with the database without waiting for the next full load. */
+  const refreshCounts = useCallback(() => {
+    fdTicketsApi.counts()
+      .then((r) => { if (r && r.counts && desk.setCounts) desk.setCounts(r.counts); })
+      .catch(() => { /* the numbers catch up on the next load */ });
+  }, [desk]);
+
+  /*
+   * Walking the rail (arrows, Close & Next) remembers which way it is going.
+   *
+   * The rail is a snapshot: a ticket another agent closed after it loaded is
+   * still in it. So the ticket reached is checked against what the server says
+   * as it loads, and if it no longer belongs in this list (closed, in the Open
+   * rail) it is dropped from the rail and the walk carries on the same way --
+   * the agent never lands on a closed ticket by pressing Next or Previous.
+   */
+  const walkRef = useRef(null);                        // { id, dir } of the move in flight
+  const walkTo = (t, dir) => { walkRef.current = { id: t.id, dir }; onOpenTicket(t); };
+  onWalkArrivedRef.current = (id, fresh) => {
+    const walk = walkRef.current;
+    if (!walk || walk.id !== id) return false;
+    walkRef.current = null;
+    const row = queueRows.find((t) => t.id === id) || ticket;
+    if (queueMatches({ ...row, ...fresh }, queueFilter)) return false;
+    patchQueue(id, { status: fresh.status, unresolved: false });
+    const next = neighbourIn(queueRows.filter((t) => t.id === id || queueMatches(t, queueFilter)), id, walk.dir);
+    if (next && next.id !== id && onOpenTicket) {
+      push({ type: "info", title: `#${id} was already ${String(fresh.status || "closed").toLowerCase()} -- skipped`, duration: 2500 });
+      walkTo(next, walk.dir);
+      return true;
+    }
+    push({ type: "info", title: `#${id} is already ${String(fresh.status || "closed").toLowerCase()}`, desc: "No more open tickets that way." });
+    return false;
+  };
+
+  /* The arrows walk the rail as it is ordered, not the desk's cache. */
+  const goNeighbour = (dir) => {
+    const t = neighbourIn(queueRows, ticket.id, dir);
+    if (t && onOpenTicket) { walkTo(t, dir); return; }
+    push({ type: "info", title: dir > 0 ? "No next ticket in this list" : "No previous ticket in this list" });
+  };
+
+  /*
+   * Close & Next.
+   *
+   * No confirmation: closing is not destructive -- the ticket keeps every
+   * message and reopens by itself when the customer writes again -- so the
+   * toast carries a 10-second Undo instead.
+   *
+   * The order matters, and getting it wrong was the "sometimes it didn't
+   * close and stayed put" bug:
+   *   1. Pick the next ticket FIRST. Once this one is closed it leaves the Open
+   *      rail and there is no "after it" to find.
+   *   2. Wait for the save. The old version swallowed a failed save and moved
+   *      on anyway, so a close that never reached the database looked done.
+   *   3. Only then move, so what the agent is shown is what is stored.
+   * The animation runs alongside the save rather than after it, so a fast
+   * save costs nothing extra and a slow one has something to look at.
+   */
+  const [closing, setClosing] = useState(null);     // { h } while the overlay shows
+  const undoClose = async (closed, was) => {
+    patchQueue(closed.id, { status: was, unresolved: !isFinished({ status: was }) });
+    try {
+      await desk.updateTicket(closed.id, { status: was }, { quiet: true });
+      refreshCounts();
+      push({ type: "info", title: `#${closed.id} reopened`, desc: `Back to ${was}.` });
+      if (onOpenTicket) onOpenTicket({ ...closed, status: was });
+    } catch (err) {
+      // updateTicket raised the toast; put the rail back the way it was.
+      patchQueue(closed.id, { status: "Closed", unresolved: false });
+    }
+  };
+  /* toStatus/extra let the properties panel use the same flow: set a ticket to
+     Closed or Resolved there, press Update, and it saves, animates, moves on
+     and offers Undo exactly like the button does. extra is whatever else was
+     changed in the panel, saved in the same request. */
+  const closeAndNext = async (toStatus = "Closed", extra = {}) => {
+    const target = typeof toStatus === "string" ? toStatus : "Closed";   // an onClick passes an event
+    if (closing || status === target) return false;
+    const closed = ticket;
+    const was = status;
+    const next = neighbourIn(queueRows, closed.id, 1);
+    const col = document.querySelector(".td-convo");
+    setClosing({ h: col ? col.clientHeight : 420, next });
+    const pause = new Promise((r) => setTimeout(r, 700));
+    try {
+      await Promise.all([desk.updateTicket(closed.id, { ...extra, status: target }, { quiet: true }), pause]);
+    } catch (err) {
+      setClosing(null);          // updateTicket raised the error toast and rolled back
+      return false;
+    }
+    setStatus(target);
+    patchQueue(closed.id, { ...extra, status: target, unresolved: false });
+    refreshCounts();
+    push({
+      type: "success",
+      title: `#${closed.id} ${target === "Resolved" ? "resolved" : "closed"}`,
+      desc: next ? `Moved on to #${next.id}.` : "That was the last ticket in this list.",
+      duration: 10000,
+      action: { label: "Undo", run: () => undoClose(closed, was) },
+    });
+    setClosing(null);
+    if (next && onOpenTicket) walkTo(next, 1);
+    else if (onBack) onBack();
+    return true;
+  };
+
+  /*
+   * The properties panel's Update. It used to do nothing at all -- the selects
+   * only changed local state. A move to Closed or Resolved goes through Close &
+   * Next; anything else is an ordinary save that leaves the agent where they
+   * are. Returns whether the save went through, so the panel can keep the
+   * agent's edits on screen when it did not.
+   */
+  const saveProperties = async (fields) => {
+    const { status: toStatus, ...rest } = fields;
+    if (toStatus && toStatus !== status && isFinished({ status: toStatus })) {
+      return closeAndNext(toStatus, rest);
+    }
+    try {
+      await desk.updateTicket(ticket.id, fields);
+      if (toStatus) { setStatus(toStatus); patchQueue(ticket.id, { status: toStatus, unresolved: !isFinished({ status: toStatus }) }); refreshCounts(); }
+      return true;
+    } catch (err) {
+      return false;               // the toast and the rollback come from updateTicket
+    }
+  };
   /* The conversation's own scroller -- the page no longer scrolls, so anything
      that wants to "scroll into view" has to move THIS. */
   const threadScrollRef = useRef(null);
@@ -2507,12 +3256,26 @@ function TicketDetailPage({ ticket: listTicket, onBack, onPrev, onNext, tickets,
       <div className={`td-grid ${propsOpen ? "" : "props-shut"} ${queueOpen ? "" : "queue-shut"}`}>
         {/* The queue you were working, kept to hand. */}
         {queueOpen && (
-          <TicketQueue tickets={tickets || []} currentId={ticket.id} filter={queueFilter}
+          <TicketQueue queue={queue} currentId={ticket.id} filter={queueFilter}
+                       sortKey={queueSort} setSortKey={setQueueSort}
+                       sortDesc={queueDesc} setSortDesc={setQueueDesc}
                        onOpen={(t) => (onOpenTicket ? onOpenTicket(t) : null)}
                        onCollapse={() => setQueueOpen(false)} />
         )}
 
-        <div className="card card-pad td-convo">
+        <div className={`card card-pad td-convo ${closing ? "is-closing" : ""}`}>
+          {/* The closing overlay. Sticky with no height of its own, so it sits
+              over whatever part of the conversation is on screen rather than
+              at the top of a column that may be scrolled a long way down. */}
+          {closing && (
+            <div className="td-closing-wrap" aria-live="polite">
+              <div className="td-closing" style={{ height: closing.h }}>
+                <span className="td-closing-badge"><CheckCheck size={26} /></span>
+                <b>Closing #{ticket.id}</b>
+                <span>{closing.next ? `Next up: #${closing.next.id}` : "Back to the list after this"}</span>
+              </div>
+            </div>
+          )}
           <div className="td-bar">
             {!queueOpen && (
               <button className="icon-btn" title="Show the ticket list" onClick={() => setQueueOpen(true)}>
@@ -2522,10 +3285,13 @@ function TicketDetailPage({ ticket: listTicket, onBack, onPrev, onNext, tickets,
             <button className="icon-btn" title={starred ? "Unstar" : "Star ticket"} onClick={() => { setStarred((v) => !v); push({ type: "success", title: starred ? "Ticket unstarred" : "Ticket starred", desc: `#${ticket.id}` }); }}>
               <Star size={17} fill={starred ? "#F59E0B" : "none"} color={starred ? "#F59E0B" : "currentColor"} />
             </button>
-            <button className={`btn btn-ghost btn-sm ${mode === "Reply" ? "on" : ""}`} onClick={() => focusComposer("Reply")}><Reply size={15} /> Reply</button>
+            <button className={`btn btn-ghost btn-sm ${mode === "Reply" ? "on" : ""}`} onClick={startReply}><Reply size={15} /> Reply</button>
             <button className={`btn btn-ghost btn-sm ${mode === "Note" ? "on" : ""}`} onClick={() => focusComposer("Note")}><Lock size={15} /> Note{noteCount > 0 && <span className="count-badge" style={{ fontSize: 10, padding: "0 6px" }}>{noteCount}</span>}</button>
             <button className={`btn btn-ghost btn-sm ${mode === "Forward" ? "on" : ""}`} onClick={() => focusComposer("Forward")}><Forward size={15} /> Forward</button>
-            <button className="btn btn-ghost btn-sm" onClick={closeTicket} disabled={status === "Closed"}><CheckCheck size={15} /> {status === "Closed" ? "Closed" : "Close"}</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => closeAndNext()} disabled={status === "Closed" || !!closing}
+                    title="Close this ticket and open the next one in the list">
+              <CheckCheck size={15} /> {status === "Closed" ? "Closed" : "Close & Next"}
+            </button>
             <div className="dd-wrap" ref={moreRef}>
               <button className="icon-btn" title="More actions" onClick={() => setMoreOpen((o) => !o)}><MoreHorizontal size={17} /></button>
               {moreOpen && (
@@ -2540,8 +3306,8 @@ function TicketDetailPage({ ticket: listTicket, onBack, onPrev, onNext, tickets,
             </div>
             <span className="sp" />
             <button className="btn btn-ghost btn-sm" onClick={() => setActs(true)}><Activity size={15} /> Activities{timeline.length > 0 && <span className="count-badge" style={{ fontSize: 10, padding: "0 6px" }}>{timeline.length}</span>}</button>
-            <button className="icon-btn" title="Previous ticket" onClick={onPrev}><ChevronLeft size={17} /></button>
-            <button className="icon-btn" title="Next ticket" onClick={onNext}><ChevronRight size={17} /></button>
+            <button className="icon-btn" title="Previous ticket" onClick={() => goNeighbour(-1)}><ChevronLeft size={17} /></button>
+            <button className="icon-btn" title="Next ticket" onClick={() => goNeighbour(1)}><ChevronRight size={17} /></button>
             <button className={`icon-btn ${propsOpen ? "on" : ""}`}
                     title={propsOpen ? "Hide ticket properties" : "Show ticket properties"}
                     onClick={() => setPropsOpen((v) => !v)}>
@@ -2594,7 +3360,7 @@ function TicketDetailPage({ ticket: listTicket, onBack, onPrev, onNext, tickets,
 
           {!composerOpen && (
             <div className="reply-bar" ref={composerRef}>
-              <button className="btn btn-primary" onClick={() => focusComposer("Reply")}><Reply size={15} /> Reply</button>
+              <button className="btn btn-primary" onClick={startReply}><Reply size={15} /> Reply</button>
               <button className="btn btn-soft" onClick={() => focusComposer("Note")}><Lock size={15} /> Add Note</button>
               <button className="btn btn-soft" onClick={() => focusComposer("Forward")}><Forward size={15} /> Forward</button>
               <span className="hint">Reading mode — the editor opens only when you need it.</span>
@@ -2603,7 +3369,7 @@ function TicketDetailPage({ ticket: listTicket, onBack, onPrev, onNext, tickets,
           <div ref={composerOpen ? composerRef : undefined} className={`comp-collapse ${composerOpen ? "open" : ""}`} aria-hidden={!composerOpen}>
             <div>
               <div style={{ paddingTop: 18, borderTop: "1px solid var(--border)" }}>
-                <ReplyComposer key={ticket.id} ticket={ticket} onSend={add} mode={mode} focusTick={focusTick}
+                <ReplyComposer key={ticket.id} ticket={ticket} onSend={add} mode={mode} onTabChange={setComposerTab} focusTick={focusTick} restore={restore}
                                onClose={() => setComposerOpen(false)} lastAgentReply={lastAgentReply} />
               </div>
             </div>
@@ -2615,7 +3381,9 @@ function TicketDetailPage({ ticket: listTicket, onBack, onPrev, onNext, tickets,
             <QueueFilterPanel value={queueFilter} onChange={setQueueFilter}
                               counts={queueCounts} />
             <ContactPanel ticket={ticket} badges={ticketBadges} />
-            <PropertiesPanel ticket={ticket} />
+            {/* Keyed: its selects hold local state, which carried one ticket's
+                status into the next after Close & Next. */}
+            <PropertiesPanel key={ticket.id} ticket={ticket} onSave={saveProperties} busy={!!closing} />
           </div>
         )}
         {/* Outside the column: the dialog must survive the column closing. */}
@@ -2682,6 +3450,7 @@ function TicketDetailPage({ ticket: listTicket, onBack, onPrev, onNext, tickets,
                            onClose={() => setPreview(null)} />
       )}
 
+      <MentionTipHost />
       <ConfirmDialog open={!!confirm} danger={confirm?.danger} title={confirm?.title || ""} message={confirm?.msg || ""} confirmLabel={confirm?.label || "Confirm"}
         onConfirm={() => confirm?.run()} onClose={() => setConfirm(null)} />
     </div>

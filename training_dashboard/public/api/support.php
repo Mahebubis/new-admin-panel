@@ -18,8 +18,12 @@
  *   • create and reply arrive as multipart when a file is attached and as JSON
  *     when it is not. learn_input() reads either, because it falls back to
  *     $_POST when php://input is not JSON.
- *   • The message body is REQUIRED and the attachment is OPTIONAL. A ticket
- *     that is nothing but a screenshot cannot be triaged.
+ *   • Raising a ticket needs BOTH a description and a screenshot (or PDF):
+ *     the screenshot is what lets support see the problem without a round of
+ *     "can you send a screenshot?". Replies need text or a file.
+ *   • A learner writing into a CLOSED ticket reopens it and stamps reopened_at
+ *     — the admin queue shows that as a Reopened badge. A PENDING ticket is an
+ *     admin's hold and stays pending; the message only raises the unread badge.
  *   • Uploads are written under api/uploads/support/ with a generated name and
  *     an extension allow-list. The stored URL is absolute, because the admin
  *     panel reads these rows from a different host.
@@ -54,6 +58,25 @@ const SUPPORT_TOPICS = [
    is another thing that has to be safe to hand back over HTTP. */
 const SUPPORT_MAX_BYTES = 5 * 1024 * 1024;      // 5 MB
 const SUPPORT_EXT = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'pdf'];
+
+/**
+ * Columns the admin side added after the tables were first created (the
+ * pending status, reopened_at). lms_api.php adds them too; this is for the
+ * case where the portal is deployed first. One metadata read per write.
+ */
+function support_ensure_columns($conn) {
+    $sc = $conn->query("SHOW COLUMNS FROM lms_support_tickets LIKE 'status'");
+    $st = $sc ? $sc->fetch_assoc() : null;
+    if ($st && strpos((string)$st['Type'], "'pending'") === false) {
+        $conn->query("ALTER TABLE lms_support_tickets MODIFY status
+                       ENUM('open','answered','closed','pending') DEFAULT 'open'");
+    }
+    $rc = $conn->query("SHOW COLUMNS FROM lms_support_tickets LIKE 'reopened_at'");
+    if ($rc && !$rc->num_rows) {
+        $conn->query("ALTER TABLE lms_support_tickets
+                       ADD COLUMN reopened_at DATETIME NULL DEFAULT NULL AFTER last_message_at");
+    }
+}
 
 /** Trim, collapse the runaway newlines a paste brings, and cap. */
 function support_text($v, $max) {
@@ -268,6 +291,7 @@ if ($action === 'create') {
        learner should get that back with their text still in the form, not a
        ticket that is missing the thing they meant to attach. */
     [$url, $fname, $ftype, $fsize] = support_upload();
+    if (!$url) learn_error('Please attach a screenshot of the problem — it is required to raise a ticket.');
 
     $conn->query("INSERT INTO lms_support_tickets
         (user_id, subject, topic, course_id, status, messages, admin_unread, learner_unread, last_message_at)
@@ -299,9 +323,10 @@ if ($action === 'reply') {
     if (!$t) learn_error('That ticket could not be found', 404);
 
     $body = support_text($in['body'] ?? '', 4000);
-    if ($body === '') learn_error('Please type a message before sending.');
-
     [$url, $fname, $ftype, $fsize] = support_upload();
+    if ($body === '' && !$url) learn_error('Please type a message or attach a file before sending.');
+
+    support_ensure_columns($conn);
 
     $conn->query("INSERT INTO lms_support_messages
         (ticket_id, sender, author, body, file_url, file_name, file_type, file_size)
@@ -314,11 +339,15 @@ if ($action === 'reply') {
 
     /* Writing again re-opens a closed ticket: the learner does not agree that
        it is finished, and a reply into a closed thread nobody watches is how
-       a support desk loses people. */
+       a support desk loses people. reopened_at is set BEFORE status in this
+       SET list on purpose — MySQL evaluates left to right, so it still sees
+       the old status. An answered ticket goes back to open (waiting for us);
+       a pending one stays on the admin's hold. */
     $conn->query("UPDATE lms_support_tickets
                   SET messages = messages + 1,
                       admin_unread = admin_unread + 1,
-                      status = IF(status = 'closed', 'open', status),
+                      reopened_at = IF(status = 'closed', NOW(), reopened_at),
+                      status = IF(status = 'pending', 'pending', 'open'),
                       last_message_at = NOW()
                   WHERE id = $tid");
 

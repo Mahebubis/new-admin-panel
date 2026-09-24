@@ -20,7 +20,8 @@ const SIG_KEY = "hh-signature";
 const SIG_DEFAULT = {
   enabled: true,
   applyForward: false,
-  template: "Regards,\n\n{{Agent Name}}\n{{Designation}}\n{{Company Name}}",
+  // No blank line between the sign-off and the name.
+  template: "Regards,\n{{Agent Name}}\n{{Designation}}\n{{Company Name}}",
   teams: {}, // e.g. { "Tech Support": "custom template" }
 };
 

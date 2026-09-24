@@ -8,10 +8,10 @@
  * which is what makes switching views instant. Bulk actions go through the
  * store so they are persisted and rolled back on failure.
  */
-import { Activity, ArrowLeft, ArrowRight, ArrowUp, ArrowUpDown, Bold, Building2, CalendarDays, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, Clock, Code, Copy, Download, Eye, FileSpreadsheet, FileText, Filter, FolderInput, Headphones, Inbox, Italic, LayoutGrid, Link2, List, ListOrdered, Loader2, Lock, Mail, MessageSquareText, MoreHorizontal, MoreVertical, Paperclip, Pencil, Printer, Reply, RotateCcw, Rows3, Search, ShieldX, SlidersHorizontal, Tag as TagIcon, Trash, Trash2, Underline, User, UserCheck, UserPlus, X } from "lucide-react";
+import { Activity, ArrowLeft, ArrowRight, ArrowUp, ArrowUpDown, Bold, Building2, CalendarDays, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, Clock, Code, Copy, Download, Eye, FileSpreadsheet, FileText, FolderInput, Headphones, Inbox, Italic, LayoutGrid, Link2, List, ListOrdered, Loader2, Lock, Mail, MessageSquareText, MoreHorizontal, MoreVertical, Paperclip, Pencil, Printer, Reply, RotateCcw, Rows3, Search, ShieldX, SlidersHorizontal, Tag as TagIcon, Trash, Trash2, Underline, User, UserCheck, UserPlus, X } from "lucide-react";
 import { BULK_AGENTS, BULK_PRIORITY, BULK_STATUS, CATS, DEPTS, EMPTY, SORTS, STATUS_OPTS, TAG_BANK, TICKET_TYPES, VIEWS, avColor, initials, prioColor, prioStyle, slaStyle, statusStyle } from "../fdConstants";
 import { useCallback, useEffect, useMemo, useRef, useState  } from "react";
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useTicketList } from "../useFreshdeskData";
 import { ConfirmDialog, downloadBlob, EmptyState, exportCSV, exportExcel, exportPDF, Portal, PrioBadge, Spinner, StatusBadge, useClickAway, useDesk, useToast } from "../fdShared";
 
@@ -114,14 +114,15 @@ function SortDropdown({ value, onChange }) {
   );
 }
 
-function FilterDrawer({ open, onClose, draft, setDraft, onApply, onReset }) {
-  if (!open) return null;
-  // Portalled: inside .content it renders behind the workspace rail no matter
-  // what z-index it carries. See the Portal doc comment in fdShared.jsx.
-  return <Portal>{<FilterDrawerBody onClose={onClose} draft={draft} setDraft={setDraft} onApply={onApply} onReset={onReset} />}</Portal>;
-}
-
-function FilterDrawerBody({ onClose, draft, setDraft, onApply, onReset }) {
+/*
+ * The filters, as a column of the ticket layout rather than a drawer over it.
+ *
+ * It mirrors the views column on the left: it takes its own width and the list
+ * narrows to make room, so the rows being filtered stay visible and readable
+ * while the filters change. The overlay drawer this replaced hid the very list
+ * it was narrowing behind a dimmed backdrop.
+ */
+function FilterSidebar({ onClose, draft, setDraft, onApply, onReset }) {
   const desk = useDesk();
   /*
    * The real roster, the same one the row picker and the bulk assign dialog
@@ -144,10 +145,9 @@ function FilterDrawerBody({ onClose, draft, setDraft, onApply, onReset }) {
   const Multi = ({ label, keyName, opts }) => (
     <div className="fld"><label>{label}</label><div className="chips">{opts.map((o) => (<button key={o} className={`fchip ${draft[keyName].includes(o) ? "on" : ""}`} onClick={() => toggle(keyName, o)}>{o}</button>))}</div></div>
   );
-  return (<>
-    <div className="drawer-overlay" onClick={onClose} />
-    <div className="drawer">
-      <div className="drawer-head"><h3 className="card-title"><SlidersHorizontal size={16} style={{verticalAlign:"-3px",marginRight:7,color:"var(--primary)"}} />Filter Tickets</h3><button className="icon-btn" onClick={onClose}><X size={17} /></button></div>
+  return (
+    <aside className="card fsb" aria-label="Filter tickets">
+      <div className="drawer-head"><h3 className="card-title"><SlidersHorizontal size={16} style={{verticalAlign:"-3px",marginRight:7,color:"var(--primary)"}} />Filter Tickets</h3><button className="icon-btn sm" title="Hide filters" onClick={onClose}><PanelRightClose size={15} /></button></div>
       <div className="drawer-body">
         {/* First, because "what has nobody looked at" is the question this
             drawer gets opened for most often. */}
@@ -161,7 +161,9 @@ function FilterDrawerBody({ onClose, draft, setDraft, onApply, onReset }) {
           </div>
         </div>
         <div className="fld"><label>Created Date (from)</label><input type="date" value={draft.createdFrom} onChange={(e)=>setDraft(d=>({...d,createdFrom:e.target.value}))} /></div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+        {/* One per row: two date pickers side by side do not fit a 300px column,
+            and the second one was cut off behind a sideways scrollbar. */}
+        <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr)",gap:12}}>
           <div className="fld"><label>Resolved At</label><input type="date" value={draft.resolvedAt} onChange={(e)=>setDraft(d=>({...d,resolvedAt:e.target.value}))} /></div>
           <div className="fld"><label>Closed At</label><input type="date" value={draft.closedAt} onChange={(e)=>setDraft(d=>({...d,closedAt:e.target.value}))} /></div>
         </div>
@@ -171,9 +173,9 @@ function FilterDrawerBody({ onClose, draft, setDraft, onApply, onReset }) {
         <div className="fld"><label>Assigned Agent</label><select value={draft.agent} onChange={(e)=>setDraft(d=>({...d,agent:e.target.value}))}><option value="">Any agent</option>{agentOpts.map(a=><option key={a}>{a}</option>)}</select></div>
         <div className="fld"><label>Customer Name</label><input placeholder="e.g. Ananya" value={draft.customer} onChange={(e)=>setDraft(d=>({...d,customer:e.target.value}))} /></div>
       </div>
-      <div className="drawer-foot"><button className="btn btn-soft" style={{flex:1,justifyContent:"center"}} onClick={onReset}><RotateCcw size={15} /> Reset Filters</button><button className="btn btn-primary" style={{flex:1,justifyContent:"center"}} onClick={onApply}><CheckCheck size={15} /> Apply Filters</button></div>
-    </div>
-  </>);
+      <div className="drawer-foot"><button className="btn btn-soft" style={{flex:1,justifyContent:"center"}} onClick={onReset}><RotateCcw size={15} /> Reset</button><button className="btn btn-primary" style={{flex:1,justifyContent:"center"}} onClick={onApply}><CheckCheck size={15} /> Apply</button></div>
+    </aside>
+  );
 }
 
 /*
@@ -419,7 +421,7 @@ function ContactHoverCard({ t, anchor, onEnter, onLeave, onViewTickets }) {
  * nothing to lock onto; the requester matters once you have already found the
  * ticket you want.
  */
-function TicketCard({ t, i, hoverId, onHoverEnter, onHoverLeave, onOpen, selected, onToggle,
+function TicketCard({ t, i, hoverId, onHoverEnter, onHoverLeave, onOpen, selected, onToggle, recent = false,
                       agents, onField, savingField, onContactEnter, onContactLeave }) {
   const sla = slaStyle[t.sla];
   const subjRef = useRef(null);
@@ -431,7 +433,7 @@ function TicketCard({ t, i, hoverId, onHoverEnter, onHoverLeave, onOpen, selecte
   ]), [agents]);
 
   return (
-    <div className={`card tcard slim ${selected ? "sel" : ""} ${hoverId === t.id ? "peek" : ""} ${t.unread === false ? "read" : "unread"}`}
+    <div data-tid={t.id} className={`card tcard slim ${selected ? "sel" : ""} ${hoverId === t.id ? "peek" : ""} ${t.unread === false ? "read" : "unread"} ${recent ? "recent" : ""}`}
          style={{ "--pc": prioColor[t.priority], cursor: "pointer" }}
          onClick={() => onOpen && onOpen(t)}>
 
@@ -496,7 +498,7 @@ function TicketCard({ t, i, hoverId, onHoverEnter, onHoverLeave, onOpen, selecte
   );
 }
 
-function TicketTable({ rows, hoverId, onHoverEnter, onHoverLeave, onOpen, sel = [], onToggle,
+function TicketTable({ rows, hoverId, onHoverEnter, onHoverLeave, onOpen, sel = [], onToggle, recentId = null,
                        agents, onField, savingRow = {} }) {
   const agentOpts = useMemo(() => ([
     { value: "Unassigned", label: "Unassigned" },
@@ -505,7 +507,7 @@ function TicketTable({ rows, hoverId, onHoverEnter, onHoverLeave, onOpen, sel = 
 
   return (<div className="card card-pad"><div className="table-wrap"><table>
     <thead><tr><th>Ticket</th><th>Customer</th><th>Subject</th><th>Category</th><th>Priority</th><th>Agent</th><th>Source</th><th>Status</th><th style={{textAlign:"right"}}>Actions</th></tr></thead>
-    <tbody>{rows.map((t) => (<tr key={t.id} className={sel.includes(t.id) ? "sel" : ""} style={{ cursor: "pointer" }} onClick={() => onOpen && onOpen(t)}>
+    <tbody>{rows.map((t) => (<tr key={t.id} data-tid={t.id} className={`${sel.includes(t.id) ? "sel" : ""} ${t.id === recentId ? "recent" : ""}`} style={{ cursor: "pointer" }} onClick={() => onOpen && onOpen(t)}>
       <td><button className={`selbox ${sel.includes(t.id) ? "on" : ""}`} onClick={(e) => { e.stopPropagation(); onToggle(t.id); }}>{sel.includes(t.id) ? <Check size={12} /> : null}</button></td>
       <td><span className="peekable" style={{fontWeight:700,color:"var(--primary)"}}
                  onMouseEnter={(e) => onHoverEnter(t, e.currentTarget)}
@@ -556,7 +558,7 @@ function TicketTable({ rows, hoverId, onHoverEnter, onHoverLeave, onOpen, sel = 
 const GROUP_OPTS = [{ value: "—", label: "No group" },
                     ...DEPTS.map((d) => ({ value: d, label: d }))];
 
-function InboxRow({ t, selected, onToggle, onOpen, onHoverEnter, onHoverLeave,
+function InboxRow({ t, selected, onToggle, onOpen, onHoverEnter, onHoverLeave, recent = false,
                     onContactEnter, onContactLeave, agents, onField, savingField }) {
   const unread = t.newReplies > 0 || t.unread;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -568,7 +570,7 @@ function InboxRow({ t, selected, onToggle, onOpen, onHoverEnter, onHoverLeave,
     ...(agents || []).filter((a) => a.name && a.name !== "Unassigned").map((a) => ({ value: a.name, label: a.name })),
   ]), [agents]);
   return (
-    <div className={`inbox-row ${selected ? "sel" : ""} ${unread ? "unread" : ""}`}>
+    <div data-tid={t.id} className={`inbox-row ${selected ? "sel" : ""} ${unread ? "unread" : ""} ${recent ? "recent" : ""}`}>
       <span className="ib-prio" style={{ background: prioColor[t.priority] || "var(--border)" }}
             title={t.priority || "No priority"} />
 
@@ -1005,9 +1007,45 @@ function pageWindow(current, total, span = 1) {
   return out;
 }
 
-function TicketsPage({ onOpen, initialView = "unresolved", initialStatus = [],
+/*
+ * Where the agent was in the list when they opened a ticket.
+ *
+ * Coming back from a ticket used to land on page 1 of a freshly mounted list,
+ * so an agent working page 3 lost their place every time. This keeps the page,
+ * the query that produced it (view, sort, search, filters, page size, layout)
+ * and the ticket they opened, so the list comes back exactly there with that
+ * row marked. Session storage, so a refresh on the ticket page does not lose
+ * it; forgotten as soon as the agent goes anywhere else in the desk (see
+ * forgetListPosition in Freshdesk.jsx), so a fresh visit still starts at the
+ * top.
+ */
+const LIST_POS_KEY = "fd-list-pos";
+function rememberListPosition(pos) {
+  try { sessionStorage.setItem(LIST_POS_KEY, JSON.stringify(pos)); } catch { /* private mode: no memory, no harm */ }
+}
+function readListPosition() {
+  try { return JSON.parse(sessionStorage.getItem(LIST_POS_KEY) || "null"); } catch { return null; }
+}
+function forgetListPosition() {
+  try { sessionStorage.removeItem(LIST_POS_KEY); } catch { /* nothing stored */ }
+}
+/* Moved to another ticket from inside the detail page (Close & Next, the
+   arrows, the rail): that ticket is now the one to mark on the way back. */
+function markListTicket(ticketId) {
+  const p = readListPosition();
+  if (p) rememberListPosition({ ...p, ticketId });
+}
+
+function TicketsPage({ onOpen: openTicketProp, initialView = "unresolved", initialStatus = [],
                        initialCreatedWithinHours = null, initialDueWithinHours = null,
                        tickets, setTickets }) {
+  /* Only a return to the SAME view restores; another view is a new question. */
+  const [restoreFrom] = useState(() => {
+    const p = readListPosition();
+    return p && p.view === initialView ? p : null;
+  });
+  /* The row the agent opened last, marked until they open another. */
+  const [recentId, setRecentId] = useState(restoreFrom ? restoreFrom.ticketId : null);
   const push = useToast();
   const desk = useDesk();
   const [sel, setSel] = useState([]);                 // selected ticket ids
@@ -1017,15 +1055,15 @@ function TicketsPage({ onOpen, initialView = "unresolved", initialStatus = [],
   const expRef = useRef(null);
   useClickAway(expRef, () => setExpOpen(false));
   const [view, setView] = useState(initialView);
-  const [q, setQ] = useState("");
-  const [sort, setSort] = useState("Created Date");
-  const [layout, setLayout] = useState("card");
+  const [q, setQ] = useState(restoreFrom ? restoreFrom.q || "" : "");
+  const [sort, setSort] = useState(restoreFrom ? restoreFrom.sort || "Created Date" : "Created Date");
+  const [layout, setLayout] = useState(restoreFrom ? restoreFrom.layout || "card" : "card");
   /* 30 matches what Freshdesk shows and what fits a laptop screen; 5 meant
      paging through 2,000 tickets sixty rows at a time. */
-  const [perPage, setPerPage] = useState(30);
+  const [perPage, setPerPage] = useState(restoreFrom ? Number(restoreFrom.perPage) || 30 : 30);
   const [drawer, setDrawer] = useState(false);
   const [draft, setDraft] = useState(EMPTY);
-  const [applied, setApplied] = useState({ ...EMPTY, status: initialStatus });
+  const [applied, setApplied] = useState(restoreFrom && restoreFrom.applied ? restoreFrom.applied : { ...EMPTY, status: initialStatus });
   const [loading, setLoading] = useState(true);
   const [hover, setHover] = useState({ t: null, el: null });
   /* The requester card is its own hover, separate from the ticket preview --
@@ -1070,8 +1108,7 @@ function TicketsPage({ onOpen, initialView = "unresolved", initialStatus = [],
     setModal(kind === "assign" ? "assign" : null);
     if (kind === "close") setConfirm({ title: "Close ticket", msg: `Close #${t.id} — “${t.subject}”?`, label: "Close Ticket",
       run: async () => {
-        try { await desk.updateTicket(t.id, { status: "Closed" }); setSel([]); }
-        catch (err) { /* the store rolled it back and reported */ }
+        if (await bulkWrite([t.id], { status: "Closed" }, () => desk.updateTicket(t.id, { status: "Closed" }))) setSel([]);
       } });
   };
   useEffect(() => clearHoverTimer, []);
@@ -1120,7 +1157,16 @@ function TicketsPage({ onOpen, initialView = "unresolved", initialStatus = [],
    */
   const [navOpen, setNavOpen] = useState(false);
 
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(restoreFrom ? Number(restoreFrom.page) || 1 : 1);
+  /* Every way of opening a ticket from this list goes through here -- the row,
+     the hover card, quick Reply/Note -- so the way back always knows the spot.
+     clampedPage is read at click time, after render has defined it. */
+  const onOpen = (t, mode) => {
+    if (!t) return;
+    rememberListPosition({ view, page: clampedPage, perPage, sort, q, applied, layout, ticketId: t.id });
+    setRecentId(t.id);
+    openTicketProp(t, mode);
+  };
 
   /*
    * The page the SERVER selected, not a slice of an in-memory array.
@@ -1285,18 +1331,53 @@ function TicketsPage({ onOpen, initialView = "unresolved", initialStatus = [],
    */
   const patchSel = (patch) => setTickets((ts) => ts.map((t) => sel.includes(t.id) ? { ...t, ...(typeof patch === "function" ? patch(t) : patch) } : t));
 
+  /*
+   * Paint a bulk change onto the rows this page is showing, before the server
+   * answers.
+   *
+   * The page's rows are the server's page, not the desk's working set, so the
+   * store's own optimistic patch never reached them -- close 100 tickets and
+   * all 100 stayed on screen until a refresh. This writes the same patches
+   * setRowField does, so viewRows re-tests them and a closed, trashed or
+   * spammed row leaves the view immediately.
+   *
+   * Returns the undo for the failure path. On success the page is refetched
+   * silently, which refills it from the rows after this page and brings the
+   * pager's total back in line with the database.
+   */
+  const paintRows = (ids, fields) => {
+    const patch = fields.status
+      ? { ...fields, unresolved: !["Resolved", "Closed"].includes(fields.status) }
+      : { ...fields };
+    let before = null;
+    setPatches((p) => {
+      before = p;
+      const next = { ...p };
+      ids.forEach((id) => { next[id] = { ...(p[id] || {}), ...patch }; });
+      return next;
+    });
+    return () => setPatches(() => before || {});
+  };
+  /** Run a bulk write with the rows painted first; refill on success. */
+  const bulkWrite = async (ids, fields, write) => {
+    const undo = paintRows(ids, fields);
+    try {
+      await write();
+      list.reload({ silent: true });
+      return true;
+    } catch (err) {
+      undo();          // the store raised the toast and rolled its own copy back
+      return false;
+    }
+  };
+
   /** Send a field set for the whole selection and report the outcome once. */
   const saveSel = async (fields, title, desc) => {
-    const n = sel.length;
     const ids = [...sel];
-    try {
-      await desk.bulkUpdate(ids, fields);
-      setModal(null); clearSel();
-      if (title) push({ type: "success", title, desc });
-    } catch (err) {
-      // The store already rolled the rows back and raised the error toast;
-      // keep the selection so the agent can retry without re-picking 40 rows.
-    }
+    const ok = await bulkWrite(ids, fields, () => desk.bulkUpdate(ids, fields));
+    if (!ok) return;   // keep the selection so the agent can retry without re-picking 40 rows
+    setModal(null); clearSel();
+    if (title) push({ type: "success", title, desc });
   };
   const done = (title, desc) => { push({ type: "success", title, desc }); clearSel(); setModal(null); };
   const selExisting = useMemo(() => Array.from(new Set(selTickets.flatMap((t) => t.tags || []))), [selTickets]);
@@ -1352,11 +1433,10 @@ function TicketsPage({ onOpen, initialView = "unresolved", initialStatus = [],
         danger: true,
         run: async () => {
           const ids = [...sel];
-          try {
-            if (permanent) await desk.removeTickets(ids);
-            else await desk.setTrash(ids, true);
-            setModal(null); clearSel();
-          } catch (err) { /* toast + rollback come from the store */ }
+          const ok = permanent
+            ? await bulkWrite(ids, { __gone: true }, () => desk.removeTickets(ids))
+            : await bulkWrite(ids, { trash: true, spam: false }, () => desk.setTrash(ids, true));
+          if (ok) { setModal(null); clearSel(); }
         },
       });
     },
@@ -1367,7 +1447,7 @@ function TicketsPage({ onOpen, initialView = "unresolved", initialStatus = [],
       label: "Mark as Spam",
       run: async () => {
         const ids = [...sel];
-        try { await desk.setSpam(ids, true); setModal(null); clearSel(); } catch (err) { /* handled */ }
+        if (await bulkWrite(ids, { spam: true, trash: false }, () => desk.setSpam(ids, true))) { setModal(null); clearSel(); }
       },
     }),
 
@@ -1378,7 +1458,7 @@ function TicketsPage({ onOpen, initialView = "unresolved", initialStatus = [],
       danger: true,
       run: async () => {
         const ids = [...sel];
-        try { await desk.setTrash(ids, true); setModal(null); clearSel(); } catch (err) { /* handled */ }
+        if (await bulkWrite(ids, { trash: true, spam: false }, () => desk.setTrash(ids, true))) { setModal(null); clearSel(); }
       },
     }),
     more: (label) => {
@@ -1386,9 +1466,8 @@ function TicketsPage({ onOpen, initialView = "unresolved", initialStatus = [],
       if (label === "Archive Tickets") { saveSel({ status: "Closed" }, "Tickets archived", `${selCount} archived.`); return; }
       if (label === "Restore Tickets") {
         const ids = [...sel];
-        Promise.all([desk.setTrash(ids, false), desk.setSpam(ids, false)])
-          .then(() => { clearSel(); })
-          .catch(() => { /* the store reports and rolls back */ });
+        bulkWrite(ids, { trash: false, spam: false }, () => Promise.all([desk.setTrash(ids, false), desk.setSpam(ids, false)]))
+          .then((ok) => { if (ok) clearSel(); });
         return;
       }
       if (label === "Print Ticket Summary") { const ok = exportPDF("Ticket Summary", ["Ticket ID", "Customer Name", "Subject", "Status", "Priority"], selTickets.map((t) => ({ "Ticket ID": t.id, "Customer Name": t.name, "Subject": t.subject, "Status": t.status, "Priority": t.priority }))); push(ok ? { type: "success", title: "Opening print dialog" } : { type: "error", title: "Popup blocked" }); return; }
@@ -1431,14 +1510,41 @@ function TicketsPage({ onOpen, initialView = "unresolved", initialStatus = [],
    */
   const viewRows = useMemo(() => {
     const match = activeView && activeView.f;
-    if (!match) return rows;
-    return rows.filter((t) => !patches[t.id] || match(t));
+    return rows.filter((t) => {
+      if (t.__gone) return false;                  // permanently deleted just now
+      return !patches[t.id] || !match || match(t);
+    });
   }, [rows, patches, activeView]);
-  const totalMatching = list.total;
+  /* Back from a ticket: bring the row that was opened into view, once. */
+  const scrolledToRef = useRef(null);
+  useEffect(() => {
+    if (!restoreFrom || list.loading || scrolledToRef.current === restoreFrom.ticketId) return;
+    const box = document.querySelector(".tl-scroll");
+    const el = box && box.querySelector('[data-tid="' + restoreFrom.ticketId + '"]');
+    if (!el) return;
+    scrolledToRef.current = restoreFrom.ticketId;
+    const top = el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+    box.scrollTop = Math.max(0, top - (box.clientHeight - el.offsetHeight) / 2);
+  }, [restoreFrom, list.loading, viewRows]);
+  // What the pager says, less the rows this tab has just taken out, so
+  // "Showing 1-30 of 359" does not lag the list under it until the refill.
+  const totalMatching = Math.max(0, list.total - (rows.length - viewRows.length));
   // Anything that changes WHAT is being asked for goes back to page 1 --
   // staying on page 7 of a result that now has 2 pages shows an empty list.
   // `view` belongs here now that the server, not a client filter, builds the page.
-  useEffect(() => { setPage(1); }, [view, q, applied, perPage, sort]);
+  /*
+   * Only when the query actually CHANGES. As a plain effect this also ran on
+   * mount -- which is harmless for a fresh list but wiped out the page being
+   * restored on the way back from a ticket. Compared by value, not by a
+   * first-run flag, because StrictMode runs mount effects twice.
+   */
+  const queryKey = JSON.stringify([view, q, applied, perPage, sort]);
+  const lastQueryKey = useRef(queryKey);
+  useEffect(() => {
+    if (lastQueryKey.current === queryKey) return;
+    lastQueryKey.current = queryKey;
+    setPage(1);
+  }, [queryKey]);
 
   return (
     <div className="content route content-frame">
@@ -1451,9 +1557,6 @@ function TicketsPage({ onOpen, initialView = "unresolved", initialStatus = [],
         )}
         <div className="searchbox" style={{ maxWidth:230, flex:"initial", width:230 }}><Search size={16} /><input placeholder="Search tickets..." value={q} onChange={(e)=>setQ(e.target.value)} /></div>
         <SortDropdown value={sort} onChange={setSort} />
-        <button className="btn btn-ghost" onClick={() => { desk.ensureMeta(); desk.ensureAgents(); setDraft(applied); setDrawer(true); }}>
-          <Filter size={15} /> Filters{activeFilterCount > 0 && <span className="count-badge" style={{fontSize:11,padding:"1px 8px"}}>{activeFilterCount}</span>}
-        </button>
         <div className="seg" style={{ marginLeft:6 }}>
           <button className={layout==="card"?"on":""} onClick={()=>setLayout("card")}><LayoutGrid size={15} /> Card</button>
           <button className={layout==="inbox"?"on":""} onClick={()=>setLayout("inbox")}><Inbox size={15} /> Inbox</button>
@@ -1474,14 +1577,31 @@ function TicketsPage({ onOpen, initialView = "unresolved", initialStatus = [],
           <button className="icon-btn" title="Refresh tickets" onClick={refresh}>{loading ? <Loader2 size={17} className="spin" /> : <RotateCcw size={17} />}</button>
           <button className="icon-btn" title={canBack ? "Back" : "No history yet"} onClick={back} disabled={!canBack}><ArrowLeft size={17} /></button>
           <button className="icon-btn" title={canFwd ? "Forward" : "Nothing ahead"} onClick={fwd} disabled={!canFwd}><ArrowRight size={17} /></button>
+          {/*
+            * The filter drawer's opener, drawn like the views toggle on the left
+            * edge because it does the same job from the other side: it slides a
+            * panel in from the right. Lit, with a count, while filters apply --
+            * with the labelled button gone this dot is what tells the agent the
+            * list is narrowed.
+            */}
+          <button className={`icon-btn fd-filter-toggle ${drawer || activeFilterCount > 0 ? "on" : ""}`}
+                  title={activeFilterCount > 0 ? `Filters (${activeFilterCount} applied)` : "Filters"}
+                  aria-label={drawer ? "Hide filters" : "Show filters"} aria-expanded={drawer}
+                  onClick={() => {
+                    if (drawer) { setDrawer(false); return; }
+                    desk.ensureMeta(); desk.ensureAgents(); setDraft(applied); setDrawer(true);
+                  }}>
+            {drawer ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}
+            {activeFilterCount > 0 && <span className="dot">{activeFilterCount}</span>}
+          </button>
         </div>
       </div>
 
       {selCount > 0 && <BulkBar count={selCount} selTickets={selTickets} actions={actions} />}
 
-      <div className={`tickets-layout ${navOpen ? "" : "nav-shut"}`}>
+      <div className={`tickets-layout ${navOpen ? "" : "nav-shut"} ${drawer ? "filters-open" : ""}`}>
         {navOpen && <TicketSidebar view={view} setView={setView} counts={counts} setOpen={setNavOpen} />}
-        <div>
+        <div className="tl-main">
           {/* Pagination above the list as well: on a 30-row page the bottom
               control starts below the fold, which is where it is least useful. */}
           {!loading && rows.length > 0 && (
@@ -1508,7 +1628,7 @@ function TicketsPage({ onOpen, initialView = "unresolved", initialStatus = [],
                             onClearFilters={clearAllFilters} />
             ) : layout === "card" ? (
               <div className="tlist" style={{display:"flex",flexDirection:"column",gap:10}}>{viewRows.map((t, i) => (
-                <TicketCard key={t.id} t={t} i={i} hoverId={hover.t?.id}
+                <TicketCard key={t.id} t={t} i={i} hoverId={hover.t?.id} recent={t.id === recentId}
                             onHoverEnter={onHoverEnter} onHoverLeave={onHoverLeave} onOpen={onOpen}
                             selected={sel.includes(t.id)} onToggle={toggleSel}
                             agents={desk.agents} onField={setRowField} savingField={savingRow[t.id]}
@@ -1516,12 +1636,12 @@ function TicketsPage({ onOpen, initialView = "unresolved", initialStatus = [],
               ))}</div>
             ) : layout === "inbox" ? (
               <div className="card inbox-list">{viewRows.map((t) => (
-                <InboxRow key={t.id} t={t} selected={sel.includes(t.id)} onToggle={toggleSel} onOpen={onOpen}
+                <InboxRow key={t.id} t={t} recent={t.id === recentId} selected={sel.includes(t.id)} onToggle={toggleSel} onOpen={onOpen}
                           onHoverEnter={onHoverEnter} onHoverLeave={onHoverLeave}
                           onContactEnter={onContactEnter} onContactLeave={onContactLeave}
                           agents={desk.agents} onField={setRowField} savingField={savingRow[t.id]} />
               ))}</div>
-            ) : <TicketTable rows={viewRows} hoverId={hover.t?.id} onHoverEnter={onHoverEnter} onHoverLeave={onHoverLeave}
+            ) : <TicketTable rows={viewRows} recentId={recentId} hoverId={hover.t?.id} onHoverEnter={onHoverEnter} onHoverLeave={onHoverLeave}
                              onOpen={onOpen} sel={sel} onToggle={toggleSel}
                              agents={desk.agents} onField={setRowField} savingRow={savingRow} />
           )}
@@ -1532,6 +1652,13 @@ function TicketsPage({ onOpen, initialView = "unresolved", initialStatus = [],
           )}
           </div>
         </div>
+        {/* The filters column, on the right the way the views column is on the
+            left. Applying keeps it open: filters get tuned a step at a time. */}
+        {drawer && (
+          <FilterSidebar onClose={() => setDrawer(false)} draft={draft} setDraft={setDraft}
+            onApply={() => setApplied(draft)}
+            onReset={() => { setDraft(EMPTY); setApplied(EMPTY); }} />
+        )}
       </div>
 
       {contact.t && contact.el && (
@@ -1556,7 +1683,8 @@ function TicketsPage({ onOpen, initialView = "unresolved", initialStatus = [],
           };
 
           try {
-            if (Object.keys(fields).length) await desk.bulkUpdate(ids, fields);
+            // Painted onto the page first, so a bulk close empties the rows at once.
+            if (Object.keys(fields).length && !(await bulkWrite(ids, fields, () => desk.bulkUpdate(ids, fields)))) return;
 
             /*
              * The bulk reply sends a REAL email per ticket, one at a time.
@@ -1597,10 +1725,10 @@ function TicketsPage({ onOpen, initialView = "unresolved", initialStatus = [],
           // sources become tombstones pointing at it, so an old link (or a
           // [#IS-nnn] token still in a customer's mail client) keeps resolving.
           const others = sel.filter((id) => id !== primaryId);
-          try {
-            await desk.mergeTickets(primaryId, others);
+          // The merged-away tickets leave the page now; the primary stays.
+          if (await bulkWrite(others, { __gone: true }, () => desk.mergeTickets(primaryId, others))) {
             setModal(null); clearSel();
-          } catch (err) { /* handled by the store */ }
+          }
         }} />
       <TagsModal open={modal === "addTags"} mode="add" count={selCount} existing={selExisting} onClose={() => setModal(null)}
         onApply={async (tags) => {
@@ -1637,8 +1765,6 @@ function TicketsPage({ onOpen, initialView = "unresolved", initialStatus = [],
       <ConfirmDialog open={!!confirm} danger={confirm?.danger} title={confirm?.title || ""} message={confirm?.msg || ""} confirmLabel={confirm?.label || "Confirm"}
         onConfirm={() => confirm?.run()} onClose={() => setConfirm(null)} />
 
-      <FilterDrawer open={drawer} onClose={()=>setDrawer(false)} draft={draft} setDraft={setDraft}
-        onApply={()=>{ setApplied(draft); setDrawer(false); }} onReset={()=>{ setDraft(EMPTY); setApplied(EMPTY); }} />
     </div>
   );
 }
@@ -1647,7 +1773,9 @@ export {
   BulkAssignModal,
   BulkBar,
   BulkUpdateModal,
-  FilterDrawer,
+  FilterSidebar,
+  forgetListPosition,
+  markListTicket,
   MergeModal,
   PickModal,
   Skeletons,

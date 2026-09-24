@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import { Helmet } from "react-helmet-async";
+import AdJourneyDrawer from './AdJourneyDrawer';
+import { AdFilterButton, AdFilterPanel, AdFilterApplied, AdFilterResults } from './AdVisitFilter';
+import { AD_FILTER_CSS, DEFAULT_FILTER, filterChips } from './adVisitFilterConfig';
 
 /* ─── tiny icon helpers (inline SVGs, no extra deps) ─── */
 const Icon = ({ d, size = 14, color = 'currentColor', ...p }) => (
@@ -49,6 +52,18 @@ export default function AllStudents() {
   const [searchInput, setSearchInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [showUpload, setShowUpload] = useState(false);
+  const [adCounts, setAdCounts] = useState({});
+  const [adStudent, setAdStudent] = useState(null);
+  /* Ad-visit filter: while `adFilter` is set, the filtered list replaces the student table. */
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [adFilter, setAdFilter] = useState(null);
+  const [adFilterMeta, setAdFilterMeta] = useState({ total: 0, sources: {}, loading: false });
+  const applyAdFilter = (f) => {
+    setAdFilter(f);
+    setAdFilterMeta((m) => ({ ...m, loading: true }));
+    setFilterOpen(false);
+  };
+  const resetAdFilter = () => { setAdFilter(null); setFilterOpen(false); };
   const navigate = useNavigate();
   const jumpRef = useRef(null);
 
@@ -69,6 +84,7 @@ export default function AllStudents() {
   }, [page]);
 
   const fetchSearch = async (kw) => {
+    setAdFilter(null); // a search is over all students, not the filtered list
     if (!kw.trim()) { fetchData(); return; }
     setLoading(true);
     try {
@@ -86,6 +102,18 @@ export default function AllStudents() {
     if (!searchMode) fetchData();
     hasFetched.current = true;
   }, [page]); // depend on page only, not fetchData
+
+  /* Ad-visit counts for the rows on screen — a separate call so the cached list stays fast. */
+  useEffect(() => {
+    const ids = data.map(s => s.user_id).filter(Boolean);
+    if (!ids.length) { setAdCounts({}); return; }
+    let cancelled = false;
+    setAdCounts(null);
+    api.get('/api/students/ad_visits.php', { params: { action: 'counts', user_ids: ids.join(',') } })
+      .then(res => { if (!cancelled) setAdCounts(res.data.success ? res.data.data.counts || {} : {}); })
+      .catch(() => { if (!cancelled) setAdCounts({}); });
+    return () => { cancelled = true; };
+  }, [data]);
 
   /* ── actions ── */
   const deleteStudent = async (id) => { if (!confirm('Delete this student? This cannot be undone.')) return; setLoading(true); try { await api.post('/api/students/action.php', { action: 'delete', user_id: id }); setData(p => p.filter(s => s.user_id != id)); toast.success('Student deleted'); } catch { toast.error('Something went wrong'); } finally { setLoading(false); } };
@@ -204,6 +232,10 @@ export default function AllStudents() {
         .col-ctry  { width: 90px; }
         .col-reg   { width: 140px; }
         .col-stat  { width: 100px; }
+        .col-ads   { width: 96px; }
+        ${AD_FILTER_CSS}
+        .ad-count { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 20px; border: 1px solid #e9d5ff; background: #faf5ff; color: #7e22ce; font-size: 11px; font-weight: 700; cursor: pointer; font-family: inherit; transition: all .15s; }
+        .ad-count:hover { background: #7e22ce; border-color: #7e22ce; color: #fff; }
         .col-act   { width: 230px; }
         .col-adm   { width: 200px; }
       `}</style>
@@ -242,6 +274,11 @@ export default function AllStudents() {
 
           <div style={{ flex: 1 }} />
 
+          {/* Ad-visit filter */}
+          <AdFilterButton open={filterOpen}
+            active={adFilter ? filterChips(adFilter).filter(c => c.reset || c.key === 'date').length : 0}
+            onClick={() => setFilterOpen(o => !o)} />
+
           {/* Search */}
           <div className="as-search">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 8, flexShrink: 0 }}>
@@ -270,27 +307,38 @@ export default function AllStudents() {
           </button>
         </div>
 
+        <AdFilterPanel open={filterOpen} value={adFilter || DEFAULT_FILTER} sources={adFilterMeta.sources}
+          onApply={applyAdFilter} onReset={resetAdFilter} onClose={() => setFilterOpen(false)} />
+        {adFilter && (
+          <AdFilterApplied value={adFilter} total={adFilterMeta.total} loading={adFilterMeta.loading}
+            onChange={applyAdFilter} onReset={resetAdFilter} />
+        )}
+
         {/* ── BODY ── */}
         <div className="as-body" style={{ paddingBottom: 12 }}>
+          {adFilter ? (
+            <AdFilterResults filter={adFilter} onOpen={setAdStudent}
+              onLoaded={(d) => setAdFilterMeta({ total: d.total, sources: d.available_sources || {}, loading: false })} />
+          ) : (
           <div className="as-card">
             <div className="as-table-wrap">
               <table className="as-t">
                 <colgroup>
                   <col className="col-id" /><col className="col-name" /><col className="col-email" />
                   <col className="col-phone" /><col className="col-state" /><col className="col-ctry" />
-                  <col className="col-reg" /><col className="col-stat" />
+                  <col className="col-reg" /><col className="col-stat" /><col className="col-ads" />
                   <col className="col-act" /><col className="col-adm" />
                 </colgroup>
                 <thead>
                   <tr>
-                    {['ID', 'Name', 'Email', 'Mobile', 'State', 'Country', 'Registered At', 'Status', 'Actions', 'Admin'].map(h => (
+                    {['ID', 'Name', 'Email', 'Mobile', 'State', 'Country', 'Registered At', 'Status', 'Ad Visits', 'Actions', 'Admin'].map(h => (
                       <th key={h}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {!loading && data.length === 0 && (
-                    <tr><td colSpan={10} className="no-data">
+                    <tr><td colSpan={11} className="no-data">
                       <Icon d={Icons.users} size={28} color="#e2e8f0" /><br />No records found
                     </td></tr>
                   )}
@@ -324,6 +372,19 @@ export default function AllStudents() {
                           </svg>
                           {el.active == 1 ? 'Active' : 'Inactive'}
                         </span>
+                      </td>
+                      <td>
+                        {(() => {
+                          if (adCounts === null) return <span style={{ color: '#cbd5e1' }}>…</span>;
+                          const c = adCounts[el.user_id];
+                          if (!c || c.total <= 1) return <span style={{ color: '#cbd5e1' }}>-</span>;
+                          return (
+                            <button className="ad-count" onClick={() => setAdStudent(el)}
+                              title={`${c.device} from the same browser, ${c.ip} from the same network · ${c.before_register} before signup`}>
+                              {c.total} visits
+                            </button>
+                          );
+                        })()}
                       </td>
                       <td>
                         <div className="as-action-cell">
@@ -395,8 +456,11 @@ export default function AllStudents() {
               </div>
             )}
           </div>
+          )}
         </div>
       </div>
+
+      {adStudent && <AdJourneyDrawer student={adStudent} onClose={() => setAdStudent(null)} />}
 
       {/* ── UPLOAD MODAL ── */}
       {showUpload && (

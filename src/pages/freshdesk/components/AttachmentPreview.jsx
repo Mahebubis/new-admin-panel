@@ -11,15 +11,19 @@
  *               enough to be worth reading without downloading it.
  *   audio/video the browser's own player — it can decode these natively, so
  *               refusing to preview them was simply wrong.
- *   archive     named and offered for download; unpacking one in the browser
- *               would mean shipping a zip parser to read someone's evidence.
+ *   zip         listed (names and sizes) with JSZip, loaded on demand.
+ *   archive     rar/7z/tar/gz: named and offered for download -- no browser
+ *               library reads them.
  *   sheets      .xlsx/.xls/.ods parsed with SheetJS, which the panel already
  *               loads on demand to WRITE exports. Multi-sheet workbooks get
  *               tabs.
- *   doc/slides  .docx/.pptx are ZIP archives and reading one needs a converter
- *               this panel does not ship, so we say so plainly and offer
- *               Download + "Open in Google Docs Viewer" rather than an empty
- *               grey box.
+ *   docx        converted to HTML in the browser with mammoth (on demand).
+ *   doc/slides  .doc/.rtf/.odt/.ppt/.pptx through Microsoft's Office viewer,
+ *               from the file's signed, time-limited link.
+ *   other       sniffed: shown as text if it reads as text, else a Download.
+ *
+ * Every viewer fetches from the DOWNLOAD url (see useBytes) and every failure
+ * ends in a message with a Download button -- never a blank or blocked frame.
  *
  * The whole gallery is navigable with arrow keys, because an agent looking at a
  * customer's five screenshots should not have to close and reopen four times.
@@ -28,7 +32,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
   X, Download, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCw,
-  FileText, FileSpreadsheet, File as FileIcon, ExternalLink, Loader2,
+  FileText, FileSpreadsheet, File as FileIcon, Loader2,
   FileArchive, FileAudio, FileVideo, FileCode, Presentation, Image as ImageIcon,
 } from "lucide-react";
 import { fdUrl } from "../fdApi";
@@ -43,38 +47,263 @@ const TEXT_RE  = /^(text\/(plain|csv|markdown)|application\/(json|xml))/i;
  * application/octet-stream -- so the extension has to be able to answer on
  * its own.
  */
+const extOf = (name) => {
+  const n = String(name || "").toLowerCase();
+  return n.includes(".") ? n.split(".").pop() : "";
+};
+
 export function kindOf(att) {
   const mime = String(att.mime || "").toLowerCase();
-  const name = String(att.name || "").toLowerCase();
-  const ext = name.includes(".") ? name.split(".").pop() : "";
+  const ext = extOf(att.name);
 
-  if (IMAGE_RE.test(mime) || ["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "svg"].includes(ext)) return "image";
+  if (IMAGE_RE.test(mime) || ["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "svg", "ico", "heic", "heif", "tif", "tiff"].includes(ext)) return "image";
   if (mime === "application/pdf" || ext === "pdf") return "pdf";
-  if (/^audio\//.test(mime) || ["mp3", "wav", "ogg", "m4a", "aac", "flac", "oga"].includes(ext)) return "audio";
-  if (/^video\//.test(mime) || ["mp4", "webm", "ogv", "mov", "m4v"].includes(ext)) return "video";
-  if (["zip", "rar", "7z", "tar", "gz", "tgz", "bz2"].includes(ext)
-      || /^application\/(zip|x-rar|x-7z|x-tar|gzip)/.test(mime)) return "archive";
+  if (/^audio\//.test(mime) || ["mp3", "wav", "ogg", "m4a", "aac", "flac", "oga", "opus", "weba", "amr", "wma", "aiff"].includes(ext)) return "audio";
+  if (/^video\//.test(mime) || ["mp4", "m4v", "webm", "ogv", "mov", "mkv", "3gp", "3g2", "avi", "wmv", "flv", "mpeg", "mpg", "ts", "mts"].includes(ext)) return "video";
+  if (ext === "zip" || /^application\/(x-)?zip/.test(mime)) return "zip";
+  if (["rar", "7z", "tar", "gz", "tgz", "bz2", "xz"].includes(ext)
+      || /^application\/(x-rar|x-7z|x-tar|gzip)/.test(mime)) return "archive";
   if (["js", "jsx", "ts", "tsx", "css", "html", "htm", "php", "py", "java", "sql", "sh", "yml", "yaml", "ini", "env"].includes(ext)) return "code";
-  if (TEXT_RE.test(mime) || ["txt", "csv", "log", "json", "xml", "md"].includes(ext)) return "text";
-  if (["doc", "docx", "odt", "rtf"].includes(ext)) return "doc";
-  if (["xls", "xlsx", "ods"].includes(ext)) return "sheet";
-  if (["ppt", "pptx", "odp"].includes(ext)) return "slides";
+  if (TEXT_RE.test(mime) || ["txt", "csv", "tsv", "log", "json", "xml", "md"].includes(ext)) return "text";
+  if (ext === "docx") return "docx";
+  if (["doc", "odt", "rtf"].includes(ext)) return "doc";
+  if (["xls", "xlsx", "xlsm", "ods"].includes(ext)) return "sheet";
+  if (["ppt", "pptx", "pps", "ppsx", "odp"].includes(ext)) return "slides";
   return "other";
 }
 
 export const ICON = {
-  image: ImageIcon, pdf: FileText, doc: FileText, sheet: FileSpreadsheet,
-  slides: Presentation, text: FileText, code: FileCode, archive: FileArchive,
+  image: ImageIcon, pdf: FileText, doc: FileText, docx: FileText, sheet: FileSpreadsheet,
+  slides: Presentation, text: FileText, code: FileCode, archive: FileArchive, zip: FileArchive,
   audio: FileAudio, video: FileVideo, other: FileIcon,
 };
 
 /* The colour each kind wears, so a PDF and a spreadsheet are told apart at a
    glance rather than read one at a time. */
 export const KIND_COLOR = {
-  image: "#0EA5E9", pdf: "#DC2626", doc: "#2563EB", sheet: "#16A34A",
-  slides: "#EA580C", text: "#64748B", code: "#7C3AED", archive: "#A16207",
+  image: "#0EA5E9", pdf: "#DC2626", doc: "#2563EB", docx: "#2563EB", sheet: "#16A34A",
+  slides: "#EA580C", text: "#64748B", code: "#7C3AED", archive: "#A16207", zip: "#A16207",
   audio: "#DB2777", video: "#9333EA", other: "#64748B",
 };
+
+/* A library from the CDN, fetched the first time a file needs it -- the same
+   way SheetJS already is, so none of these weigh on the bundle. */
+const scriptPromises = {};
+function loadScript(src, globalName) {
+  if (window[globalName]) return Promise.resolve(window[globalName]);
+  if (!scriptPromises[src]) {
+    scriptPromises[src] = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = src;
+      s.onload = () => (window[globalName] ? resolve(window[globalName]) : reject(new Error(`${globalName} did not load`)));
+      s.onerror = () => { delete scriptPromises[src]; reject(new Error(`Could not load ${globalName}`)); };
+      document.head.appendChild(s);
+    });
+  }
+  return scriptPromises[src];
+}
+const loadMammoth = () => loadScript("https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js", "mammoth");
+const loadJSZip = () => loadScript("https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js", "JSZip");
+
+/*
+ * The file's bytes, from the DOWNLOAD url.
+ *
+ * Not the view url: for a file in S3 that one redirects to the bucket, and a
+ * script can only read the answer if the bucket allows this origin -- which it
+ * need not. The download action streams the bytes through our own API, which
+ * sends CORS for the panel, so this works wherever the file is stored.
+ */
+function useBytes(url) {
+  const [state, setState] = useState({ loading: true, buf: null, error: null });
+  useEffect(() => {
+    let alive = true;
+    setState({ loading: true, buf: null, error: null });
+    fetch(url, { credentials: "omit" })
+      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((buf) => alive && setState({ loading: false, buf, error: null }))
+      .catch((e) => alive && setState({ loading: false, buf: null, error: e.message || "Could not fetch the file" }));
+    return () => { alive = false; };
+  }, [url]);
+  return state;
+}
+
+const Spin = ({ label }) => <div className="ap-empty"><Loader2 size={20} className="spin" /> {label}</div>;
+
+/* What the viewer says when a file genuinely cannot be shown in a browser --
+   always with the way out, never an empty grey box. */
+function NoPreview({ Ic, name, why, dl, children }) {
+  return (
+    <div className="ap-empty ap-nopreview">
+      <Ic size={44} />
+      <h4>{name}</h4>
+      <p>{why}</p>
+      <div className="ap-actions">
+        <a className="btn btn-primary btn-sm" href={dl} download={name}><Download size={14} /> Download</a>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/*
+ * PDF: the fetched bytes as a blob, shown by the browser's own viewer.
+ *
+ * The old frame pointed at the file with a sandbox attribute -- and Chrome's
+ * PDF viewer refuses to run inside a sandboxed frame, which is the "This page
+ * has been blocked by Chrome" agents saw. The blob is typed application/pdf
+ * whatever the file claims, so nothing in it can run as a page of the panel.
+ * If the bytes cannot be fetched, the file itself is framed, still without a
+ * sandbox (it is another origin, so it cannot reach the panel anyway).
+ */
+function PdfViewer({ fetchUrl, directUrl, name }) {
+  const { loading, buf, error } = useBytes(fetchUrl);
+  const [blobUrl, setBlobUrl] = useState(null);
+  useEffect(() => {
+    if (!buf) return undefined;
+    const u = URL.createObjectURL(new Blob([buf], { type: "application/pdf" }));
+    setBlobUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [buf]);
+  if (loading) return <Spin label="Opening the PDF…" />;
+  if (error || !blobUrl) return <iframe title={name} src={directUrl} className="ap-frame" />;
+  return <iframe title={name} src={blobUrl} className="ap-frame" />;
+}
+
+/*
+ * Audio and video in the browser's own player, with its controls.
+ *
+ * Browsers decode MP4/H.264, WebM, Ogg, MP3, AAC, WAV and usually MOV and MKV.
+ * They cannot play AVI, WMV, FLV and friends at all -- no setting changes
+ * that -- so when the player reports it cannot decode the file, that is said
+ * plainly with the download beside it, rather than leaving a dead player.
+ */
+function MediaViewer({ kind, url, dl, name, Ic }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setFailed(false); }, [url]);
+  if (failed) {
+    return <NoPreview Ic={Ic} name={name} dl={dl}
+      why={`This .${extOf(name) || "file"} format cannot be played in a web browser. Download it to play it in a media player such as VLC.`} />;
+  }
+  if (kind === "audio") {
+    return (
+      <div className="ap-empty ap-media">
+        <Ic size={44} />
+        <h4>{name}</h4>
+        {/* controlsList keeps the browser's own download button out of the
+            way; ours is in the header and carries the filename. */}
+        <audio key={url} src={url} controls preload="metadata" controlsList="nodownload"
+               style={{ width: "min(560px, 90%)" }} onError={() => setFailed(true)} />
+      </div>
+    );
+  }
+  return (
+    <video key={url} src={url} controls playsInline preload="metadata" controlsList="nodownload"
+           className="ap-video" style={{ maxWidth: "100%", maxHeight: "100%" }} onError={() => setFailed(true)} />
+  );
+}
+
+/* .docx, converted to HTML in the browser with mammoth -- the file never
+   leaves the panel. Pictures inside come through as data: URIs. */
+function DocxViewer({ fetchUrl, fallback }) {
+  const { loading, buf, error } = useBytes(fetchUrl);
+  const [out, setOut] = useState({ html: null, error: null });
+  useEffect(() => {
+    if (!buf) return undefined;
+    let alive = true;
+    loadMammoth()
+      .then((m) => m.convertToHtml({ arrayBuffer: buf }))
+      .then((res) => {
+        if (!alive) return;
+        // mammoth writes plain markup, but the file is a stranger's: no
+        // scripts, no handlers, no script URLs survive into the panel.
+        const safe = String(res.value || "")
+          .replace(/<\s*(script|style|iframe|object|embed)\b[\s\S]*?<\s*\/\s*\1\s*>/gi, "")
+          .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+          .replace(/(href|src)\s*=\s*(["'])\s*javascript:[^"']*\2/gi, "$1=$2#$2");
+        setOut({ html: safe, error: null });
+      })
+      .catch((e) => alive && setOut({ html: null, error: e.message }));
+    return () => { alive = false; };
+  }, [buf]);
+  if (loading || (!out.html && !out.error && !error)) return <Spin label="Opening the document…" />;
+  if (error || out.error) return fallback;
+  return (
+    <div className="ap-doc-wrap">
+      {out.html ? <div className="ap-doc" dangerouslySetInnerHTML={{ __html: out.html }} />
+                : <div className="ap-empty">This document has no text to show.</div>}
+    </div>
+  );
+}
+
+/*
+ * Old Word, RTF, OpenDocument and PowerPoint: Microsoft's Office viewer.
+ * There is no browser library that renders these faithfully. The viewer reads
+ * the file from its signed link, which expires on its own, and the Download
+ * button is always beside it.
+ */
+function OfficeViewer({ publicUrl, name }) {
+  return (
+    <div className="ap-office">
+      <iframe title={name} className="ap-frame"
+              src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(publicUrl)}`} />
+      <div className="ap-note">Shown with Microsoft's Office viewer from this file's time-limited link.</div>
+    </div>
+  );
+}
+
+/* A .zip, listed: what is inside and how big, without unpacking anything. */
+function ZipViewer({ fetchUrl, fallback }) {
+  const { loading, buf, error } = useBytes(fetchUrl);
+  const [out, setOut] = useState({ rows: null, error: null });
+  useEffect(() => {
+    if (!buf) return undefined;
+    let alive = true;
+    loadJSZip()
+      .then((Z) => Z.loadAsync(buf))
+      .then((zip) => {
+        const rows = [];
+        zip.forEach((path, entry) => rows.push({
+          path, dir: entry.dir,
+          size: entry._data && entry._data.uncompressedSize != null ? entry._data.uncompressedSize : null,
+        }));
+        if (alive) setOut({ rows, error: null });
+      })
+      .catch((e) => alive && setOut({ rows: null, error: e.message }));
+    return () => { alive = false; };
+  }, [buf]);
+  if (loading || (!out.rows && !out.error && !error)) return <Spin label="Reading the archive…" />;
+  if (error || out.error) return fallback;
+  const files = out.rows.filter((r) => !r.dir);
+  return (
+    <div className="ap-table-wrap">
+      <div className="ap-note" style={{ marginTop: 0 }}>{files.length} file{files.length === 1 ? "" : "s"} in this archive</div>
+      <table className="ap-table">
+        <thead><tr><th>Name</th><th style={{ textAlign: "right" }}>Size</th></tr></thead>
+        <tbody>{files.slice(0, 1000).map((r) => (
+          <tr key={r.path}><td>{r.path}</td><td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{r.size == null ? "—" : humanSize(r.size)}</td></tr>
+        ))}</tbody>
+      </table>
+    </div>
+  );
+}
+const humanSize = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+
+/*
+ * An unknown type: look before giving up. Plenty of "unknown" files are text
+ * with an odd extension (.conf, .srt, .ics, .vcf) -- if the first bytes read
+ * as text, show them; otherwise say what the file is and offer the download.
+ */
+function SniffViewer({ fetchUrl, fallback }) {
+  const { loading, buf, error } = useBytes(fetchUrl);
+  if (loading) return <Spin label="Opening…" />;
+  if (error || !buf) return fallback;
+  const head = new Uint8Array(buf.slice(0, 4096));
+  let ctrl = 0;
+  for (const b of head) { if (b === 0) { ctrl = head.length; break; } if (b < 9 || (b > 13 && b < 32)) ctrl++; }
+  if (!head.length || ctrl > head.length * 0.02) return fallback;
+  const text = new TextDecoder("utf-8", { fatal: false }).decode(buf.slice(0, 500000));
+  return <pre className="ap-text">{text}</pre>;
+}
 
 /** Render a CSV as a real table — far easier to read than raw commas. */
 function CsvTable({ raw }) {
@@ -186,7 +415,7 @@ function SheetViewer({ url }) {
  * A large screenshot over a slow connection left the viewer blank with no
  * indication anything was happening, which reads as broken.
  */
-function ImageViewer({ url, alt, zoom, rot }) {
+function ImageViewer({ url, dl, alt, zoom, rot }) {
   const [state, setState] = useState("loading");   // loading | ready | error
   useEffect(() => { setState("loading"); }, [url]);
   return (
@@ -195,11 +424,12 @@ function ImageViewer({ url, alt, zoom, rot }) {
         <div className="ap-empty ap-loading"><Loader2 size={22} className="spin" /> Loading image…</div>
       )}
       {state === "error" && (
-        <div className="ap-empty">
-          <FileIcon size={40} />
-          <h4>{alt}</h4>
-          <p>This image could not be loaded. It may have been removed from storage.</p>
-        </div>
+        /* HEIC (iPhone photos) and TIFF are real images most browsers cannot
+           draw -- saying "removed from storage" for those was wrong. */
+        <NoPreview Ic={FileIcon} name={alt} dl={dl}
+          why={["heic", "heif", "tif", "tiff"].includes(extOf(alt))
+            ? "This image format cannot be shown in the browser. Download it to open it."
+            : "This image could not be loaded. It may have been removed from storage."} />
       )}
       <img src={url} alt={alt} className="ap-img"
            style={{ transform: `scale(${zoom}) rotate(${rot}deg)`, display: state === "ready" ? "" : "none" }}
@@ -306,65 +536,41 @@ export default function AttachmentPreview({ attachments = [], startIndex = 0, on
             )}
 
             {kind === "image" && (
-              <ImageViewer url={url} alt={att.name} zoom={zoom} rot={rot} />
+              <ImageViewer url={url} dl={dl} alt={att.name} zoom={zoom} rot={rot} />
             )}
 
-            {kind === "pdf" && (
-              /* The browser's own PDF viewer. sandbox keeps a hostile PDF from
-                 scripting the panel's origin. */
-              <iframe title={att.name} src={url} className="ap-frame"
-                      sandbox="allow-same-origin allow-scripts allow-popups" />
-            )}
+            {kind === "pdf" && <PdfViewer fetchUrl={dl} directUrl={url} name={att.name} />}
 
             {(kind === "text" || kind === "code") && (
-              <TextViewer url={url} isCsv={/\.csv$/i.test(att.name || "")} />
+              <TextViewer url={dl} isCsv={/.csv$/i.test(att.name || "")} />
             )}
 
-            {kind === "audio" && (
-              <div className="ap-empty ap-media">
-                <Ic size={44} />
-                <h4>{att.name}</h4>
-                {/* controlsList keeps the browser's own download button out of
-                    the way; ours is in the header and carries the filename. */}
-                <audio src={url} controls controlsList="nodownload" style={{ width: "min(560px, 90%)" }} />
-              </div>
+            {(kind === "audio" || kind === "video") && (
+              <MediaViewer kind={kind} url={url} dl={dl} name={att.name} Ic={Ic} />
             )}
 
-            {kind === "video" && (
-              <video src={url} controls controlsList="nodownload" className="ap-video"
-                     style={{ maxWidth: "100%", maxHeight: "100%" }} />
+            {kind === "sheet" && <SheetViewer url={dl} />}
+
+            {kind === "docx" && (
+              <DocxViewer fetchUrl={dl} fallback={<OfficeViewer publicUrl={dl} name={att.name} />} />
             )}
 
-            {kind === "sheet" && <SheetViewer url={url} />}
+            {(kind === "doc" || kind === "slides") && <OfficeViewer publicUrl={dl} name={att.name} />}
 
-            {["doc", "slides", "archive", "other"].includes(kind) && (
-              <div className="ap-empty ap-nopreview">
-                <Ic size={44} />
-                <h4>{att.name}</h4>
-                <p>
-                  {kind === "archive"
-                    ? "An archive has to be unpacked before anything inside it can be read."
-                    : kind === "other"
-                      ? "This file type has no in-browser preview."
-                      : "Word and PowerPoint files are ZIP archives — reading one needs a converter this panel does not ship."}
-                </p>
-                <div className="ap-actions">
-                  <a className="btn btn-primary btn-sm" href={dl} download={att.name}>
-                    <Download size={14} /> Download
-                  </a>
-                  {/* Google's viewer needs a publicly reachable URL. Ours are
-                      signed and time-limited, so this works while the link is
-                      valid and simply fails after — a secondary option, never
-                      the only one. Pointless for an archive, so not offered. */}
-                  {["doc", "slides"].includes(kind) && (
-                    <a className="btn btn-soft btn-sm"
-                       href={`https://docs.google.com/viewer?embedded=1&url=${encodeURIComponent(dl)}`}
-                       target="_blank" rel="noopener noreferrer">
-                      <ExternalLink size={14} /> Try Google Docs Viewer
-                    </a>
-                  )}
-                </div>
-              </div>
+            {kind === "zip" && (
+              <ZipViewer fetchUrl={dl} fallback={<NoPreview Ic={Ic} name={att.name} dl={dl} why="This archive could not be read. It may be damaged or password-protected." />} />
+            )}
+
+            {kind === "archive" && (
+              <NoPreview Ic={Ic} name={att.name} dl={dl}
+                why={`A .${extOf(att.name)} archive cannot be opened in a browser (only .zip can). Download it to unpack it.`} />
+            )}
+
+            {kind === "other" && (
+              <SniffViewer fetchUrl={dl} fallback={
+                <NoPreview Ic={Ic} name={att.name} dl={dl}
+                  why={`${extOf(att.name) ? "A ." + extOf(att.name) : "This"} file has no in-browser preview.`} />
+              } />
             )}
 
             {list.length > 1 && (

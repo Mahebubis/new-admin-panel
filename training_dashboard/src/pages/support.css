@@ -197,6 +197,9 @@
 }
 .sup-file-btn:hover { border-color: var(--brand); color: var(--brand); }
 .sup-file-btn em { font-style: normal; font-size: 11.5px; color: var(--text-3); }
+/* the screenshot a new ticket must carry */
+.sup-file-btn.sup-file-req { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); }
+.sup-file-btn.sup-file-req em { color: var(--brand); opacity: 0.8; }
 
 .sup-file-chip {
   display: inline-flex; align-items: center; gap: 9px; max-width: 100%;
@@ -269,6 +272,34 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .sup-msg-doc-size { font-size: 11.5px; color: var(--text-3); flex-shrink: 0; }
+.sup-msg-doc-ext {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.04em; color: var(--text-3);
+  padding: 1px 6px; border-radius: 4px; background: var(--bg-soft); flex-shrink: 0;
+}
+.sup-msg-doc-ext:empty { display: none; }
+
+/* video / audio the support team sent — played in the bubble */
+.sup-msg-media {
+  margin-top: 10px; border-radius: var(--r-sm); overflow: hidden;
+  border: 1px solid var(--border); background: #0c111d;
+}
+.sup-msg-media video { display: block; width: 100%; max-height: 320px; background: #000; }
+.sup-msg-media audio { display: block; width: 100%; background: var(--bg); }
+.sup-msg-media-bar {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  background: var(--bg); color: var(--text); font-size: 12.5px;
+}
+.sup-msg-media-bar:hover { color: var(--brand); }
+
+/* links inside a message */
+.sup-link {
+  color: #1570ef; font-weight: 500; word-break: break-all;
+  text-decoration: underline; text-underline-offset: 2px;
+  text-decoration-color: rgba(21, 112, 239, 0.4);
+  background: rgba(21, 112, 239, 0.08); border-radius: 4px; padding: 0 3px;
+}
+.sup-link:hover { text-decoration-color: #1570ef; background: rgba(21, 112, 239, 0.14); }
+.sup-mine .sup-link { color: #0b4aa2; }
 
 .sup-waiting {
   margin: 4px 0 0; padding: 11px 13px; border-radius: var(--r-sm);
@@ -350,7 +381,7 @@
   .sup-file-btn, .sup-file-chip { width: 100%; }
   .sup-file-btn { justify-content: center; flex-wrap: wrap; }
 
-  .sup-thread { padding: 14px; max-height: none; gap: 12px; }
+  .sup-thread { padding: 14px; max-height: 60vh; max-height: 60dvh; gap: 12px; }
   /* A bubble that stops at 78% of a phone wastes the only space there is. */
   .sup-bubble { max-width: 92%; }
   .sup-msg-body { font-size: 13.5px; }

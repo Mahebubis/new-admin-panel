@@ -179,8 +179,12 @@ export const LMS = {
      admin session of its own, so the panel is what knows who is answering. */
   listTickets: (o) => api(`resource=support&action=list&${qp(o)}`),
   getTicket: (id) => api(`resource=support&action=get&id=${id}`),
-  replyTicket: (d) => api('resource=support&action=reply', d),
+  /* FormData when the reply carries files — multipart is the only way to send them. */
+  replyTicket: (d) => (d instanceof FormData
+    ? apiForm('resource=support&action=reply', d)
+    : api('resource=support&action=reply', d)),
   setTicketStatus: (id, status) => api('resource=support&action=status', { id, status }),
+  bulkTicketStatus: (ids, status) => api('resource=support&action=bulk_status', { ids, status }),
   deleteTicket: (id) => api('resource=support&action=delete', { id }),
 
   /* settings + editor */

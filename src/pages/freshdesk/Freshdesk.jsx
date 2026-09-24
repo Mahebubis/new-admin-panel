@@ -37,7 +37,7 @@ import { CallerPage } from "./pages/CallerPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { CustomerProfilePage, CustomersPage } from "./pages/CustomersPage";
 import { TicketDetailPage } from "./pages/TicketDetailPage";
-import { TicketsPage } from "./pages/TicketsPage";
+import { TicketsPage, forgetListPosition, markListTicket } from "./pages/TicketsPage";
 import { CommandPalette, Sidebar, ThemeDrawer, TopBar } from "./components/Chrome";
 
 
@@ -345,9 +345,11 @@ export default function App() {
   useEffect(() => { if (theme) applyTheme(theme, dark); }, [theme, dark]);
   const push = (t) => {
     const id = Date.now() + Math.random();
-    setToasts((x) => [...x, { id, ...t }]);
-    // An Undo the agent cannot reach in time is not an undo.
-    setTimeout(() => setToasts((x) => x.filter((y) => y.id !== id)), t && t.action ? 9000 : 4200);
+    // An Undo the agent cannot reach in time is not an undo. A caller can ask
+    // for longer (Close & Next's Undo is 10s); the toast draws the countdown.
+    const duration = (t && t.duration) || (t && t.action ? 9000 : 4200);
+    setToasts((x) => [...x, { id, ...t, duration }]);
+    setTimeout(() => setToasts((x) => x.filter((y) => y.id !== id)), duration);
   };
   const dismiss = (id) => setToasts((x) => x.filter((y) => y.id !== id));
   const top = () => window.scrollTo({ top: 0, behavior: "smooth" });
@@ -355,11 +357,38 @@ export default function App() {
   const signOut = () => { setNavOpen(false); setThemeOpen(false); logout(); };
   const go = (r) => { navigate(r === "home" ? "/freshdesk" : `/freshdesk/${r}`); setNavOpen(false); top(); };
   const [composeIntent, setComposeIntent] = useState(null);   // "Reply" | "Note" | null
+  /*
+   * The ticket openTicket() has asked the router for, until the URL shows it.
+   *
+   * setActiveTicket() lands on the next render but the router applies the new
+   * URL a render later. In the render between, the deep-link effect below saw
+   * the OLD ticket id in the URL, decided the active ticket was wrong, and put
+   * the old ticket back -- then flipped forward again once the URL arrived.
+   * The flash loaded the previous customer's conversation under the new
+   * ticket, and on a slow network it could leave the agent on the ticket they
+   * had just closed. While this is set, the effect waits for the URL.
+   */
+  const pendingOpenRef = useRef(null);
+  /* The list remembers its page for the way back from a ticket. Anywhere else
+     in the desk ends that trip, so a later visit starts at the top. */
+  useEffect(() => { if (route !== "ticket" && route !== "tickets") forgetListPosition(); }, [route]);
   const openTicket = (t, compose = null) => {
     if (!t) return;
+    // Only when the URL will actually change: re-opening the ticket already in
+    // the address never re-runs the effect, so the flag would never clear and
+    // would block the next Back-button navigation.
+    if (!(route === "ticket" && Number(parsed.id) === Number(t.id))) pendingOpenRef.current = Number(t.id);
     setActiveTicket(t);
     setComposeIntent(compose);
-    navigate(`/freshdesk/tickets/${t.id}`);
+    /*
+     * Ticket to ticket (Close & Next, the arrows, the rail) REPLACES the entry
+     * instead of stacking one: after closing #2 and landing on #4, Back goes
+     * straight to the list, not back through the ticket just closed -- and the
+     * list marks #4, the one actually open, as last opened.
+     */
+    const fromTicket = route === "ticket";
+    if (fromTicket) markListTicket(t.id);
+    navigate(`/freshdesk/tickets/${t.id}`, { replace: fromTicket });
     top();
   };
   /**
@@ -437,49 +466,6 @@ export default function App() {
   const resetTheme = () => { setTheme(null); try { localStorage.removeItem("helphive-theme"); } catch (e) {} const root = document.querySelector(".app"); if (root) root.removeAttribute("style"); };
   const themeApi = { theme: theme || (dark ? THEME_DARK : THEME_DEFAULT), setTheme, resetTheme, dark };
   /*
-   * Prev / Next through the queue, and what "Close" hands off to.
-   *
-   * Three things here were wrong and produced the same visible bug — closing a
-   * ticket threw you back onto one you had already answered:
-   *
-   *   1. It moved activeTicket WITHOUT navigating, so the URL still named the
-   *      old ticket. The deep-link effect below re-reads the URL on every
-   *      `tickets` change — which is constantly, because every optimistic patch
-   *      and every poll replaces that array — sees activeTicket disagreeing
-   *      with the address bar, and snaps you back to the ticket you just left.
-   *      Going through openTicket() keeps the two in step.
-   *
-   *   2. It stepped by array position in a list sorted by last_message_at.
-   *      Replying bumps a ticket to index 0, so after answering two or three in
-   *      a row, "next" from the top walked straight into the one answered
-   *      before it.
-   *
-   *   3. It wrapped with % length, so Next from the last row silently became
-   *      the first row.
-   *
-   * Now: move forward to the next ticket that still needs an agent, skipping
-   * anything already Resolved/Closed and anything filed away, and stop at the
-   * end of the queue instead of wrapping.
-   */
-  const step = (d) => {
-    if (!tickets.length) return;
-    const i = tickets.findIndex(t => t.id === (activeTicket && activeTicket.id));
-    if (i < 0) return;
-
-    const needsWork = (t) => t
-      && !["Resolved", "Closed"].includes(t.status)
-      && !t.spam && !t.trash;
-
-    for (let j = i + d; j >= 0 && j < tickets.length; j += d) {
-      if (needsWork(tickets[j])) { openTicket(tickets[j]); return; }
-    }
-
-    /* Nothing left in that direction. The queue is the right place to land --
-       silently staying put reads as a dead button. */
-    push({ type: "success", title: "That is the end of the queue", desc: "Nothing left to answer this way." });
-    go("tickets");
-  };
-  /*
    * Deep links.
    *
    * On a cold load of /freshdesk/tickets/336966 there is no activeTicket yet --
@@ -492,6 +478,11 @@ export default function App() {
   useEffect(() => {
     if (route !== "ticket" || !parsed.id) return;
     const wanted = Number(parsed.id);
+    // The URL has not caught up with openTicket() yet -- see pendingOpenRef.
+    if (pendingOpenRef.current != null) {
+      if (pendingOpenRef.current !== wanted) return;
+      pendingOpenRef.current = null;
+    }
     if (activeTicket && Number(activeTicket.id) === wanted) return;
 
     const inSet = tickets.find((t) => Number(t.id) === wanted);
@@ -584,7 +575,7 @@ export default function App() {
             : route === "ticket"
               ? (active
                   ? <TicketDetailPage ticket={tickets.find(t => t.id === active.id) || active}
-                      onBack={() => go("tickets")} onPrev={() => step(-1)} onNext={() => step(1)}
+                      onBack={() => go("tickets")}
                       tickets={tickets} setTickets={setTickets}
                       onOpenTicket={openTicket} initialCompose={composeIntent} />
                   : <RouteLoading label={`Loading ticket #${parsed.id}…`}

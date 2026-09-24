@@ -160,7 +160,10 @@ export default function useFreshdeskData({ onToast } = {}) {
 
   /* --------------------------------------------------------------- edits -- */
 
-  const updateTicket = useCallback((id, fields) => optimistic(
+  /* `quiet` drops the generic "#id updated" toast for callers that announce the
+     change themselves -- Close & Next raises its own, with the Undo on it. The
+     error toast is never dropped. */
+  const updateTicket = useCallback((id, fields, { quiet = false } = {}) => optimistic(
     [id],
     () => {
       // Keep the derived flags the sidebar filters on in step with the status
@@ -170,7 +173,7 @@ export default function useFreshdeskData({ onToast } = {}) {
       return p;
     },
     () => ticketsApi.update(id, fields),
-    { successToast: { title: `#${id} updated` }, errorTitle: `Could not update #${id}` }
+    { successToast: quiet ? null : { title: `#${id} updated` }, errorTitle: `Could not update #${id}` }
   ), [optimistic]);
 
   const bulkUpdate = useCallback((ids, fields) => optimistic(
@@ -385,9 +388,12 @@ export function useTicketList({ view, page, perPage, search, sort, sortDir, filt
   // every render and would otherwise refetch forever.
   const filterKey = JSON.stringify(filters || {});
 
-  const fetchPage = useCallback(async () => {
+  /* `silent` keeps the rows on screen while the page refetches. A bulk close
+     reloads to refill the page, and blanking it to skeletons in between made a
+     change that had already been painted look like a full refresh. */
+  const fetchPage = useCallback(async ({ silent = false } = {}) => {
     const seq = ++seqRef.current;
-    setState((s) => ({ ...s, loading: true }));
+    if (!silent) setState((s) => ({ ...s, loading: true }));
     try {
       const res = await ticketsApi.list({
         view, page, perPage, search, sort, sortDir,

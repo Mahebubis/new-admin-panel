@@ -276,7 +276,7 @@ function learn_install($conn) {
            portal will grow and an ENUM would need a migration each time. */
         topic           VARCHAR(60)       DEFAULT 'other',
         course_id       INT               DEFAULT 0,
-        status          ENUM('open','answered','closed') DEFAULT 'open',
+        status          ENUM('open','answered','closed','pending') DEFAULT 'open',
         messages        INT               DEFAULT 0,
         admin_unread    INT               DEFAULT 0,
         learner_unread  INT               DEFAULT 0,

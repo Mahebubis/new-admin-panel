@@ -13,18 +13,24 @@
 //  The form
 //    A pre-set query is picked from a list (served by support.php, so the
 //    server validates against the same list it hands out) which also titles
-//    the ticket. Describing the problem is REQUIRED; the attachment is
-//    OPTIONAL — a ticket that is nothing but a screenshot cannot be triaged.
-//    Images and PDFs only, 5 MB, and both limits are checked here as well as
-//    on the server so nobody waits for an upload that was always going to be
-//    refused.
+//    the ticket. Describing the problem AND attaching a screenshot are both
+//    REQUIRED — the screenshot is what lets support see the problem without
+//    asking for one first. Images and PDFs only, 5 MB, and both limits are
+//    checked here as well as on the server so nobody waits for an upload that
+//    was always going to be refused. A reply needs text or a file.
+//
+//  The thread
+//    Opens scrolled to the LATEST message, inside its own scroll box (not the
+//    page), and follows images/videos down as they load. Links in messages are
+//    clickable. The support team can send sheets, videos and archives, so a
+//    bubble plays video/audio inline and shows anything else as a download.
 //
 //  Replies come from an admin in the LMS panel and land in this same thread,
 //  which is why a ticket carries an unread count rather than a "read" flag:
 //  the learner needs to see that something new arrived from the list, before
 //  opening anything.
 // ===========================================================================
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { EmptyState, PageLoader } from '../components/Layout';
 import {
@@ -37,7 +43,33 @@ const OK_EXT = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'pdf'];
 
 const extOf = (name = '') => String(name).split('.').pop().toLowerCase();
 const isImage = (name = '', type = '') =>
-  String(type).startsWith('image/') || ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(extOf(name));
+  String(type).startsWith('image/') || ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'].includes(extOf(name));
+const isVideo = (name = '', type = '') =>
+  String(type).startsWith('video/') || ['mp4', 'webm', 'mov', 'mkv', 'm4v'].includes(extOf(name));
+const isAudio = (name = '', type = '') =>
+  String(type).startsWith('audio/') || ['mp3', 'wav', 'ogg', 'm4a'].includes(extOf(name));
+
+/* URLs and emails in a message become links; trailing punctuation stays text. */
+const LINK_RE = /((?:https?:\/\/|www\.)[^\s<>"']+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/g;
+function Linkified({ text }) {
+  const out = [];
+  const s = String(text || '');
+  let last = 0;
+  s.replace(LINK_RE, (m, _g, idx) => {
+    let url = m;
+    let tail = '';
+    while (/[.,!?;:)\]}'"]$/.test(url)) { tail = url.slice(-1) + tail; url = url.slice(0, -1); }
+    if (idx > last) out.push(s.slice(last, idx));
+    const mail = !/^(https?:\/\/|www\.)/i.test(url);
+    const href = mail ? `mailto:${url}` : (/^www\./i.test(url) ? `https://${url}` : url);
+    out.push(<a key={idx} className="sup-link" href={href} target="_blank" rel="noopener noreferrer">{url}</a>);
+    if (tail) out.push(tail);
+    last = idx + m.length;
+    return m;
+  });
+  if (last < s.length) out.push(s.slice(last));
+  return out;
+}
 
 function size(bytes) {
   const n = Number(bytes) || 0;
@@ -58,7 +90,8 @@ function when(d) {
     : { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
-const STATUS_LABEL = { open: 'Awaiting reply', answered: 'Replied', closed: 'Closed' };
+/* 'pending' is the support team holding a ticket while they look into it. */
+const STATUS_LABEL = { open: 'Awaiting reply', answered: 'Replied', pending: 'In progress', closed: 'Closed' };
 
 /** The one place a chosen file is judged, so compose and reply agree. */
 function checkFile(f) {
@@ -70,7 +103,7 @@ function checkFile(f) {
 }
 
 /* ── the attachment picker, shared by the form and the reply box ────────── */
-function FilePick({ file, onPick, onClear, id }) {
+function FilePick({ file, onPick, onClear, id, required = false }) {
   const ref = useRef(null);
   return (
     <div className="sup-file">
@@ -99,10 +132,10 @@ function FilePick({ file, onPick, onClear, id }) {
           </button>
         </div>
       ) : (
-        <button type="button" className="sup-file-btn" onClick={() => ref.current?.click()}>
+        <button type="button" className={`sup-file-btn${required ? ' sup-file-req' : ''}`} onClick={() => ref.current?.click()}>
           <Upload size={16} />
-          <span>Attach a screenshot or PDF</span>
-          <em>optional · max 5 MB</em>
+          <span>{required ? 'Attach a screenshot of the problem' : 'Attach a screenshot or PDF'}</span>
+          <em>{required ? 'required · image or PDF · max 5 MB' : 'optional · max 5 MB'}</em>
         </button>
       )}
     </div>
@@ -110,7 +143,7 @@ function FilePick({ file, onPick, onClear, id }) {
 }
 
 /* ── one message bubble ────────────────────────────────────────────────── */
-function Message({ m }) {
+function Message({ m, onMediaLoad }) {
   const mine = m.sender === 'learner';
   return (
     <div className={`sup-msg${mine ? ' sup-mine' : ''}`}>
@@ -119,17 +152,31 @@ function Message({ m }) {
           <strong>{mine ? 'You' : (m.author || 'Support team')}</strong>
           <span>{when(m.created_at)}</span>
         </div>
-        {m.body && <p className="sup-msg-body">{m.body}</p>}
+        {m.body && <p className="sup-msg-body"><Linkified text={m.body} /></p>}
 
         {m.file_url && (
           isImage(m.file_name, m.file_type) ? (
             <a className="sup-msg-img" href={m.file_url} target="_blank" rel="noreferrer">
-              <img src={m.file_url} alt={m.file_name || 'attachment'} />
+              <img src={m.file_url} alt={m.file_name || 'attachment'} onLoad={onMediaLoad} />
             </a>
+          ) : isVideo(m.file_name, m.file_type) || isAudio(m.file_name, m.file_type) ? (
+            <div className="sup-msg-media">
+              {isVideo(m.file_name, m.file_type)
+                ? <video src={m.file_url} controls preload="metadata" onLoadedMetadata={onMediaLoad} />
+                : <audio src={m.file_url} controls preload="metadata" />}
+              <a className="sup-msg-media-bar" href={m.file_url} target="_blank" rel="noreferrer" download>
+                <span className="sup-msg-doc-name">{m.file_name || 'Attachment'}</span>
+                {m.file_size > 0 && <span className="sup-msg-doc-size">{size(m.file_size)}</span>}
+                <Download size={15} />
+              </a>
+            </div>
           ) : (
-            <a className="sup-msg-doc" href={m.file_url} target="_blank" rel="noreferrer">
-              <Pdf size={18} />
+            /* PDFs open in a new tab; sheets, docs and archives download. */
+            <a className="sup-msg-doc" href={m.file_url} target="_blank" rel="noreferrer"
+              download={extOf(m.file_name) === 'pdf' ? undefined : (m.file_name || true)}>
+              {extOf(m.file_name) === 'pdf' ? <Pdf size={18} /> : <Attachment size={18} />}
               <span className="sup-msg-doc-name">{m.file_name || 'Attachment'}</span>
+              <span className="sup-msg-doc-ext">{extOf(m.file_name).toUpperCase()}</span>
               {m.file_size > 0 && <span className="sup-msg-doc-size">{size(m.file_size)}</span>}
               <Download size={16} />
             </a>
@@ -168,7 +215,10 @@ export default function Support() {
   const [replyErr, setReplyErr] = useState('');
   const [replying, setReplying] = useState(false);
 
-  const endRef = useRef(null);
+  /* The thread's own scroll box, and whether it should stay pinned to the
+     newest message (true until the learner scrolls up to read). */
+  const threadRef = useRef(null);
+  const stickRef = useRef(true);
 
   const say = useCallback((m) => {
     setFlash(m);
@@ -207,6 +257,7 @@ export default function Support() {
     setOpenId(id);
     setThread(null);
     setThreadBusy(true);
+    stickRef.current = true;
     setReply('');
     setReplyFile(null);
     setReplyErr('');
@@ -224,12 +275,22 @@ export default function Support() {
     }
   }, [say]);
 
-  /* A new message should be the thing you are looking at. */
-  useEffect(() => {
-    if (thread?.messages?.length) {
-      endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }
-  }, [thread?.messages?.length]);
+  /* The newest message is what you are looking at when a thread opens or
+     grows. The box scrolls — not the page — so on a phone the header and the
+     reply form stay where they are. */
+  const toBottom = useCallback(() => {
+    const el = threadRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, []);
+  useLayoutEffect(() => {
+    if (thread?.messages?.length && stickRef.current) toBottom();
+  }, [thread?.messages, toBottom]);
+  /* Images and videos grow the thread after that first scroll — follow them. */
+  const onMediaLoad = useCallback(() => { if (stickRef.current) toBottom(); }, [toBottom]);
+  const onThreadScroll = () => {
+    const el = threadRef.current;
+    if (el) stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
 
   const startCompose = () => {
     setComposing(true);
@@ -250,6 +311,7 @@ export default function Support() {
     const text = body.trim();
     if (!text) return setErr('Please describe the problem — this part is required.');
     if (text.length < 10) return setErr('Please add a little more detail — at least a sentence.');
+    if (!file) return setErr('Please attach a screenshot of the problem — it is required.');
     const bad = checkFile(file);
     if (bad) return setErr(bad);
 
@@ -283,7 +345,7 @@ export default function Support() {
     setReplyErr('');
 
     const text = reply.trim();
-    if (!text) return setReplyErr('Type a message first.');
+    if (!text && !replyFile) return setReplyErr('Type a message or attach a file first.');
     const bad = checkFile(replyFile);
     if (bad) return setReplyErr(bad);
 
@@ -297,6 +359,7 @@ export default function Support() {
       await api.supportReply(fd);
       setReply('');
       setReplyFile(null);
+      stickRef.current = true;
       const d = await api.supportTicket(openId);
       setThread(d);
       refreshList();
@@ -449,7 +512,10 @@ export default function Support() {
                 />
                 <div className="sup-count">{body.length} / 4000</div>
 
-                <FilePick id="sup-file-new" file={file} onPick={setFile} onClear={() => setFile(null)} />
+                <label className="sup-label" htmlFor="sup-file-new">
+                  Screenshot <b className="sup-req">required</b>
+                </label>
+                <FilePick id="sup-file-new" required file={file} onPick={setFile} onClear={() => setFile(null)} />
 
                 {err && <p className="sup-err" role="alert">{err}</p>}
               </div>
@@ -458,7 +524,7 @@ export default function Support() {
                 <button type="button" className="btn btn-outline" onClick={() => { resetCompose(); setComposing(false); }}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-brand" disabled={sending || !body.trim()}>
+                <button type="submit" className="btn btn-brand" disabled={sending || !body.trim() || !file}>
                   <Send size={16} /> {sending ? 'Sending…' : 'Send ticket'}
                 </button>
               </div>
@@ -496,14 +562,13 @@ export default function Support() {
                 <div className="sup-body"><p className="muted">Loading the conversation…</p></div>
               ) : (
                 <>
-                  <div className="sup-thread">
-                    {(thread?.messages || []).map((m) => <Message key={m.id} m={m} />)}
+                  <div className="sup-thread" ref={threadRef} onScroll={onThreadScroll}>
+                    {(thread?.messages || []).map((m) => <Message key={m.id} m={m} onMediaLoad={onMediaLoad} />)}
                     {thread?.messages?.length === 1 && (
                       <p className="sup-waiting">
                         We have your ticket. A reply lands right here — you do not need to email anyone.
                       </p>
                     )}
-                    <div ref={endRef} />
                   </div>
 
                   <form className="sup-reply" onSubmit={sendReply}>
@@ -522,7 +587,7 @@ export default function Support() {
                         onPick={setReplyFile}
                         onClear={() => setReplyFile(null)}
                       />
-                      <button type="submit" className="btn btn-brand sup-send" disabled={replying || !reply.trim()}>
+                      <button type="submit" className="btn btn-brand sup-send" disabled={replying || (!reply.trim() && !replyFile)}>
                         <Send size={16} /> {replying ? 'Sending…' : 'Send'}
                       </button>
                     </div>

@@ -146,6 +146,8 @@ function ToastHost({ toasts, dismiss }) {
             </button>
           )}
           <button className="tx" onClick={() => dismiss(t.id)}><X size={15} /></button>
+          {/* How long the Undo has left, for the toasts that carry one. */}
+          {t.action && t.duration && <span className="t-timer" style={{ animationDuration: t.duration + "ms" }} />}
         </div>
       ); })}
     </div>
