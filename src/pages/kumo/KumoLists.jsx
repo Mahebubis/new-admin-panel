@@ -1,33 +1,39 @@
-import { useEffect, useRef, useState } from 'react';
+/*
+ * Kumo — Lists.
+ *
+ * A one-for-one clone of the Netcore Lists screen (src/pages/netcore/NetcoreLists.jsx):
+ * same header, same toolbar buttons, same table chrome, same row menu, same footer
+ * pagination. Only the data layer differs — everything goes through kapi() against
+ * api/kumo/kumo.php instead of the Netcore lists endpoint.
+ *
+ * Because `lists_list` returns every list in one shot (no server paging), the search
+ * box and the pager are resolved client-side over the full set.
+ */
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import api from '../../api/axios';
 import toast from 'react-hot-toast';
-import TopConfirm from '../../components/TopConfirm';
-import CreateListModal from './CreateListModal';
+import { kapi } from './kumoShared';
+import KumoCreateListModal from './KumoCreateListModal';
 
-const API = '/api/lists/lists.php';
-const FORM = { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } };
 const PER_PAGE_OPTS = [10, 25, 50, 100];
 
 function fmtDt(s) {
   if (!s) return '';
-  const d = new Date(s.replace(' ', 'T'));
+  const d = new Date(String(s).replace(' ', 'T'));
   if (isNaN(d.getTime())) return s;
   const pad = n => String(n).padStart(2, '0');
   return `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]} ${pad(d.getDate())}, ${d.getFullYear()} ${pad(d.getHours() % 12 || 12)}:${pad(d.getMinutes())} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
 }
 
 function Spinner({ size = 32 }) {
-  return <span style={{ display: 'inline-block', width: size, height: size, borderRadius: '50%', border: '3px solid #c4b5fd', borderTopColor: '#4f46e5', animation: 'nc_spin 0.85s linear infinite' }} />;
+  return <span style={{ display: 'inline-block', width: size, height: size, borderRadius: '50%', border: '3px solid #c4b5fd', borderTopColor: '#4f46e5', animation: 'km_spin 0.85s linear infinite' }} />;
 }
 
-export default function NetcoreLists() {
+export default function KumoLists() {
   const nav = useNavigate();
-  const [rows, setRows]       = useState([]);
-  const [total, setTotal]     = useState(0);
+  const [all, setAll]         = useState([]);
   const [page, setPage]       = useState(1);
   const [perPage, setPerPage] = useState(10);
-  const [pages, setPages]     = useState(1);
   const [loading, setLoading] = useState(true);
 
   const [search, setSearch]               = useState('');
@@ -36,25 +42,20 @@ export default function NetcoreLists() {
   const searchInputRef = useRef(null);
 
   const [menuFor, setMenuFor] = useState(null);
-  /* Copy-to-Kumo confirmation (a top sheet, not window.confirm). */
-  const [kumoAsk, setKumoAsk] = useState(null);
-  const [kumoBusy, setKumoBusy] = useState(false);
   const menuRef = useRef(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editRow, setEditRow]       = useState(null);
 
-  const fetchPage = async (p = page, pp = perPage, s = appliedSearch) => {
+  const load = async () => {
     setLoading(true); setMenuFor(null);
     try {
-      const body = new URLSearchParams({ action: 'list', page: p, per_page: pp, search: s });
-      const res = await api.post(API, body, FORM);
-      if (res.data.success) {
-        setRows(res.data.data.lists || []);
-        setTotal(res.data.data.total || 0);
-        setPage(res.data.data.page); setPages(res.data.data.pages); setPerPage(res.data.data.per_page);
-      }
+      const d = await kapi('lists_list');
+      setAll(d.lists || []);
+    } catch (e) {
+      toast.error(e.message || 'Could not load lists');
     } finally { setLoading(false); }
   };
-  useEffect(() => { fetchPage(1, perPage, ''); }, []); // eslint-disable-line
+  useEffect(() => { load(); }, []); // eslint-disable-line
 
   useEffect(() => {
     if (!menuFor) return;
@@ -63,75 +64,46 @@ export default function NetcoreLists() {
     return () => document.removeEventListener('mousedown', onDown);
   }, [menuFor]);
 
+  /* The endpoint hands back every list, so searching and paging happen here. */
+  const filtered = useMemo(() => {
+    const q = appliedSearch.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter(r =>
+      String(r.name || '').toLowerCase().includes(q) ||
+      String(r.description || '').toLowerCase().includes(q) ||
+      String(r.id).includes(q));
+  }, [all, appliedSearch]);
+
+  const total = filtered.length;
+  const pages = Math.max(1, Math.ceil(total / perPage));
+  const safePage = Math.min(page, pages);
+  const rows = filtered.slice((safePage - 1) * perPage, safePage * perPage);
+
+  const goPage = (p, pp = perPage, s = appliedSearch) => {
+    setPerPage(pp); setAppliedSearch(s); setMenuFor(null);
+    setPage(Math.max(1, p));
+  };
+
   const doDelete = async (id) => {
     setMenuFor(null);
     if (!window.confirm('Delete this list? Contacts already imported into it will not be deleted, only the list grouping.')) return;
     const t = toast.loading('Deleting…');
     try {
-      const res = await api.post(API, new URLSearchParams({ action: 'delete', id }), FORM);
-      if (res.data.success) { toast.success('Deleted', { id: t }); fetchPage(); }
-      else toast.error(res.data.message || 'Failed', { id: t });
-    } catch { toast.error('Network error', { id: t }); }
-  };
-
-  const doDownload = async (id, name) => {
-    setMenuFor(null);
-    const t = toast.loading('Preparing download…');
-    try {
-      const res = await api.get(API, { params: { action: 'download', id }, responseType: 'blob' });
-      const cd = res.headers?.['content-disposition'] || '';
-      const m  = /filename="?([^";]+)"?/.exec(cd);
-      const fname = m ? m[1] : `${name || 'list'}.csv`;
-      const url = URL.createObjectURL(res.data);
-      const a = document.createElement('a');
-      a.href = url; a.download = fname;
-      document.body.appendChild(a); a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success('Downloaded', { id: t });
-    } catch { toast.error('Download failed', { id: t }); }
-  };
-
-  /*
-   * Copy this list into the Kumo MTA module. Read-only here: the Kumo endpoint
-   * SELECTs the members and writes them into its own kumo_* tables, so nothing
-   * on this screen changes.
-   */
-  const doCopyToKumo = async (id, name) => {
-    setMenuFor(null);
-    setKumoAsk({ id, name });
-  };
-
-  const runCopyToKumo = async () => {
-    const { id } = kumoAsk || {};
-    if (!id) return;
-    setKumoBusy(true);
-    const t = toast.loading('Copying to Kumo…');
-    try {
-      const res = await api.post('/api/kumo/kumo.php',
-        new URLSearchParams({ action: 'copy_list_from_netcore', list_id: id }), FORM);
-      if (res.data?.success) {
-        const d = res.data.data || {};
-        toast.success(`Copied ${(d.imported || 0).toLocaleString('en-IN')} contacts into Kumo`, { id: t });
-        if (d.list_id) nav(`/kumo/lists/${d.list_id}/contacts`);
-      } else toast.error(res.data?.message || 'Copy failed', { id: t });
-    } catch (e) {
-      toast.error(e?.response?.data?.message || 'Copy failed — do you have the Kumo MTA permission?', { id: t });
-    } finally {
-      setKumoBusy(false);
-      setKumoAsk(null);
-    }
+      await kapi('list_delete', { id });
+      toast.success('Deleted', { id: t });
+      load();
+    } catch (e) { toast.error(e.message || 'Failed', { id: t }); }
   };
 
   const onSearchKey = e => {
-    if (e.key === 'Enter') { setAppliedSearch(search); fetchPage(1, perPage, search); }
-    else if (e.key === 'Escape') { setSearchOpen(false); if (appliedSearch) { setSearch(''); setAppliedSearch(''); fetchPage(1, perPage, ''); } }
+    if (e.key === 'Enter') { setAppliedSearch(search); setPage(1); }
+    else if (e.key === 'Escape') { setSearchOpen(false); if (appliedSearch) { setSearch(''); setAppliedSearch(''); setPage(1); } }
   };
   const toggleSearch = () => {
     setSearchOpen(o => {
       const next = !o;
       if (next) setTimeout(() => searchInputRef.current?.focus(), 50);
-      else if (appliedSearch) { setSearch(''); setAppliedSearch(''); fetchPage(1, perPage, ''); }
+      else if (appliedSearch) { setSearch(''); setAppliedSearch(''); setPage(1); }
       return next;
     });
   };
@@ -139,15 +111,15 @@ export default function NetcoreLists() {
   return (
     <>
       <style>{`
-        @keyframes nc_spin { to { transform: rotate(360deg); } }
-        .nc-lst *{ box-sizing:border-box; font-family:'Plus Jakarta Sans',sans-serif; }
-        .nc-lst-row .nc-lst-dots { opacity: 1; background: none; border: none; cursor: pointer; padding: 4px; color: #1e293b; transition: color .15s; }
-        .nc-lst-row .nc-lst-dots:hover { color: #1e3a8a; }
-        .nc-lst-dots.menu-open { color: #1e3a8a; }
-        .nc-lst-row:hover td { background: #f5f3ff; }
+        @keyframes km_spin { to { transform: rotate(360deg); } }
+        .km-lst *{ box-sizing:border-box; font-family:'Plus Jakarta Sans',sans-serif; }
+        .km-lst-row .km-lst-dots { opacity: 1; background: none; border: none; cursor: pointer; padding: 4px; color: #1e293b; transition: color .15s; }
+        .km-lst-row .km-lst-dots:hover { color: #1e3a8a; }
+        .km-lst-dots.menu-open { color: #1e3a8a; }
+        .km-lst-row:hover td { background: #f5f3ff; }
       `}</style>
 
-      <div className="nc-lst" style={{ padding: 24, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div className="km-lst" style={{ padding: 24, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14, flexShrink: 0 }}>
           <div>
@@ -160,7 +132,7 @@ export default function NetcoreLists() {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <button title="Refresh" onClick={() => fetchPage()}
+              <button title="Refresh" onClick={load}
                 style={{ width: 36, height: 36, border: '1.5px solid #e2e8f0', background: '#fff', borderRadius: 8, cursor: 'pointer', color: '#475569', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>
               </button>
@@ -178,11 +150,11 @@ export default function NetcoreLists() {
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
                 </button>
               )}
-              <Link to="/netcore/lists/logs"
+              <Link to="/kumo/lists/logs"
                 style={{ padding: '9px 16px', border: '1.5px solid #e2e8f0', background: '#fff', color: '#1e3a8a', borderRadius: 6, fontSize: 12, fontWeight: 700, textDecoration: 'none', whiteSpace: 'nowrap' }}>
                 Contact logs
               </Link>
-              <button onClick={() => setCreateOpen(true)}
+              <button onClick={() => { setEditRow(null); setCreateOpen(true); }}
                 style={{ padding: '10px 20px', background: '#1e3a8a', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, letterSpacing: '.4px', cursor: 'pointer', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                 + Create List
               </button>
@@ -210,7 +182,7 @@ export default function NetcoreLists() {
                 {rows.length === 0 && !loading
                   ? <tr><td colSpan={4} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>{appliedSearch ? `No lists matching "${appliedSearch}".` : 'No lists yet. Click "Create List" to import your first contacts.'}</td></tr>
                   : rows.map(r => (
-                      <tr key={r.id} className="nc-lst-row">
+                      <tr key={r.id} className="km-lst-row">
                         <td style={{ padding: '14px 18px', borderBottom: '1px solid #f1f5f9' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                             <span style={{ width: 30, height: 30, borderRadius: 8, background: '#dcfce7', color: '#15803d', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -218,10 +190,10 @@ export default function NetcoreLists() {
                             </span>
                             <div style={{ minWidth: 0 }}>
                               <span style={{ color: '#0f172a', fontWeight: 600, fontSize: 13 }}>{r.name}</span>
-                              <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 2 }}>ID - {r.id}</div>
+                              <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 2 }}>ID - {r.id}{r.description ? ` · ${r.description}` : ''}</div>
                             </div>
                             <div style={{ position: 'relative', marginLeft: 'auto' }}>
-                              <button className={`nc-lst-dots${menuFor === r.id ? ' menu-open' : ''}`}
+                              <button className={`km-lst-dots${menuFor === r.id ? ' menu-open' : ''}`}
                                 onClick={e => { e.stopPropagation(); setMenuFor(menuFor === r.id ? null : r.id); }}>
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                                   <circle cx="12" cy="5"  r="2.2" />
@@ -233,12 +205,9 @@ export default function NetcoreLists() {
                                 <div ref={menuRef}
                                   style={{ position: 'absolute', top: 'calc(100% + 4px)', right: 0, background: '#fff', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,.12)', border: '1px solid #e2e8f0', zIndex: 50, width: 200, padding: 6 }}>
                                   {[
-                                    { label: 'View contacts',   icon: '👁', action: () => { setMenuFor(null); nav(`/netcore/lists/${r.id}/contacts`); } },
-                                    { label: 'Import contacts', icon: '⬆', action: () => { setMenuFor(null); nav(`/netcore/lists/${r.id}/import`); } },
-                                    { label: 'Download',        icon: '⤓', action: () => doDownload(r.id, r.name) },
-                                    /* Copies the list and its contacts into the Kumo MTA module.
-                                       Nothing here is modified — it only reads this list. */
-                                    { label: 'Copy to Kumo',    icon: '🚀', action: () => doCopyToKumo(r.id, r.name) },
+                                    { label: 'View contacts',   icon: '👁', action: () => { setMenuFor(null); nav(`/kumo/lists/${r.id}/contacts`); } },
+                                    { label: 'Import contacts', icon: '⬆', action: () => { setMenuFor(null); nav(`/kumo/lists/${r.id}/import`); } },
+                                    { label: 'Rename',          icon: '✎', action: () => { setMenuFor(null); setEditRow(r); setCreateOpen(true); } },
                                     { label: 'Delete',          icon: '🗑', action: () => doDelete(r.id), danger: true },
                                   ].map(opt => (
                                     <button key={opt.label} onClick={opt.action}
@@ -257,7 +226,7 @@ export default function NetcoreLists() {
                         <td style={{ padding: '14px 18px', borderBottom: '1px solid #f1f5f9', color: '#475569' }}>{fmtDt(r.created_at)}</td>
                         <td style={{ padding: '14px 18px', borderBottom: '1px solid #f1f5f9', color: '#475569' }}>{fmtDt(r.updated_at)}</td>
                         <td style={{ padding: '14px 18px', borderBottom: '1px solid #f1f5f9' }}>
-                          <Link to={`/netcore/lists/${r.id}/contacts`} style={{ color: '#1e3a8a', fontWeight: 600, textDecoration: 'none' }}>
+                          <Link to={`/kumo/lists/${r.id}/contacts`} style={{ color: '#1e3a8a', fontWeight: 600, textDecoration: 'none' }}>
                             {Number(r.contact_count || 0).toLocaleString()}
                           </Link>
                         </td>
@@ -273,39 +242,32 @@ export default function NetcoreLists() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span>Per page:</span>
             <select value={perPage}
-              onChange={e => { const n = parseInt(e.target.value, 10); fetchPage(1, n, appliedSearch); }}
+              onChange={e => goPage(1, parseInt(e.target.value, 10), appliedSearch)}
               style={{ padding: '6px 10px', border: '1.5px solid #c4b5fd', borderRadius: 6, fontSize: 12, fontFamily: 'inherit', outline: 'none', background: '#fff', cursor: 'pointer' }}>
               {PER_PAGE_OPTS.map(n => <option key={n} value={n}>{n}</option>)}
             </select>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span>Page {page} of {pages || 1}</span>
-            <button disabled={page <= 1 || loading} onClick={() => fetchPage(page - 1, perPage, appliedSearch)}
-              style={{ padding: '6px 14px', border: '1.5px solid #c4b5fd', borderRadius: 6, background: '#fff', cursor: page <= 1 ? 'not-allowed' : 'pointer', opacity: page <= 1 ? .4 : 1, fontSize: 12, fontFamily: 'inherit' }}>Prev</button>
-            <button disabled={page >= pages || loading} onClick={() => fetchPage(page + 1, perPage, appliedSearch)}
-              style={{ padding: '6px 14px', border: '1.5px solid #c4b5fd', borderRadius: 6, background: '#fff', cursor: page >= pages ? 'not-allowed' : 'pointer', opacity: page >= pages ? .4 : 1, fontSize: 12, fontFamily: 'inherit' }}>Next</button>
+            <span>Page {safePage} of {pages || 1}</span>
+            <button disabled={safePage <= 1 || loading} onClick={() => goPage(safePage - 1)}
+              style={{ padding: '6px 14px', border: '1.5px solid #c4b5fd', borderRadius: 6, background: '#fff', cursor: safePage <= 1 ? 'not-allowed' : 'pointer', opacity: safePage <= 1 ? .4 : 1, fontSize: 12, fontFamily: 'inherit' }}>Prev</button>
+            <button disabled={safePage >= pages || loading} onClick={() => goPage(safePage + 1)}
+              style={{ padding: '6px 14px', border: '1.5px solid #c4b5fd', borderRadius: 6, background: '#fff', cursor: safePage >= pages ? 'not-allowed' : 'pointer', opacity: safePage >= pages ? .4 : 1, fontSize: 12, fontFamily: 'inherit' }}>Next</button>
           </div>
         </div>
       </div>
 
       {createOpen && (
-        <CreateListModal
-          onClose={() => setCreateOpen(false)}
-          onCreated={(id) => { setCreateOpen(false); nav(`/netcore/lists/${id}/import`); }}
+        <KumoCreateListModal
+          list={editRow}
+          onClose={() => { setCreateOpen(false); setEditRow(null); }}
+          onSaved={(id, isNew) => {
+            setCreateOpen(false); setEditRow(null);
+            if (isNew) nav(`/kumo/lists/${id}/import`);
+            else load();
+          }}
         />
       )}
-
-      <TopConfirm
-        open={!!kumoAsk}
-        tone="brand"
-        title={`Copy “${kumoAsk?.name || 'this list'}” into Kumo MTA?`}
-        message="A new list is created in the Kumo MTA module with these contacts, so you can send to them from your own IPs."
-        detail="This list is not changed. Anyone already suppressed in Kumo is skipped during the copy."
-        confirmLabel="Copy to Kumo"
-        busy={kumoBusy}
-        onConfirm={runCopyToKumo}
-        onCancel={() => !kumoBusy && setKumoAsk(null)}
-      />
     </>
   );
 }

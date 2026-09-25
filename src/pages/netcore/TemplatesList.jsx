@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
+import TopConfirm from '../../components/TopConfirm';
 
 const API = '/api/campaigns/templates.php';
 const FORM = { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } };
@@ -38,6 +39,9 @@ function TemplateThumbnail({ html, height = 260 }) {
 
 export default function TemplatesList() {
   const nav = useNavigate();
+  /* Copy-to-Kumo confirmation — a top sheet rather than window.confirm. */
+  const [kumoAsk, setKumoAsk] = useState(null);
+  const [kumoBusy, setKumoBusy] = useState(false);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -56,6 +60,34 @@ export default function TemplatesList() {
     } finally { setLoading(false); }
   };
   useEffect(() => { fetchPage(1, ''); }, []); // eslint-disable-line
+
+  /*
+   * Copy this template into Kumo MTA. Read-only here: the Kumo endpoint reads
+   * this row and inserts a copy into kumo_templates, so the two can then be
+   * edited independently.
+   */
+  const copyToKumo = (id, name) => setKumoAsk({ id, name });
+
+  const runCopyToKumo = async () => {
+    const id = kumoAsk?.id;
+    if (!id) return;
+    setKumoBusy(true);
+    const t = toast.loading('Copying to Kumo…');
+    try {
+      const res = await api.post('/api/kumo/kumo.php',
+        new URLSearchParams({ action: 'copy_template_from_netcore', template_id: id }), FORM);
+      if (res.data?.success) {
+        const d = res.data.data || {};
+        toast.success('Copied into Kumo', { id: t });
+        if (d.template_id) nav(`/kumo/templates/${d.template_id}`);
+      } else toast.error(res.data?.message || 'Copy failed', { id: t });
+    } catch (e) {
+      toast.error(e?.response?.data?.message || 'Copy failed — do you have the Kumo MTA permission?', { id: t });
+    } finally {
+      setKumoBusy(false);
+      setKumoAsk(null);
+    }
+  };
 
   const archive = async (id) => {
     if (!window.confirm('Archive this template?')) return;
@@ -105,6 +137,9 @@ export default function TemplatesList() {
                     <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>{t.name}</div>
                     <div style={{ fontSize: 10.5, color: '#94a3b8', marginBottom: 12 }}>ID: {t.id} · {fmtDt(t.updated_at)}</div>
                     <div style={{ display: 'flex', gap: 8 }}>
+                      {/* Copies the HTML into the Kumo MTA module. This template is untouched. */}
+                      <button onClick={() => copyToKumo(t.id, t.name)} title="Copy this template into Kumo MTA"
+                        style={{ flex: 1, padding: '8px 0', border: '1.5px solid #ddd6fe', background: '#f5f3ff', borderRadius: 6, fontSize: 11, fontWeight: 700, color: '#5b21b6', cursor: 'pointer' }}>→ Kumo</button>
                       <button onClick={() => archive(t.id)} style={{ flex: 1, padding: '8px 0', border: '1.5px solid #e2e8f0', background: '#fff', borderRadius: 6, fontSize: 11, fontWeight: 700, color: '#64748b', cursor: 'pointer' }}>Archive</button>
                       <button onClick={() => nav(`/netcore/templates/${t.id}`)} style={{ flex: 1, padding: '8px 0', border: '1.5px solid #e2e8f0', background: '#fff', borderRadius: 6, fontSize: 11, fontWeight: 700, color: '#1e3a8a', cursor: 'pointer' }}>Edit</button>
                       <button onClick={() => nav(`/netcore/campaigns/new?template_id=${t.id}`)} style={{ flex: 1, padding: '8px 0', border: 'none', background: '#1e3a8a', borderRadius: 6, fontSize: 11, fontWeight: 700, color: '#fff', cursor: 'pointer' }}>Use</button>
@@ -124,6 +159,18 @@ export default function TemplatesList() {
           </div>
         )}
       </div>
+
+      <TopConfirm
+        open={!!kumoAsk}
+        tone="brand"
+        title={`Copy “${kumoAsk?.name || 'this template'}” into Kumo MTA?`}
+        message="The subject and HTML are copied into a new Kumo template, which then opens in the Kumo editor."
+        detail="This template is not changed. The two copies are independent from then on."
+        confirmLabel="Copy to Kumo"
+        busy={kumoBusy}
+        onConfirm={runCopyToKumo}
+        onCancel={() => !kumoBusy && setKumoAsk(null)}
+      />
     </>
   );
 }

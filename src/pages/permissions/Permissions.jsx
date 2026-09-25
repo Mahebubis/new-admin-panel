@@ -72,6 +72,11 @@ const EXTRA_SECTION_PERMISSIONS = {
   'Netcore': {
     netcore_analytics: 'Messaging Analytics (email & WhatsApp sends, campaigns & journeys)',
   },
+  /* Our own KumoMTA sending platform — one key gates the whole module
+     (api/kumo/kumo.php checks the same string). */
+  'Kumo MTA': {
+    kumo_mta: 'Kumo MTA (own sending IPs, campaigns, audience, warmup & deliverability)',
+  },
   'Resume/Profile Metrics': {
     profile_metrics: 'Resume/Profile Metrics (profile, resume & hiring-portal activity)',
   },
@@ -89,6 +94,7 @@ const SECTION_ICONS = {
   'Refund Management': '↩️',
   'Domain Management': '🌐',
   'Netcore': '🔌',
+  'Kumo MTA': '🚀',
   'Homepage': '🏠',
   'Internships': '💼',
   'Blogs': '✍️',

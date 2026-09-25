@@ -234,6 +234,34 @@ import WaTemplatesList from './pages/netcore/whatsapp/WaTemplatesList';
 import WaTemplateEditor from './pages/netcore/whatsapp/WaTemplateEditor';
 import WaSettings from './pages/netcore/whatsapp/WaSettings';
 import WaInbox from './pages/netcore/whatsapp/WaInbox';
+/* KumoMTA — our own sending platform. Deliberately a separate module from
+   Netcore: its own layout, its own API (api/kumo/kumo.php) and its own
+   kumo_* tables. Nothing here shares state with the Netcore screens. */
+import KumoLayout from './pages/kumo/KumoLayout';
+import KumoDashboard from './pages/kumo/KumoDashboard';
+import KumoIps from './pages/kumo/KumoIps';
+import KumoCampaigns from './pages/kumo/KumoCampaigns';
+import KumoCampaignWizard from './pages/kumo/KumoCampaignWizard';
+import KumoCampaignReport from './pages/kumo/KumoCampaignReport';
+import KumoAudience from './pages/kumo/KumoAudience';
+import KumoBlocklist from './pages/kumo/KumoBlocklist';
+import KumoTemplates from './pages/kumo/KumoTemplates';
+import KumoLogs from './pages/kumo/KumoLogs';
+import KumoSettings from './pages/kumo/KumoSettings';
+/* Audience screens cloned from the Netcore ones so the flow is identical:
+   contacts → timeline, lists → import wizard, segments → full-screen builder. */
+import KumoContacts from './pages/kumo/KumoContacts';
+import KumoUserTimeline from './pages/kumo/KumoUserTimeline';
+import KumoLists from './pages/kumo/KumoLists';
+import KumoImportWizard from './pages/kumo/KumoImportWizard';
+import KumoListContacts from './pages/kumo/KumoListContacts';
+import KumoSegments from './pages/kumo/KumoSegments';
+import KumoSegmentCreate from './pages/kumo/KumoSegmentCreate';
+import KumoSegmentUsers from './pages/kumo/KumoSegmentUsers';
+import KumoAttributes from './pages/kumo/KumoAttributes';
+import KumoContactLogs from './pages/kumo/KumoContactLogs';
+import KumoAttributeLogs from './pages/kumo/KumoAttributeLogs';
+import KumoTemplateEditor from './pages/kumo/KumoTemplateEditor';
 import InternshipList from './pages/internships/InternshipList';
 import PurchasedInternships from './pages/internships/PurchasedInternships';
 import PurchasedStarterKit from './pages/internships/PurchasedStarterKit';
@@ -431,6 +459,44 @@ export default function App() {
           <Route path="whatsapp/inbox" element={<WaInbox />} />
         </Route>
         <Route path="netcore/filter" element={G('netcore_filter', <NetcoreFilter />)} />
+
+        {/* KumoMTA — own-IP sending platform. One gate (kumo_mta) on the parent
+            covers every child. 'campaigns/new' is declared before 'campaigns/:id'
+            for readability; React Router ranks the static segment higher anyway. */}
+        <Route path="kumo" element={G('kumo_mta', <KumoLayout />)}>
+          <Route index element={<KumoDashboard />} />
+          <Route path="ips" element={<KumoIps />} />
+          <Route path="campaigns" element={<KumoCampaigns />} />
+          <Route path="campaigns/:id" element={<KumoCampaignReport />} />
+          {/* Audience — same shape as the Netcore screens it was cloned from. */}
+          <Route path="contacts" element={<KumoContacts />} />
+          <Route path="contacts/:email" element={<KumoUserTimeline />} />
+          <Route path="lists" element={<KumoLists />} />
+          {/* Static path, so it outranks lists/:id/contacts. */}
+          <Route path="lists/logs" element={<KumoContactLogs />} />
+          <Route path="lists/:id/contacts" element={<KumoListContacts />} />
+          <Route path="segments" element={<KumoSegments />} />
+          <Route path="segments/:id/users" element={<KumoSegmentUsers />} />
+          {/* The old tabbed Audience page stays reachable (nothing links to it) so
+              segments built there can still be opened and edited. */}
+          <Route path="audience" element={<KumoAudience />} />
+          <Route path="attributes" element={<KumoAttributes />} />
+          <Route path="attributes/logs" element={<KumoAttributeLogs />} />
+          <Route path="templates" element={<KumoTemplates />} />
+          <Route path="blocklist" element={<KumoBlocklist />} />
+          <Route path="logs" element={<KumoLogs />} />
+          <Route path="settings" element={<KumoSettings />} />
+        </Route>
+        {/* Full-screen Kumo builders — outside the module chrome, exactly like the
+            Netcore wizard/segment-builder routes above. */}
+        <Route path="kumo/campaigns/new"        element={G('kumo_mta', <KumoCampaignWizard />)} />
+        <Route path="kumo/campaigns/:id/edit"   element={G('kumo_mta', <KumoCampaignWizard />)} />
+        <Route path="kumo/segments/new"         element={G('kumo_mta', <KumoSegmentCreate />)} />
+        <Route path="kumo/segments/:id/edit"    element={G('kumo_mta', <KumoSegmentCreate />)} />
+        <Route path="kumo/lists/:id/import"     element={G('kumo_mta', <KumoImportWizard />)} />
+        {/* Full-screen template editor, like /netcore/templates/:id. */}
+        <Route path="kumo/templates/new"        element={G('kumo_mta', <KumoTemplateEditor />)} />
+        <Route path="kumo/templates/:id"        element={G('kumo_mta', <KumoTemplateEditor />)} />
 
         {/* Homepage */}
         <Route path="/homepage" element={G('homepage', <HomePage />)} />

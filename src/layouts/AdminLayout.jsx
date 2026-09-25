@@ -1082,6 +1082,15 @@ const sidebarMenu = [
     ]
   },
   {
+    /* Our own sending platform (KumoMTA on the OVH box). Separate from Netcore
+       on purpose — separate API, separate kumo_* tables, separate permission. */
+    /* One entry only — the module carries its own top rail, so every screen is
+       reached from inside it rather than from this sidebar. */
+    key: 'kumo', group: 'Kumo MTA', icon: 'fas fa-paper-plane', items: [
+      { text: 'Kumo MTA', link: '/kumo', icon: 'fas fa-paper-plane', perm: 'kumo_mta' },
+    ]
+  },
+  {
     key: 'homepage', group: 'Homepage', icon: 'fas fa-house', items: [
       { text: 'Homepage', link: '/homepage', icon: 'fas fa-toolbox', perm: 'homepage' },
     ]
