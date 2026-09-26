@@ -104,6 +104,24 @@
 .syl-att:active { transform: scale(0.96); }
 .syl-att:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 
+/* ── the Mark complete badge beside the attachments chip ──────────────── */
+.syl-done {
+  font-style: normal; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: 6px; padding: 2px 8px;
+  border-radius: var(--r-pill);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.01em;
+  color: var(--ok); background: var(--ok-soft);
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
+  cursor: pointer;
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease), transform var(--fast) var(--ease);
+}
+.syl-done:hover { background: var(--ok); color: #fff; }
+.syl-done:active { transform: scale(0.95); }
+.syl-done:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.syl-done.on { background: var(--ok); color: #fff; border-color: var(--ok); }
+.syl-done[aria-disabled] { opacity: 0.6; cursor: progress; }
+
 /* ── "you were here" ─────────────────────────────────────────────────────
    A lesson already played reads dark blue: the title tints, the meta line
    says how far in, and a line runs along the foot of the row to that point.

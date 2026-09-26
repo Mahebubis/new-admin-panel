@@ -15,7 +15,7 @@
 // ===========================================================================
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Attachment, CheckCircle, ChevronDown, ChevronUp, History, LessonIcon, Lock, Search } from './icons';
+import { Attachment, Check, CheckCircle, ChevronDown, ChevronUp, History, LessonIcon, Lock, Search } from './icons';
 import AttachmentDrawer from './AttachmentDrawer';
 import './syllabus.css';
 
@@ -35,7 +35,7 @@ const typeLabel = (t) => ({
   video: 'Video', article: 'Article', pdf: 'PDF', quiz: 'Quiz', form: 'Assignment', live: 'Live',
 }[t] || 'Lesson');
 
-export default function Syllabus({ course, sections, progress, activeId, nextId, onPick }) {
+export default function Syllabus({ course, sections, progress, activeId, nextId, onPick, onComplete, completing }) {
   const [open, setOpen] = useState(() => new Set());
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
@@ -270,6 +270,32 @@ export default function Syllabus({ course, sections, progress, activeId, nextId,
                                   : ' Attachment'}
                               </em></>
                             )}
+                            {/* Right beside the files: a lesson that IS its
+                                attachments (PDFs, templates, notes) is ticked
+                                off from the rail, without opening it just to
+                                find a button. Its own control inside the row,
+                                like the chip, so the click stops here. */}
+                            {onComplete && !soon && l.type !== 'quiz'
+                              && (l.attachments?.length > 0 || ['pdf', 'article', 'form'].includes(l.type)) && (
+                              <em
+                                className={`syl-done${done ? ' on' : ''}`}
+                                role="button"
+                                tabIndex={0}
+                                aria-pressed={done}
+                                aria-disabled={completing || undefined}
+                                title={done ? 'Completed — click to mark as not complete' : 'Mark this lesson as complete'}
+                                onClick={(e) => { e.stopPropagation(); if (!completing) onComplete(l.id, !done); }}
+                                onKeyDown={(e) => {
+                                  if (e.key !== 'Enter' && e.key !== ' ') return;
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  if (!completing) onComplete(l.id, !done);
+                                }}
+                              >
+                                {done ? <CheckCircle size={12} /> : <Check size={12} />}
+                                {done ? 'Completed' : 'Mark complete'}
+                              </em>
+                            )}
                           </span>
                         </span>
 
@@ -294,7 +320,12 @@ export default function Syllabus({ course, sections, progress, activeId, nextId,
         })}
       </div>
 
-      <AttachmentDrawer lesson={attFor} onClose={() => setAttId(0)} />
+      <AttachmentDrawer
+        lesson={attFor}
+        onClose={() => setAttId(0)}
+        onToggleDone={onComplete && attFor ? () => onComplete(attFor.id, attFor.status !== 'completed') : undefined}
+        saving={completing}
+      />
     </aside>
   );
 }

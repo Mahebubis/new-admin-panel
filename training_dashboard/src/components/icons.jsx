@@ -89,18 +89,20 @@ export function LessonIcon({ type, size = 17, ...rest }) {
    skip icons is real text rather than a path: it stays crisp at every size,
    and it is the number the button actually seeks by. */
 export const Pause    = (p) => <Icon {...p}><path d="M9 4.5v15M15 4.5v15" strokeWidth="2.4" /></Icon>;
-export const Back5    = (p) => (
+/* The skip buttons. The number is real text rather than a path, so it stays
+   crisp at every size and always matches what the button actually seeks by. */
+export const SkipBack = ({ n = 10, ...p }) => (
   <Icon {...p}>
     <path d="M3.6 12a8.4 8.4 0 1 0 2.5-6" />
     <path d="M3 4v5h5" />
-    <text x="12" y="15.6" textAnchor="middle" fontSize="9.5" fontWeight="700" fill="currentColor" stroke="none">5</text>
+    <text x="12.2" y="15.4" textAnchor="middle" fontSize={n >= 10 ? 7.6 : 9.5} fontWeight="700" fill="currentColor" stroke="none">{n}</text>
   </Icon>
 );
-export const Fwd5     = (p) => (
+export const SkipFwd = ({ n = 10, ...p }) => (
   <Icon {...p}>
     <path d="M20.4 12a8.4 8.4 0 1 1-2.5-6" />
     <path d="M21 4v5h-5" />
-    <text x="12" y="15.6" textAnchor="middle" fontSize="9.5" fontWeight="700" fill="currentColor" stroke="none">5</text>
+    <text x="11.8" y="15.4" textAnchor="middle" fontSize={n >= 10 ? 7.6 : 9.5} fontWeight="700" fill="currentColor" stroke="none">{n}</text>
   </Icon>
 );
 export const Volume   = (p) => <Icon {...p}><path d="M4 9.5h3.2L12 5.5v13L7.2 14.5H4Z" /><path d="M15.8 9.4a3.6 3.6 0 0 1 0 5.2M18.4 6.8a7.3 7.3 0 0 1 0 10.4" /></Icon>;
@@ -119,3 +121,11 @@ export const Send         = (p) => <Icon {...p}><path d="M21 3 10.5 13.5" /><pat
 export const Ticket       = (p) => <Icon {...p}><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h13A1.5 1.5 0 0 1 20 8.5v1.8a2 2 0 0 0 0 3.4v1.8A1.5 1.5 0 0 1 18.5 17h-13A1.5 1.5 0 0 1 4 15.5v-1.8a2 2 0 0 0 0-3.4Z" /><path d="M13 7v10" /></Icon>;
 export const Trash        = (p) => <Icon {...p}><path d="M4 7h16M9 7V5.2A1.2 1.2 0 0 1 10.2 4h3.6A1.2 1.2 0 0 1 15 5.2V7" /><path d="M6.5 7 7.4 19a1.8 1.8 0 0 0 1.8 1.7h5.6a1.8 1.8 0 0 0 1.8-1.7L17.5 7" /></Icon>;
 export const Support      = (p) => <Icon {...p}><path d="M20.5 12.5a8.5 8.5 0 1 0-3.2 6.6L21 20l-1-3.4a8.4 8.4 0 0 0 .5-4.1Z" /><path d="M9.8 9.6a2.3 2.3 0 1 1 3.2 2.1c-.6.3-1 .9-1 1.6" /><circle cx="12" cy="16.4" r=".85" fill="currentColor" stroke="none" /></Icon>;
+
+/* ── the playback troubleshooter ─────────────────────────────────────────── */
+export const Wrench  = (p) => <Icon {...p}><path d="M14.7 6.3a4 4 0 0 0 5 5L21 12.6a6 6 0 0 1-7.9 2.3l-6.4 6.4a2.1 2.1 0 0 1-3-3l6.4-6.4A6 6 0 0 1 12.4 4l1.3 1.3a4 4 0 0 0 1 1Z" /></Icon>;
+export const Refresh = (p) => <Icon {...p}><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8" /><path d="M4 3v5h5" /><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16" /><path d="M20 21v-5h-5" /></Icon>;
+export const Copy    = (p) => <Icon {...p}><rect x="8.5" y="8.5" width="12" height="12" rx="2" /><path d="M15.5 8.5V5.2a1.7 1.7 0 0 0-1.7-1.7H5.2a1.7 1.7 0 0 0-1.7 1.7v8.6a1.7 1.7 0 0 0 1.7 1.7h3.3" /></Icon>;
+export const Info    = (p) => <Icon {...p}><circle cx="12" cy="12" r="9" /><path d="M12 11v5.5" /><circle cx="12" cy="7.8" r=".9" fill="currentColor" stroke="none" /></Icon>;
+export const Warning = (p) => <Icon {...p}><path d="M10.3 4.2 2.6 17.6A2 2 0 0 0 4.3 20.6h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0Z" /><path d="M12 9.5v4.5" /><circle cx="12" cy="17.2" r=".9" fill="currentColor" stroke="none" /></Icon>;
+export const Monitor = (p) => <Icon {...p}><rect x="3" y="4" width="18" height="12.5" rx="2" /><path d="M8.5 20.5h7M12 16.5v4" /></Icon>;

@@ -5,7 +5,7 @@
    The bar is ours rather than the browser's for one reason: the browser's own
    bar carried a fullscreen button of its own, right under the stage's, and two
    fullscreen buttons in one corner is not a control, it is a puzzle. Owning
-   the bar also buys the ±5s buttons and the landscape flip on phones.
+   the bar also buys the ±10s buttons and the landscape flip on phones.
    =========================================================================== */
 
 .vp {
@@ -62,26 +62,10 @@
   color: #fff;
   background: rgba(15, 21, 34, 0.62);
   border: 1px solid rgba(255, 255, 255, 0.24);
-  backdrop-filter: blur(3px);
   transition: transform var(--fast) var(--ease), background var(--fast) var(--ease);
 }
 .vp-big:hover { background: var(--brand); border-color: var(--brand); transform: translate(-50%, -50%) scale(1.06); }
 .vp-big:active { transform: translate(-50%, -50%) scale(0.96); }
-
-/* ── the "+5s" flash the skip buttons leave behind ────────────────────── */
-@keyframes vpNudge {
-  from { opacity: 0; transform: translate(-50%, -50%) scale(0.86); }
-  25%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-  to   { opacity: 0; transform: translate(-50%, -50%) scale(1.06); }
-}
-.vp-nudge {
-  position: absolute; left: 50%; top: 50%; z-index: 6;
-  padding: 10px 18px; border-radius: var(--r-pill);
-  background: rgba(9, 13, 22, 0.72);
-  color: #fff; font-size: 15px; font-weight: 600; letter-spacing: 0.02em;
-  pointer-events: none;
-  animation: vpNudge 600ms var(--ease) forwards;
-}
 
 /* ── "Resumed from 6:02" ──────────────────────────────────────────────── */
 @keyframes vpResumed {
@@ -209,12 +193,11 @@
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 14px; text-align: center; padding: 24px;
   color: rgba(255, 255, 255, 0.85); font-size: 13.5px;
-  background: rgba(9, 13, 22, 0.55);
-  backdrop-filter: blur(2px);
+  background: rgba(9, 13, 22, 0.62);
 }
-.vp-overlay-solid { background: var(--player-bg); backdrop-filter: none; }
+.vp-overlay-solid { background: var(--player-bg); }
 /* Buffering: the frame is already on screen, so nothing is drawn over it. */
-.vp-overlay-bare { background: transparent; backdrop-filter: none; pointer-events: none; }
+.vp-overlay-bare { background: transparent; pointer-events: none; }
 
 .vp-error-title { margin: 0; font-size: 16px; font-weight: 600; color: #fff; }
 .vp-error-sub   { margin: 0; max-width: 340px; color: rgba(255, 255, 255, 0.6); }
@@ -238,66 +221,6 @@
   .vp-vol-input, .vp-vol:hover .vp-vol-input { display: none; }
 }
 
-/* ── our skip controls over an embedded player ────────────────────────────
-   Bunny, Vimeo and YouTube each draw their own control bar along the bottom
-   of the iframe, so this floats ABOVE it: overlapping it would put two rows
-   of buttons on the same pixels and make both unusable.
-
-   72px clears every one of those bars at desktop sizes. It is a small pill
-   rather than a full-width bar because it adds exactly two controls the
-   embeds do not offer — a five-second step in each direction — and must not
-   look like it has taken the player over. */
-.vp-embed-ctl {
-  position: absolute; left: 50%; bottom: 72px; z-index: 6;
-  transform: translateX(-50%);
-  display: flex; align-items: center; gap: 4px;
-  padding: 5px 6px; border-radius: var(--r-pill);
-  background: rgba(9, 13, 22, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  backdrop-filter: blur(4px);
-  /* Visible by default, which is the right answer on a touch screen: there is
-     no hover there, and a strip that waited for one would simply never
-     appear. A mouse gets the rule below instead. */
-  opacity: 0.9;
-  transition: opacity var(--base) var(--ease);
-}
-
-/* With a real pointer the strip stays out of the picture and comes back when
-   the learner reaches for it — the embed's own bar is enough on its own, and
-   ours sitting over the lecture the whole time is furniture. */
-@media (hover: hover) and (pointer: fine) {
-  .vp-embed-ctl { opacity: 0; pointer-events: none; }
-  .vp:hover .vp-embed-ctl,
-  .vp-embed-ctl:focus-within { opacity: 1; pointer-events: auto; }
-}
-
-.vp-embed-btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 34px; height: 34px; border-radius: 50%;
-  color: rgba(255, 255, 255, 0.92);
-  transition: background var(--fast) var(--ease), transform var(--fast) var(--ease);
-}
-.vp-embed-btn:hover { background: rgba(255, 255, 255, 0.16); }
-.vp-embed-btn:active { transform: scale(0.92); }
-
-/* Play/pause carries the strip: it is the control a learner reaches for
-   first, and the one the embed's own bar can have covered. */
-.vp-embed-play { background: rgba(255, 255, 255, 0.14); }
-.vp-embed-play:hover { background: var(--brand); }
-
-.vp-embed-time {
-  padding: 0 6px; font-size: 11.5px; font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.82); white-space: nowrap;
-}
-.vp-embed-time em { font-style: normal; color: rgba(255, 255, 255, 0.45); }
-
-/* A phone's embed bar is shorter, and so is the room above it. */
-@media (max-width: 620px) {
-  .vp-embed-ctl { bottom: 56px; opacity: 0.9; gap: 2px; }
-  .vp-embed-btn { width: 30px; height: 30px; }
-  .vp-embed-time { font-size: 11px; padding: 0 4px; }
-}
-
 /* Autoplay was refused (a fresh page load with no prior user gesture). Saying
    so is better than a video that silently declines to start. */
 .vp-blocked {
@@ -310,4 +233,261 @@
 }
 @media (max-width: 620px) {
   .vp-blocked { font-size: 11px; top: calc(50% + 52px); }
+}
+
+/* ===========================================================================
+   The shared feedback layer — every kind of player, native or embedded.
+   All of it is pointer-events: none. It is something to SEE, never something
+   in the way of a click on the video underneath.
+   =========================================================================== */
+
+/* ── the burst: play/pause, big, in the middle, gone in 0.7s ──────────────
+   A filled disc that pops in and swells out with a ring rippling past it —
+   the same beat YouTube and Netflix give a tap, so the learner knows the
+   press landed even when the embed's own button is somewhere else. */
+.vp-burst {
+  position: absolute; left: 50%; top: 50%; z-index: 7;
+  width: 104px; height: 104px; margin: -52px 0 0 -52px;
+  pointer-events: none;
+}
+.vp-burst-core {
+  position: absolute; inset: 0; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+  background: radial-gradient(circle at 50% 38%, rgba(40, 46, 62, 0.82), rgba(8, 11, 18, 0.78));
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  animation: vpBurst 700ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+.vp-burst-play .vp-burst-core svg { margin-left: 6px; }       /* optical centre */
+.vp-burst-ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 3px solid var(--brand);
+  animation: vpBurstRing 700ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+@keyframes vpBurst {
+  0%   { opacity: 0; transform: scale(0.55); }
+  22%  { opacity: 1; transform: scale(1.04); }
+  38%  { transform: scale(0.97); }
+  70%  { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.22); }
+}
+@keyframes vpBurstRing {
+  0%   { opacity: 0; transform: scale(0.7); }
+  25%  { opacity: 0.95; }
+  100% { opacity: 0; transform: scale(1.75); }
+}
+
+/* ── the skip flash: "+10 seconds" on the side that was skipped ───────────
+   A soft half-moon washes in from that edge, three chevrons run in the
+   direction of travel, and the number pops. Repeated presses accumulate
+   (+10 → +20 → +30) and restart the animation. */
+.vp-skipfx {
+  position: absolute; top: 0; bottom: 0; z-index: 7;
+  width: 42%;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none; overflow: hidden;
+}
+.vp-skipfx.is-back { left: 0; }
+.vp-skipfx.is-fwd  { right: 0; }
+.vp-skipfx-wave {
+  position: absolute; top: -20%; bottom: -20%; width: 140%;
+  /* Dark, not light: lectures are often a white slide or document, and a
+     white number on a white page cannot be read. */
+  background: radial-gradient(closest-side, rgba(8, 11, 18, 0.62), rgba(8, 11, 18, 0.38) 72%, transparent);
+  animation: vpWave 800ms ease-out forwards;
+}
+.vp-skipfx.is-back .vp-skipfx-wave { right: 25%; border-radius: 0 50% 50% 0; }
+.vp-skipfx.is-fwd  .vp-skipfx-wave { left: 25%;  border-radius: 50% 0 0 50%; }
+@keyframes vpWave {
+  0% { opacity: 0; } 18% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; }
+}
+.vp-skipfx-body {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  color: #fff; text-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
+  animation: vpSkipOut 800ms ease-out forwards;
+}
+@keyframes vpSkipOut { 0%, 72% { opacity: 1; } 100% { opacity: 0; } }
+.vp-skipfx-arrows { display: flex; gap: 2px; height: 18px; }
+.vp-skipfx.is-back .vp-skipfx-arrows { flex-direction: row-reverse; }
+.vp-skipfx-arrows i {
+  width: 0; height: 0; opacity: 0.2;
+  border-top: 9px solid transparent; border-bottom: 9px solid transparent;
+  animation: vpChevron 600ms ease-out 2;
+}
+.vp-skipfx.is-fwd  .vp-skipfx-arrows i { border-left: 13px solid #fff; }
+.vp-skipfx.is-back .vp-skipfx-arrows i { border-right: 13px solid #fff; }
+.vp-skipfx-arrows i:nth-child(2) { animation-delay: 120ms; }
+.vp-skipfx-arrows i:nth-child(3) { animation-delay: 240ms; }
+@keyframes vpChevron { 0% { opacity: 0.2; } 35% { opacity: 1; } 100% { opacity: 0.2; } }
+.vp-skipfx-n {
+  font-size: 46px; font-weight: 800; line-height: 1.05; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  animation: vpPop 420ms cubic-bezier(0.2, 0.9, 0.3, 1.4) both;
+}
+.vp-skipfx-l {
+  font-size: 12px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+  opacity: 0.85;
+}
+@keyframes vpPop {
+  0%   { transform: scale(0.4); opacity: 0; }
+  60%  { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+/* ── play ⇄ pause, morphing in place ────────────────────────────────────── */
+.vp-morph { position: relative; display: inline-flex; width: 22px; height: 22px; }
+.vp-morph svg {
+  position: absolute; inset: 0; margin: auto;
+  transition: opacity 180ms var(--ease), transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1.2);
+}
+.vp-morph-play  { opacity: 1; transform: translateX(1px); }
+.vp-morph-pause { opacity: 0; transform: scale(0.4) rotate(-90deg); }
+.vp-morph.is-on .vp-morph-play  { opacity: 0; transform: scale(0.4) rotate(90deg); }
+.vp-morph.is-on .vp-morph-pause { opacity: 1; transform: none; }
+
+/* ===========================================================================
+   The dock — our toolbar over an EMBEDDED player (Bunny, Vimeo, YouTube).
+
+   The embed draws its own bar along the bottom of the frame (quality,
+   captions, the scrubber). The dock floats just above it: an elevated pill
+   in the Material/Chakra idiom — solid surface, soft shadow, round icon
+   buttons with a press ripple, the primary action filled in brand colour.
+
+   It covers only its own pixels. That is the whole answer to "your overlay
+   swallows clicks": nothing else of ours sits over the embed's surface.
+
+   Solid, not frosted: a backdrop-filter over a playing video makes the GPU
+   re-blur that region on every frame, which on a laptop is heat for nothing.
+   =========================================================================== */
+.vp-dock {
+  position: absolute; left: 50%; bottom: 70px; z-index: 6;
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 8px; border-radius: 999px;
+  background: rgba(17, 22, 34, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42), 0 2px 6px rgba(0, 0, 0, 0.3);
+  transition: opacity 220ms var(--ease), transform 220ms var(--ease);
+}
+
+/* While a video plays the dock dims back so it does not compete with the
+   lecture, and comes up to full strength under the pointer or on pause.
+   It is NEVER hidden or made unclickable: whether :hover reaches a parent
+   while the pointer is inside a cross-origin iframe differs by browser, and
+   a control that only appears on hover can then never be reached at all. */
+@media (hover: hover) and (pointer: fine) {
+  .vp-embed.is-playing .vp-dock { opacity: 0.42; }
+  .vp-embed.is-playing:hover .vp-dock,
+  .vp-embed .vp-dock:hover,
+  .vp-embed .vp-dock:focus-within { opacity: 1; }
+}
+
+.vp-dock-btn {
+  position: relative; overflow: hidden;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 42px; height: 42px; border-radius: 50%;
+  color: rgba(255, 255, 255, 0.94);
+  transition: background 150ms var(--ease), transform 150ms var(--ease), box-shadow 150ms var(--ease);
+}
+.vp-dock-btn:hover { background: rgba(255, 255, 255, 0.12); }
+.vp-dock-btn:active { transform: scale(0.9); }
+.vp-dock-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* The Material press ripple: a disc that blooms from the centre on :active
+   and fades after release. */
+.vp-btn { position: relative; overflow: hidden; }
+.vp-dock-btn::after, .vp-btn::after {
+  content: ""; position: absolute; left: 50%; top: 50%;
+  width: 100%; height: 100%; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35);
+  transform: translate(-50%, -50%) scale(0); opacity: 0;
+  transition: transform 380ms ease-out, opacity 520ms ease-out;
+  pointer-events: none;
+}
+.vp-dock-btn:active::after, .vp-btn:active::after {
+  transform: translate(-50%, -50%) scale(1.3); opacity: 1; transition: 0s;
+}
+
+.vp-dock-play {
+  width: 50px; height: 50px; margin: 0 2px;
+  color: #fff;
+  background: linear-gradient(145deg, #f08a2e, var(--brand-strong));
+  box-shadow: 0 6px 16px rgba(226, 118, 27, 0.45);
+}
+.vp-dock-play:hover {
+  background: linear-gradient(145deg, #f59a44, var(--brand));
+  box-shadow: 0 8px 22px rgba(226, 118, 27, 0.6);
+}
+.vp-dock-play .vp-morph { width: 24px; height: 24px; }
+.vp-dock-sm { width: 36px; height: 36px; color: rgba(255, 255, 255, 0.78); }
+
+.vp-dock-time {
+  padding: 0 8px 0 6px; white-space: nowrap;
+  font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.9);
+}
+.vp-dock-time em { font-style: normal; margin: 0 4px; color: rgba(255, 255, 255, 0.4); }
+.vp-dock-sep { width: 1px; height: 22px; margin: 0 2px; background: rgba(255, 255, 255, 0.14); }
+
+/* ── "Video not playing? Fix it" — shown when a source is slow or silent ── */
+@keyframes vpTroubleIn {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to   { opacity: 1; transform: translateX(-50%); }
+}
+.vp-trouble {
+  position: absolute; left: 50%; top: 16px; z-index: 8;
+  transform: translateX(-50%);
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 9px 16px; border-radius: 999px;
+  background: #fff; color: #14213d;
+  font-size: 13px; font-weight: 600;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  animation: vpTroubleIn 260ms var(--ease) both;
+}
+.vp-trouble:hover { background: var(--brand-soft); color: var(--brand-strong); }
+
+.vp-error-acts { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+@media (max-width: 620px) {
+  /* Low and compact: on a phone the stage is ~220px tall and the embed's own
+     big play button sits in the middle of it. */
+  .vp-dock { bottom: 44px; gap: 1px; padding: 3px 5px; }
+  .vp-dock-btn { width: 32px; height: 32px; }
+  .vp-dock-btn svg { width: 19px; height: 19px; }
+  .vp-dock-play { width: 38px; height: 38px; }
+  .vp-dock-sm { width: 32px; height: 32px; }
+  .vp-dock-time { font-size: 11px; padding: 0 4px; }
+  .vp-dock-sep { display: none; }
+  .vp-burst { width: 80px; height: 80px; margin: -40px 0 0 -40px; }
+  .vp-burst-core svg { width: 34px; height: 34px; }
+  .vp-skipfx-n { font-size: 34px; }
+  .vp-trouble { top: 10px; font-size: 12px; padding: 7px 12px; }
+}
+/* Too narrow for the time readout at all. */
+@media (max-width: 380px) {
+  .vp-dock-time { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vp-burst-core { animation: none; opacity: 0.92; }
+  .vp-burst-ring, .vp-skipfx-arrows i { animation: none; }
+  .vp-skipfx-n { animation: none; }
+}
+
+/* ── touch screens ─────────────────────────────────────────────────────────
+   Paused, the embed shows its own big play button in the middle of a stage
+   that on a phone is barely 200px tall — the dock sat on top of it. So while
+   paused the dock steps aside (that big button IS play), and once playing it
+   shows at full strength for a moment, then dims back out of the lecture.
+   It stays tappable throughout: a dimmed control is still a control. */
+@media (hover: none), (max-width: 620px) {
+  .vp-embed.is-paused .vp-dock {
+    opacity: 0; pointer-events: none; transform: translate(-50%, 10px);
+  }
+  .vp-embed.is-playing .vp-dock { animation: vpDockDim 4s ease forwards; }
+}
+@keyframes vpDockDim {
+  0%, 70% { opacity: 1; }
+  100%    { opacity: 0.5; }
 }

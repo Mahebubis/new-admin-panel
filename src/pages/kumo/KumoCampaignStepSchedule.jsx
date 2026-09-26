@@ -113,7 +113,10 @@ export default function KumoCampaignStepSchedule({ draft, setField, onValidChang
 
   return (
     <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
+      {/* A column so the IP card can sit first without moving the JSX:
+          picking the sending IP is a per-campaign decision people look for
+          immediately, and it used to be the third card down. */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={card}>
           <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>Review your campaign</div>
           <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 16 }}>Double-check everything below — this is exactly what will go out.</div>
@@ -182,9 +185,13 @@ export default function KumoCampaignStepSchedule({ draft, setField, onValidChang
         </div>
 
         {/* ── the Kumo-specific bit: which of our own IPs carry this send ── */}
-        <div style={card}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>Sending IPs</div>
-          <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 16 }}>Decide which addresses this campaign goes out from.</div>
+        <div style={{ ...card, order: -1, borderColor: '#c7d2fe', borderWidth: 2 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>
+            Sending IPs <span style={{ color: '#dc2626' }}>*</span>
+          </div>
+          <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 16 }}>
+            Which of your {ips.length || 5} addresses this campaign goes out from. Saved with this campaign only.
+          </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }} onClick={() => setField('ip_mode', 'auto')}>

@@ -218,6 +218,7 @@ import ImportContactsWizard from './pages/netcore/ImportContactsWizard';
 import ContactLogs from './pages/netcore/ContactLogs';
 import { NetcoreBlocklist, BlocklistLogs, BlocklistImport } from './pages/netcore/NetcoreBlocklist';
 import NetcoreAttributes from './pages/netcore/NetcoreAttributes';
+import NetcoreSpend from './pages/netcore/NetcoreSpend';
 import AttributeLogs from './pages/netcore/AttributeLogs';
 import CampaignsUnified from './pages/netcore/CampaignsUnified';
 import CampaignDetail from './pages/netcore/CampaignDetail';
@@ -438,6 +439,8 @@ export default function App() {
               them at all. */}
           <Route path="settings" element={<EspSettings />} />
           <Route path="whatsapp/settings" element={<WaSettings />} />
+          {/* Money limits for both channels, plus the spend watchdog and the weekly reports. */}
+          <Route path="spend" element={<NetcoreSpend />} />
           {/* Performance + Preview for one campaign, either channel. Static 'campaigns/:channel/:id'
               cannot collide with the full-screen wizard route, which is /netcore/campaigns/:id. */}
           <Route path="campaigns/:channel/:id" element={<CampaignDetail />} />

@@ -413,6 +413,30 @@ export default function WaCampaignWizard() {
               ))}
             </div>
 
+            {/* WHAT IT WILL COST — the last moment this number can change a decision. After Send
+                it is a report, and after the month it is an invoice. Rendered only when the server
+                could price it, so an unpriced country or a missing rate card leaves the dialog
+                exactly as it was. */}
+            {checks.cost && checks.cost.messages > 0 && (
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '11px 14px', marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+                  <span style={{ fontSize: 11.5, fontWeight: 800, color: '#475569' }}>ESTIMATED COST</span>
+                  <span style={{ fontSize: 16, fontWeight: 800, color: '#0f172a' }}>
+                    {checks.cost.currency} {Number(checks.cost.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div style={{ fontSize: 11.5, color: '#64748b', lineHeight: 1.6, marginTop: 4 }}>
+                  {n0(checks.cost.messages)} message(s) at {checks.cost.currency}{' '}
+                  {Number(checks.cost.per_message).toFixed(4)} each ({checks.cost.category})
+                  {checks.cost.estimated ? ' — priced at the default country until the audience is built' : ''}.
+                  {checks.cost.cap?.enabled && checks.cost.cap.remaining !== null && (
+                    <> {checks.cost.cap.currency}{' '}
+                      {Number(checks.cost.cap.remaining).toLocaleString('en-US', { maximumFractionDigits: 2 })} left under the cap.</>
+                  )}
+                </div>
+              </div>
+            )}
+
             {(checks.warnings || []).length > 0 && (
               <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 10, padding: '11px 14px', marginBottom: 18 }}>
                 <div style={{ fontSize: 11.5, fontWeight: 800, color: '#c2410c', marginBottom: 5 }}>WORTH KNOWING</div>

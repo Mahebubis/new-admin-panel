@@ -243,13 +243,23 @@ function learn_video_source($url, $provider) {
     /* Vimeo — either a plain link or an already-built player URL. */
     if (preg_match('#(?:player\.)?vimeo\.com/(?:video/)?(\d+)#i', $url, $m)) {
         $q = 'title=0&byline=0&portrait=0&dnt=1';
-        /* Unlisted Vimeo links carry a hash after the id: vimeo.com/ID/HASH */
-        if (preg_match('#vimeo\.com/(?:video/)?\d+/([0-9a-z]+)#i', $url, $h)) $q .= '&h=' . $h[1];
+        /* Unlisted Vimeo videos only play with their privacy hash — without it
+           the player answers 401. It arrives two ways: vimeo.com/ID/HASH, or
+           ?h=HASH in Vimeo's own embed code (often HTML-escaped as &amp;h=). */
+        $plain = html_entity_decode($url, ENT_QUOTES);
+        if (preg_match('#[?&]h=([0-9a-z]+)#i', $plain, $h)
+            || preg_match('#vimeo\.com/(?:video/)?\d+/([0-9a-z]{6,})#i', $plain, $h)) {
+            $q .= '&h=' . $h[1];
+        }
         return ['kind' => 'vimeo', 'src' => $url, 'embed' => "https://player.vimeo.com/video/{$m[1]}?$q"];
     }
 
-    /* Bunny Stream — the embed iframe, or a direct HLS playlist off the CDN. */
-    if (preg_match('#iframe\.mediadelivery\.net/(?:embed|play)/(\d+)/([0-9a-f\-]+)#i', $url, $m)) {
+    /* Bunny Stream — the embed iframe, or a direct HLS playlist off the CDN.
+       player.mediadelivery.net/play/… is Bunny's SHARE PAGE: a whole document
+       that nests a second, autoplaying /embed/ iframe we cannot reach with
+       postMessage. Every form is rewritten to the embed itself, which is what
+       gives those lessons pause, ±10s, resume and end-of-lesson completion. */
+    if (preg_match('#(?:iframe|player)\.mediadelivery\.net/(?:embed|play)/(\d+)/([0-9a-f\-]+)#i', $url, $m)) {
         return [
             'kind'  => 'bunny',
             'src'   => $url,

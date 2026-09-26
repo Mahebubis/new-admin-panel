@@ -1,69 +1,56 @@
 // ===========================================================================
-//  VideoPlayer.jsx — one component, four kinds of video.
+//  VideoPlayer.jsx — one component, every kind of video.
 //
-//  Admins add lessons from whatever source they have, so the player must cope
-//  with all of them without the learner ever seeing the difference:
+//    file     a direct MP4/WebM (the S3 uploads lms_api.php makes)
+//    hls      an .m3u8 ladder, through hls.js where the browser needs it
+//    bunny    the Bunny Stream embed (iframe.mediadelivery.net)
+//    vimeo    the Vimeo embed
+//    youtube  the privacy-preserving YouTube embed
+//    iframe   anything else — shown, but not drivable
 //
-//    file    a direct MP4/WebM — typically the S3 uploads lms_api.php makes
-//    hls     an .m3u8 ladder (Bunny's CDN pull zone, or any HLS origin)
-//    vimeo   the Vimeo iframe embed
-//    bunny   the Bunny Stream iframe embed (iframe.mediadelivery.net)
-//    youtube the privacy-preserving YouTube embed
+//  Bunny's SHARE page (player.mediadelivery.net/play/…) is rewritten to its
+//  embed before anything else happens — see lib/videoSource.js. Left as it
+//  was, it nested a second autoplaying player we could not reach.
 //
-//  The backend decides which of those a stored URL is (see learn_video_source()
-//  in catalog.php) so the sniffing lives in exactly one place.
+//  One set of controls for all of them
+//    Every drivable kind gets the same things: ±10 s, play/pause, a big
+//    animated burst in the middle when playback starts or stops, a "+10"
+//    flash on the side that was skipped, keyboard shortcuts, fullscreen that
+//    keeps our controls on screen, and the end-of-lesson card via onEnded.
 //
-//  Controls
-//    `file` and `hls` play in a real <video> with OUR control bar rather than
-//    the browser's. That is not decoration: the browser's bar brought its own
-//    fullscreen button, which sat directly under the stage's one and read as
-//    two fullscreen buttons fighting over the same corner. One bar means one
-//    fullscreen button, and it makes room for the two controls a lecture
-//    actually needs — back five seconds and forward five seconds, for the
-//    sentence you did not quite catch.
+//    file/hls draw a full control bar of our own. The embeds keep their own
+//    bar (it owns quality, captions and the scrubber) and get a floating
+//    toolbar above it that only ever covers its own few pixels — nothing of
+//    ours sits over the embed's surface, so a click on the video always
+//    reaches the video.
 //
-//    Fullscreen belongs to the player wrapper, so the bar stays over the video
-//    inside it. On a phone, entering fullscreen also asks the screen to turn
-//    landscape (the Screen Orientation API) — a 16:9 lecture in a portrait
-//    letterbox is a third of the pixels it should be. Browsers that refuse the
-//    lock simply keep the fullscreen; iOS Safari has no element fullscreen
-//    worth using here, so it gets the video element's own native one, which
-//    rotates by itself anyway.
+//  Talking to an embed — and the bug this replaced
+//    Bunny runs player.js. Its Receiver RE-EMITS `ready` every time it is sent
+//    addEventListener('ready'). The old bridge answered `ready` by
+//    subscribing again — including to `ready` — so the page and the iframe
+//    played ping-pong as fast as the event loop allowed: ~1,450 messages a
+//    second, measured on the live site, for as long as a Bunny lesson was
+//    open. That was the laptop heating up. And on every lap it also sent
+//    `play` when the lesson had been opened by a click, which is why pressing
+//    pause "did nothing": the page un-paused it again a few milliseconds later.
 //
-//  Playback position
-//    Position and completion come straight off the element for the two native
-//    kinds. The iframe embeds are cross-origin, so we speak their postMessage
-//    protocols instead — Vimeo and Bunny both implement the player.js shape,
-//    which is why one bridge covers both. YouTube's iframe API needs their
-//    loader script, so YouTube lessons report no position; they still complete
-//    from the player's own "Mark as complete".
+//    Now: we never subscribe to `ready` (the embed announces it unprompted),
+//    we handle it once per load, we subscribe once per load, and we only
+//    listen to messages whose source IS our iframe. The bridge effect depends
+//    on the iframe's URL alone, so the progress save every ten seconds —
+//    which changes `startAt` — no longer tears it down and rebuilds it.
 //
-//  What gets reported, and why it is three numbers
-//    onProgress({ seconds, duration, watched }) — the player owns the
-//    throttling, because it is the only thing that knows the difference
-//    between time passing and time WATCHED:
-//
-//      seconds   where the playhead is now → what Resume seeks back to
-//      duration  the real length of the video, measured rather than typed in
-//                by an admin (lms_lessons.duration_secs is usually 0)
-//      watched   seconds genuinely played since the last report, summed from
-//                the gaps between timeupdate ticks. A scrub from 0:10 to 9:50
-//                produces one big gap, which is rejected — so this cannot be
-//                inflated by dragging the scrubber, and neither can the two
-//                skip buttons.
-//
-//    A report goes out every ten watched seconds, and immediately on pause, on
-//    the tab being hidden, and when the lesson changes or the page goes away —
-//    the last of those is what stops a learner losing their place by simply
-//    closing the tab.
-//
-//  Loading
-//    Nothing is ever shown as a blank black box: a spinner sits over the stage
-//    until the source actually reports itself ready, and a failed source gets a
-//    real message with a retry rather than silence.
+//  Progress
+//    onProgress({ seconds, duration, watched }) — `watched` is summed from
+//    small forward steps of the playhead only, so scrubbing and skipping
+//    cannot inflate it. Reported every ten watched seconds, and immediately on
+//    pause, on the tab being hidden and on the lesson closing.
 // ===========================================================================
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Back5, Compress, Expand, Fwd5, Pause, Play, Volume, VolumeX } from './icons';
+import {
+  Compress, Expand, Pause, Play, SkipBack, SkipFwd, Volume, VolumeX, Wrench,
+} from './icons';
+import { normalizeVideo } from '../lib/videoSource';
 import './video.css';
 
 /* hls.js is only pulled in when an .m3u8 actually needs it — Safari and iOS
@@ -75,20 +62,24 @@ async function loadHls() {
 
 const IFRAME_KINDS = new Set(['vimeo', 'bunny', 'youtube', 'iframe']);
 
-/* Report every ten seconds of real watching. Small enough that a crash costs
-   the learner nothing they would notice, large enough that a 40-minute lesson
-   is ~240 writes rather than ten thousand. */
+/* Report every ten seconds of real watching. */
 const REPORT_EVERY = 10;
-
-/* A gap larger than this between two timeupdate ticks is a seek, a stall or a
-   backgrounded tab — never someone watching. 2s covers 4x playback speed. */
+/* A gap larger than this between two playhead readings is a seek, a stall or
+   a backgrounded tab — never someone watching. Covers 2x speed comfortably. */
 const MAX_TICK_GAP = 2.5;
-
-/* How far the two skip buttons jump. Named because the arrow keys use it too,
-   and because it is the number printed on the icons. */
-const SKIP = 5;
-
+/* How far the skip buttons, the arrow keys and a double-tap jump. */
+const SKIP = 10;
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+
+/* player.js replies to a getter on the listener id it was handed. */
+const PJS = { context: 'player.js', version: '0.0.11' };
+const L_DURATION = 'istudio-duration';
+const L_PAUSED = 'istudio-paused';
+const PJS_EVENTS = ['play', 'pause', 'timeupdate', 'seeked', 'ended'];
+/* Vimeo answers the modern names on some builds and the original ones on
+   others; subscribing to both costs nothing and the aliases fold them. */
+const VIMEO_EVENTS = ['play', 'pause', 'timeupdate', 'playProgress', 'seeked', 'seek', 'ended', 'finish'];
+const VIMEO_ALIAS = { playProgress: 'timeupdate', finish: 'ended', seek: 'seeked' };
 
 /* mm:ss, or h:mm:ss once there is an hour to show. */
 function clock(secs) {
@@ -105,17 +96,27 @@ const isTouchScreen = () =>
   && (window.matchMedia?.('(pointer: coarse)').matches || 'ontouchstart' in window);
 
 export default function VideoPlayer({
-  video,              // { kind, src, embed } from the API
+  video: rawVideo,     // { kind, src, embed } from the API
   poster,
-  startAt = 0,        // seconds to resume from
-  onProgress,         // ({seconds, duration, watched}) — already throttled here
+  startAt = 0,         // seconds to resume from
+  onProgress,          // ({seconds, duration, watched}) — already throttled here
   onEnded,
   title,
-  autoPlay = false,   // start on its own once the source is playable
-  replayToken = 0,    // bumped by "Revise This Lesson" — back to 0:00 and play
+  autoPlay = false,    // start on its own once the source is playable
+  replayToken = 0,     // bumped by "Revise This Lesson" — back to 0:00 and play
+  reloadToken = 0,     // bumped by the troubleshooter — reload, keep the place
+  onHelp,              // opens the troubleshooter
+  onIssue,             // ({type, detail}) — a playback problem worth logging
+  onDiag,              // ({kind, state, connected}) — for the troubleshooter
 }) {
+  const video = useMemo(() => normalizeVideo(rawVideo), [rawVideo]);
   const kind = video?.kind || 'none';
   const native = kind === 'file' || kind === 'hls';
+  /* Only these answer postMessage. A bare `iframe` is someone else's player
+     on an unknown protocol — buttons that silently do nothing are worse
+     than no buttons. */
+  const drivable = kind === 'vimeo' || kind === 'bunny' || kind === 'youtube';
+
   const [state, setState] = useState('loading');   // loading | ready | error
   const wrapRef = useRef(null);
   const videoRef = useRef(null);
@@ -123,8 +124,6 @@ export default function VideoPlayer({
   const hlsRef = useRef(null);
   const seeded = useRef(false);
 
-  /* Everything the control bar draws. None of it is authoritative — the
-     <video> element is — these are only the latest readings of it. */
   const [playing, setPlaying] = useState(false);
   const [cur, setCur] = useState(0);
   const [len, setLen] = useState(0);
@@ -136,27 +135,48 @@ export default function VideoPlayer({
   const [fs, setFs] = useState(false);
   const [uiOn, setUiOn] = useState(true);
   const [waiting, setWaiting] = useState(false);
-  const [nudge, setNudge] = useState('');      // the "+5s" / "−5s" flash
-  const [resumed, setResumed] = useState(0);   // "Resumed from 6:02", briefly
-  const [blocked, setBlocked] = useState(false); // autoplay refused by the browser
+  const [resumed, setResumed] = useState(0);        // "Resumed from 6:02", briefly
+  const [blocked, setBlocked] = useState(false);    // autoplay refused by the browser
+  const [connected, setConnected] = useState(false); // the embed has answered us
+  const [slow, setSlow] = useState(false);           // still not playable after a while
+  const [frameNonce, setFrameNonce] = useState(0);   // remounts the iframe on reload
+  /* The two animations: the burst in the middle, the "+10" on a side. Each
+     carries an id so pressing twice restarts the animation. */
+  const [burst, setBurst] = useState(null);         // { type: 'play'|'pause', id }
+  const [skipFx, setSkipFx] = useState(null);       // { dir: -1|1, total, id }
 
-  /* Autoplay is attempted exactly once per source. Without the latch, every
-     `canplay` — and HLS fires several — would call play() again and fight a
-     learner who had deliberately paused. */
+  /* The latest props, for callbacks that must stay stable. Written in an
+     effect (refs are not written during render). */
+  const latest = useRef({});
+  useEffect(() => {
+    latest.current = { startAt, autoPlay, onProgress, onEnded, onIssue, onDiag };
+  });
+
+  /* Mirrors of state the event handlers need synchronously. */
+  const playingRef = useRef(false);
+  const setPlayingNow = useCallback((v) => { playingRef.current = v; setPlaying(v); }, []);
+  const uiOnRef = useRef(true);
+  useEffect(() => { uiOnRef.current = uiOn; }, [uiOn]);
+
+  /* Autoplay is attempted once per source; without the latch every `canplay`
+     would call play() again and fight a learner who had paused. */
   const autoTried = useRef(false);
 
-  /* The watch bookkeeping. `accum` is unsent watched seconds, `tick` the
-     previous playhead reading, `pos`/`dur` the last known position and length
-     — kept in refs so the flush paths can read them without a re-render. */
+  /* Watch bookkeeping, per source. */
   const accum = useRef(0);
   const tick = useRef(null);
   const pos = useRef(0);
   const dur = useRef(0);
   const sentPos = useRef(-1);
+  const endedFired = useRef(false);
+  const resumeOverride = useRef(null);   // the troubleshooter's reload keeps the place
+  const lastCmdAt = useRef(0);           // when WE last asked the embed to play/pause
+  const pausedAt = useRef(0);
+  const lastTickAt = useRef(0);
+  const reported = useRef(new Set());    // issue types already logged for this source
 
-  /* A new lesson is a new everything. Reset during render so the spinner is up
-     on the very first paint of the new source, instead of flashing the previous
-     lesson's finished frame for one tick. */
+  /* A new lesson is a new everything. Reset during render so the spinner is
+     up on the very first paint of the new source. */
   const sourceKey = `${kind}|${video?.src || ''}|${video?.embed || ''}`;
   const [seenKey, setSeenKey] = useState(sourceKey);
   if (seenKey !== sourceKey) {
@@ -170,10 +190,12 @@ export default function VideoPlayer({
     setUiOn(true);
     setResumed(0);
     setBlocked(false);
+    setConnected(false);
+    setSlow(false);
+    setBurst(null);
+    setSkipFx(null);
   }
 
-  /* The bookkeeping refs belong to the source, not to the render, so they are
-     cleared in an effect — refs must not be written during render. */
   useEffect(() => {
     seeded.current = false;
     autoTried.current = false;
@@ -183,152 +205,70 @@ export default function VideoPlayer({
     pos.current = 0;
     dur.current = 0;
     sentPos.current = -1;
+    playingRef.current = false;
+    resumeOverride.current = null;
+    reported.current = new Set();
   }, [sourceKey]);
 
-  /**
-   * Start playing on our own, when asked to.
-   *
-   * Browsers only allow an unmuted play() once the page has had a real user
-   * gesture. Picking a lesson from the syllabus IS that gesture, so every
-   * lesson after the first starts by itself. The very first video of a fresh
-   * page load — arriving straight from a link — can still be refused, and the
-   * honest answer to that is the big play button plus a line saying why,
-   * NOT muting the lecture and pretending it started.
-   */
-  const tryAutoPlay = useCallback(() => {
-    if (!autoPlay || autoTried.current) return;
-    const el = videoRef.current;
-    if (!el || !el.paused) return;
-    autoTried.current = true;
-    const p = el.play();
-    if (p?.catch) p.catch(() => setBlocked(true));
-  }, [autoPlay]);
+  /** Where to resume: a troubleshooter reload beats the saved position. */
+  const seekTarget = () => (resumeOverride.current ?? latest.current.startAt ?? 0);
 
-  /* ── driving an embedded player ───────────────────────────────────────────
-     Most lessons on this portal are NOT a plain MP4 — they are a Bunny/Vimeo/
-     YouTube iframe. Everything below used to be gated on `native`, so on those
-     lessons there was no autoplay, no skip buttons and no end-of-lesson card:
-     the embed's own player was the only thing on screen.
+  const report = useCallback((type, detail = '') => {
+    if (reported.current.has(type)) return;
+    reported.current.add(type);
+    latest.current.onIssue?.({ type, detail });
+  }, []);
 
-     Two dialects, one door. Vimeo and Bunny both speak player.js
-     ({method, value}); YouTube has its own shape ({event:'command', func,
-     args}) and answers postMessage directly once enablejsapi=1 is on the URL,
-     with no loader script needed.
+  /* ── the two animations ──────────────────────────────────────────────── */
+  const burstAt = useRef(null);
+  const showBurst = useCallback((type) => {
+    setBurst({ type, id: Date.now() + Math.random() });
+    clearTimeout(burstAt.current);
+    burstAt.current = setTimeout(() => setBurst(null), 720);
+  }, []);
 
-     A bare `iframe` kind is deliberately excluded: that is someone else's
-     player on an unknown protocol, and offering buttons that silently do
-     nothing is worse than not offering them. */
-  const drivable = kind === 'vimeo' || kind === 'bunny' || kind === 'youtube';
+  /* Taps in quick succession add up — three presses of +10 read "+30", the
+     way every streaming app does it. */
+  const skipRun = useRef({ dir: 0, total: 0, at: 0 });
+  const skipAt = useRef(null);
+  const showSkip = useCallback((delta) => {
+    const now = Date.now();
+    const dir = Math.sign(delta);
+    const r = skipRun.current;
+    const total = r.dir === dir && now - r.at < 900 ? r.total + Math.abs(delta) : Math.abs(delta);
+    skipRun.current = { dir, total, at: now };
+    setSkipFx({ dir, total, id: now });
+    clearTimeout(skipAt.current);
+    skipAt.current = setTimeout(() => setSkipFx(null), 800);
+  }, []);
 
-  const postToFrame = useCallback((cmd, value) => {
-    const win = frameRef.current?.contentWindow;
-    if (!win) return;
+  useEffect(() => () => { clearTimeout(burstAt.current); clearTimeout(skipAt.current); }, []);
 
-    const send = (payload) => {
-      try { win.postMessage(JSON.stringify(payload), '*'); } catch { /* not ready yet */ }
-    };
-
-    if (kind === 'vimeo' || kind === 'bunny') {
-      const bare = value === undefined ? { method: cmd } : { method: cmd, value };
-      /* Vimeo takes the bare shape. Bunny runs Embedly's player.js, whose
-         Receiver checks `data.context === 'player.js'` and DROPS everything
-         else — which is why a bare command reached Vimeo and vanished on
-         Bunny. Both shapes go out every time; each receiver ignores the one
-         it does not recognise, so there is nothing to detect and no cost. */
-      send(bare);
-      send({ context: 'player.js', version: '0.0.11', ...bare });
-      return;
-    }
-
-    if (kind === 'youtube') {
-      const fn = { play: 'playVideo', pause: 'pauseVideo', setCurrentTime: 'seekTo' }[cmd];
-      if (!fn) return;
-      send({ event: 'command', func: fn, args: fn === 'seekTo' ? [value, true] : [] });
-    }
-  }, [kind]);
-
-  /**
-   * The iframe URL, with the parameters that make the embed cooperate.
-   *
-   * autoplay rides on the URL as well as being asked for over postMessage:
-   * an embed that has not finished booting cannot answer a `play` command, and
-   * the URL parameter has no such race. Both paths are harmless together —
-   * the second play() on an already-playing video is a no-op.
-   */
-  const frameSrc = useMemo(() => {
-    const base = video?.embed || video?.src || '';
-    if (!base) return '';
-    try {
-      const u = new URL(base, window.location.href);
-      if (kind === 'bunny') {
-        /* catalog.php builds this with autoplay=false. Clicking a lesson in
-           the syllabus is exactly the gesture that earns a true. */
-        u.searchParams.set('autoplay', autoPlay ? 'true' : 'false');
-      } else if (kind === 'vimeo') {
-        if (autoPlay) u.searchParams.set('autoplay', '1');
-      } else if (kind === 'youtube') {
-        /* Without enablejsapi the iframe answers no command at all, which is
-           why a YouTube lesson had no skip buttons and reported no position. */
-        u.searchParams.set('enablejsapi', '1');
-        u.searchParams.set('origin', window.location.origin);
-        if (autoPlay) u.searchParams.set('autoplay', '1');
-      }
-      return u.toString();
-    } catch {
-      /* A URL the constructor cannot parse still deserves to be shown. */
-      return base;
-    }
-  }, [kind, video?.embed, video?.src, autoPlay]);
-
-  /** Hand the accumulated watching to the caller. `force` also sends a report
-      that carries no new watched time — used when the lesson is closing and
-      the position alone is still worth saving. */
+  /* ── progress ───────────────────────────────────────────────────────── */
   const flush = useCallback((force = false) => {
     const add = Math.floor(accum.current);
     if (!force && add < REPORT_EVERY) return;
-
     const seconds = Math.max(0, Math.floor(pos.current || 0));
-    if (add <= 0 && seconds === sentPos.current) return;   // nothing new to say
-
-    accum.current -= add;                                  // keep the remainder
+    if (add <= 0 && seconds === sentPos.current) return;
+    accum.current -= add;
     sentPos.current = seconds;
-
     const duration = Number.isFinite(dur.current) ? Math.floor(dur.current) : 0;
-    onProgress?.({ seconds, duration: duration > 0 ? duration : 0, watched: add });
-  }, [onProgress]);
+    latest.current.onProgress?.({ seconds, duration: duration > 0 ? duration : 0, watched: add });
+  }, []);
 
-  /**
-   * "That finished" — said exactly once per source.
-   *
-   * The end-of-lesson card is a one-shot: firing it twice would ask the same
-   * question over the top of itself, and an embed that reports both `ended`
-   * and a final timeupdate does exactly that.
-   */
-  const endedFired = useRef(false);
+  /** "That finished" — exactly once per pass through the video. */
   const fireEnded = useCallback(() => {
     if (endedFired.current) return;
     endedFired.current = true;
     flush(true);
-    onEnded?.();
-  }, [flush, onEnded]);
+    latest.current.onEnded?.();
+  }, [flush]);
 
-  /**
-   * Reaching the end IS the end.
-   *
-   * Some embeds never send `ended` at all — a Bunny build with a post-roll
-   * card, a stall on the last second, a tab that lost focus over the final
-   * frame. The playhead is allowed to settle it, which is what stops a learner
-   * finishing a lecture and being offered nothing.
-   */
+  /* Some embeds never send `ended` (a post-roll card, a stall on the last
+     second). The playhead is allowed to settle it. */
   const maybeEnded = useCallback((secs, length) => {
-    if (!Number.isFinite(length) || length <= 0) return;
-    if (!Number.isFinite(secs)) return;
-
-    /* Genuinely back inside the video — a re-watch after Cancel, or a scrub
-       away from the end. The one-shot re-arms, so finishing a second time asks
-       a second time instead of silently offering nothing. */
+    if (!Number.isFinite(length) || length <= 0 || !Number.isFinite(secs)) return;
     if (secs < length - 5) { endedFired.current = false; return; }
-
     if (secs < length - 1.25) return;
     fireEnded();
   }, [fireEnded]);
@@ -337,26 +277,18 @@ export default function VideoPlayer({
   const advance = useCallback((seconds, duration) => {
     const t = Number(seconds);
     if (!Number.isFinite(t) || t < 0) return;
-
     if (Number.isFinite(duration) && duration > 0) dur.current = duration;
-
     const prev = tick.current;
     if (prev !== null) {
       const gap = t - prev;
-      /* Forward, and by a plausible amount: that is watching. Anything else is
-         a seek or a stall and adds nothing to the watched total. */
       if (gap > 0 && gap <= MAX_TICK_GAP) accum.current += gap;
     }
     tick.current = t;
     pos.current = t;
-
     flush(false);
   }, [flush]);
 
-  /* Pause, tab-hidden and unmount are the three moments a learner's position
-     is most likely to be lost, so all three flush immediately. The cleanup
-     closes over THIS lesson's onProgress, which is what makes a lesson switch
-     save against the lesson being left rather than the one being opened. */
+  /* Pause, tab-hidden and unmount are when a position is most likely lost. */
   useEffect(() => {
     const onHide = () => { if (document.visibilityState === 'hidden') flush(true); };
     const onLeave = () => flush(true);
@@ -369,14 +301,14 @@ export default function VideoPlayer({
     };
   }, [flush, sourceKey]);
 
-  /* ── the control bar comes and goes ──────────────────────────────────────
-     Visible while paused, while the pointer is moving, and for a moment after;
-     hidden once a playing video is being left alone, so nothing sits over the
-     picture. The speed menu pins it open — a menu that vanished mid-choice
-     would be unusable. */
+  /* The readout only needs whole seconds; re-rendering the player on every
+     sub-second tick is work for nothing. */
+  const showTime = useCallback((t) => {
+    setCur((c) => (Math.floor(c) === Math.floor(t) ? c : t));
+  }, []);
+
+  /* ── control-bar auto-hide (native only) ─────────────────────────────── */
   const hideAt = useRef(null);
-  /* The hide timer fires long after the render that opened the speed menu, so
-     it reads the menu's state through a ref rather than closing over it. */
   const keepOpen = useRef(false);
   useEffect(() => { keepOpen.current = rateOpen; }, [rateOpen]);
 
@@ -388,150 +320,368 @@ export default function VideoPlayer({
       if (el && !el.paused && !keepOpen.current) setUiOn(false);
     }, 2800);
   }, []);
-
   useEffect(() => () => clearTimeout(hideAt.current), []);
 
-  /* ── the reconciler ───────────────────────────────────────────────────────
-     Every reading below already arrives as a media event, and for most people
-     that is enough. It is not enough for everyone, and the failure is ugly:
-     the lecture plays while the stage shows a big play button over it and the
-     control bar is gone. That is `playing` stuck at false — the bar hides
-     itself off `el.paused`, which is true to the element, while the button
-     renders off React state, which is not.
+  const tryAutoPlay = useCallback(() => {
+    if (!latest.current.autoPlay || autoTried.current) return;
+    const el = videoRef.current;
+    if (!el || !el.paused) return;
+    autoTried.current = true;
+    const p = el.play();
+    if (p?.catch) p.catch(() => setBlocked(true));
+  }, []);
 
-     An event can go missing for reasons this component cannot prevent:
+  /* ── the iframe URL ──────────────────────────────────────────────────── */
+  const frameSrc = useMemo(() => {
+    const base = video?.embed || video?.src || '';
+    if (!base) return '';
+    try {
+      const u = new URL(base, window.location.href);
+      if (kind === 'bunny') {
+        u.searchParams.set('autoplay', autoPlay ? 'true' : 'false');
+        u.searchParams.set('preload', 'true');
+      } else if (kind === 'vimeo') {
+        if (autoPlay) u.searchParams.set('autoplay', '1');
+      } else if (kind === 'youtube') {
+        u.searchParams.set('enablejsapi', '1');
+        u.searchParams.set('origin', window.location.origin);
+        if (autoPlay) u.searchParams.set('autoplay', '1');
+      }
+      return u.toString();
+    } catch {
+      return base;
+    }
+  }, [kind, video?.embed, video?.src, autoPlay]);
 
-       a warm cache      the file is already local, so `loadeddata` and
-                         `canplay` can fire before this element is listening
-                         at all — which is exactly why the same lesson behaves
-                         in a fresh incognito window and misbehaves in the
-                         profile that has watched it before
-       an extension      video-downloader add-ons re-wrap the element and eat
-                         events on the way past
-       bfcache / restore a tab coming back from the back-forward cache resumes
-                         a playing video without replaying its event history
+  /* ── the command channel to an embed ─────────────────────────────────── */
+  const bridge = useRef(null);   // (method, value, listener) => void, per iframe load
+  const resubscribe = useRef(null);
 
-     So the element is polled, and it is the element — never our own state —
-     that wins. Any desync corrects itself inside 400ms instead of lasting the
-     whole lesson. It costs one cheap property read a few times a second.
+  const sendCmd = useCallback((cmd, value) => {
+    if (kind === 'youtube') {
+      const win = frameRef.current?.contentWindow;
+      const fn = { play: 'playVideo', pause: 'pauseVideo', setCurrentTime: 'seekTo' }[cmd];
+      if (!win || !fn) return;
+      try {
+        win.postMessage(JSON.stringify({ event: 'command', func: fn, args: fn === 'seekTo' ? [value, true] : [] }), '*');
+      } catch { /* not ready yet */ }
+      return;
+    }
+    if (cmd === 'getPaused') bridge.current?.('getPaused', undefined, L_PAUSED);
+    else bridge.current?.(cmd, value);
+  }, [kind]);
 
-     It doubles as a floor under progress reporting: `advance` is fed here too,
-     so a lesson whose `timeupdate` events are being swallowed still records
-     what was watched. advance() measures gaps between readings, so being
-     called twice with the same playhead adds nothing. */
-  const armed = useRef(false);            // has THIS source been attached yet
+  /* ── the Bunny / Vimeo bridge ────────────────────────────────────────── */
+  useEffect(() => {
+    if (kind !== 'bunny' && kind !== 'vimeo') return undefined;
+    const frame = frameRef.current;
+    if (!frame) return undefined;
+    const bunny = kind === 'bunny';
+
+    let readySeen = false;
+    let heard = false;     // any event at all has come back since loading
+    const timers = [];
+
+    const send = (method, value, listener) => {
+      const win = frame.contentWindow;
+      if (!win) return;
+      const msg = bunny ? { ...PJS, method } : { method };
+      if (value !== undefined) msg.value = value;
+      if (bunny && listener) msg.listener = listener;
+      try { win.postMessage(JSON.stringify(msg), '*'); } catch { /* frame navigating */ }
+    };
+    bridge.current = send;
+    resubscribe.current = () => subscribe();
+
+    /* NEVER 'ready' — that is the event whose re-emission started the old
+       loop, and the embed announces it unprompted anyway.
+
+       Bunny can announce `ready` more than once per load: some builds create
+       a second player.js Receiver after the first has already answered, and
+       that one starts with no listeners — commands still work, but no events
+       come back. So every `ready` re-subscribes. It cannot loop (we never
+       subscribe to `ready`), and it is still rate-limited and capped, in case
+       a future embed misbehaves in some other way. */
+    let subs = 0;
+    let lastSub = 0;
+    let pendingSub = null;
+    const subscribe = () => {
+      if (subs >= 6) return;
+      const wait = lastSub + 1200 - Date.now();
+      if (wait > 0) {
+        if (!pendingSub) pendingSub = setTimeout(() => { pendingSub = null; subscribe(); }, wait);
+        return;
+      }
+      subs += 1;
+      lastSub = Date.now();
+      (bunny ? PJS_EVENTS : VIMEO_EVENTS).forEach((evt) => send('addEventListener', evt, evt));
+      send('getDuration', undefined, L_DURATION);
+      send('getPaused', undefined, L_PAUSED);
+    };
+
+    const seedIfDue = () => {
+      if (seeded.current) return;
+      const at = Number(seekTarget()) || 0;
+      if (at <= 5) { seeded.current = true; return; }
+      /* The length has to be known first: seeking past the end restarts the
+         video, and landing on the last seconds is worse than the tail. */
+      if (!(dur.current > 0)) return;
+      seeded.current = true;
+      if (at >= dur.current - 15) return;
+      lastCmdAt.current = Date.now();
+      send('setCurrentTime', at);
+      tick.current = at;
+      pos.current = at;
+      setCur(at);
+      setResumed(at);
+      timers.push(setTimeout(() => setResumed(0), 4200));
+    };
+
+    const noteDuration = (v) => {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n <= 0) return;
+      dur.current = n;
+      setLen((l) => (Math.abs(l - n) < 0.5 ? l : n));
+      seedIfDue();
+    };
+
+    const onReady = () => {
+      if (readySeen) { subscribe(); return; }
+      readySeen = true;
+      /* Subscribed, but nothing back yet? Try again — a receiver rebuilt
+         behind our back is the usual reason. Harmless if the video is simply
+         sitting paused. */
+      [2500, 6000].forEach((ms) => timers.push(setTimeout(() => { if (!heard) subscribe(); }, ms)));
+      setConnected(true);
+      setState('ready');
+      subscribe();
+      /* The URL parameter usually has this covered already. */
+      if (latest.current.autoPlay) { lastCmdAt.current = Date.now(); send('play'); }
+    };
+
+    /* A frame announced from the playing state, rather than an event WE caused,
+       still gets the burst — a click on the embed's own surface looks the same
+       as a click on ours. The first play of a source is autoplay, not a click. */
+    const noteState = (isPlaying) => {
+      const was = playingRef.current;
+      if (was === isPlaying) return;
+      setPlayingNow(isPlaying);
+      if (!isPlaying) pausedAt.current = Date.now();
+      if (Date.now() - lastCmdAt.current > 700 && pos.current > 0.5) showBurst(isPlaying ? 'play' : 'pause');
+    };
+
+    const onMessage = (e) => {
+      if (e.source !== frame.contentWindow) return;
+      let d = e.data;
+      if (typeof d === 'string') {
+        if (d.charAt(0) !== '{') return;
+        try { d = JSON.parse(d); } catch { return; }
+      }
+      if (!d || typeof d !== 'object') return;
+      /* Bunny also speaks its own "bunnystream" channel; we do not use it. */
+      if (d.channel === 'bunnystream') return;
+
+      /* Vimeo still reports under its original names — playProgress, finish,
+         seek — whichever name it was subscribed under. */
+      const raw = d.event || d.method;
+      const evt = VIMEO_ALIAS[raw] || raw;
+      if (evt === 'play' || evt === 'pause' || evt === 'timeupdate' || evt === 'seeked' || evt === 'ended') heard = true;
+      const v = d.value !== undefined ? d.value : d.data;
+      const body = v && typeof v === 'object' ? v : {};
+
+      switch (evt) {
+        case 'ready':
+          onReady();
+          return;
+        case 'getDuration':
+        case L_DURATION:
+          noteDuration(v);
+          return;
+        case 'getPaused':
+        case L_PAUSED:
+          if (typeof v === 'boolean') noteState(!v);
+          return;
+        case 'play':
+          if (!readySeen) onReady();
+          setWaiting(false);
+          noteState(true);
+          return;
+        case 'pause':
+          noteState(false);
+          flush(true);
+          return;
+        case 'seeked': {
+          const s = Number(body.seconds ?? body.currentTime);
+          if (Number.isFinite(s)) { tick.current = s; pos.current = s; showTime(s); }
+          return;
+        }
+        case 'timeupdate': {
+          if (!readySeen) onReady();
+          if (Number(body.duration) > 0) noteDuration(body.duration);
+          const s = Number(body.seconds ?? body.currentTime);
+          if (!Number.isFinite(s)) return;
+          const prev = pos.current;
+          lastTickAt.current = Date.now();
+          /* Moving forward with no `play` heard: it is playing. (A pause
+             sends one trailing tick, hence the grace period.) */
+          if (!playingRef.current && s > prev + 0.05 && s - prev < 3 && Date.now() - pausedAt.current > 1200) {
+            noteState(true);
+          }
+          showTime(s);
+          advance(s, dur.current);
+          maybeEnded(s, dur.current);
+          return;
+        }
+        case 'ended':
+        case 'finish':
+          noteState(false);
+          fireEnded();
+          return;
+        default:
+      }
+    };
+
+    window.addEventListener('message', onMessage);
+
+    /* The embed's unprompted `ready` can land before this listener existed (a
+       cached frame). If nothing has arrived a moment after load, subscribe
+       anyway — player.js answers subscriptions whether or not we saw ready. */
+    const onLoad = () => {
+      timers.push(setTimeout(() => { if (!readySeen) subscribe(); }, 1500));
+      timers.push(setTimeout(() => { if (!readySeen) send('getPaused', undefined, L_PAUSED); }, 3500));
+    };
+    frame.addEventListener('load', onLoad);
+    /* …and for a frame that finished loading before this effect ran. */
+    timers.push(setTimeout(() => { if (!readySeen) subscribe(); }, 4000));
+    /* A paused video sends no timeupdate, so the length — which Resume needs —
+       is asked for again once the metadata has had time to arrive. */
+    [2000, 5000, 9000].forEach((ms) => timers.push(setTimeout(() => {
+      if (!(dur.current > 0)) send('getDuration', undefined, L_DURATION);
+    }, ms)));
+
+    return () => {
+      window.removeEventListener('message', onMessage);
+      frame.removeEventListener('load', onLoad);
+      timers.forEach(clearTimeout);
+      clearTimeout(pendingSub);
+      if (bridge.current === send) { bridge.current = null; resubscribe.current = null; }
+    };
+    // Deliberately keyed on the frame alone — see the header.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, frameSrc, frameNonce]);
+
+  /* A playing embed that goes quiet has usually been paused by something we
+     did not hear. Ask, rather than show a pause button over a stopped video. */
+  useEffect(() => {
+    if (kind !== 'bunny' && kind !== 'vimeo') return undefined;
+    if (!playing) return undefined;
+    const id = setInterval(() => {
+      /* Silent while we think it plays: ask, and re-attach our listeners in
+         case the embed rebuilt its receiver without telling us. */
+      if (Date.now() - lastTickAt.current > 2500) { sendCmd('getPaused'); resubscribe.current?.(); }
+    }, 2500);
+    return () => clearInterval(id);
+  }, [kind, playing, sendCmd]);
+
+  /* ── YouTube ─────────────────────────────────────────────────────────── */
+  useEffect(() => {
+    if (kind !== 'youtube') return undefined;
+    const frame = frameRef.current;
+    if (!frame) return undefined;
+
+    const listen = () => {
+      try {
+        frame.contentWindow?.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*');
+      } catch { /* not ready yet */ }
+    };
+
+    const onMessage = (e) => {
+      if (e.source !== frame.contentWindow) return;
+      let data = e.data;
+      if (typeof data === 'string') { try { data = JSON.parse(data); } catch { return; } }
+      const info = data?.info;
+      if (!info || typeof info !== 'object') return;
+      setConnected(true);
+
+      const length = Number(info.duration);
+      if (Number.isFinite(length) && length > 0) { dur.current = length; setLen(length); }
+
+      const secs = Number(info.currentTime);
+      if (Number.isFinite(secs)) {
+        showTime(secs);
+        advance(secs, dur.current);
+        maybeEnded(secs, dur.current);
+        const at = Number(seekTarget()) || 0;
+        if (!seeded.current && at > 5 && dur.current > 0 && at < dur.current - 15) {
+          seeded.current = true;
+          sendCmd('setCurrentTime', at);
+        }
+      }
+
+      /* -1 unstarted · 0 ended · 1 playing · 2 paused · 3 buffering */
+      if (info.playerState === 1) { setState('ready'); setPlayingNow(true); setWaiting(false); }
+      else if (info.playerState === 2) { setPlayingNow(false); flush(true); }
+      else if (info.playerState === 3) setWaiting(true);
+      else if (info.playerState === 0) { setPlayingNow(false); fireEnded(); }
+    };
+
+    window.addEventListener('message', onMessage);
+    const a = setTimeout(listen, 400);
+    const b = setTimeout(listen, 1800);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      clearTimeout(a);
+      clearTimeout(b);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, frameSrc, frameNonce]);
+
+  /* ── native <video>: the reconciler ──────────────────────────────────────
+     Media events can go missing (a warm cache firing `canplay` before we
+     listen, a downloader extension re-wrapping the element, bfcache). The
+     element is polled and always wins, so a desync lasts 400ms, not a lesson.
+     It doubles as a floor under progress reporting. */
+  const armed = useRef(false);
   useEffect(() => { armed.current = false; }, [sourceKey]);
 
   useEffect(() => {
     if (!native) return undefined;
     const since = Date.now();
-
     const sync = () => {
       const el = videoRef.current;
       if (!el || !armed.current) return;
-
-      /* Ready means there is a frame to show (HAVE_CURRENT_DATA), not merely
-         that the duration is known — a bar reading 0:00 over a black box is
-         furniture. The one exception is a source that has given us metadata
-         and then stalled: after seven seconds the controls appear anyway,
-         because an endless spinner the learner cannot press play on is worse
-         than a player that has to buffer. */
       const enough = el.readyState >= 2 || (el.readyState >= 1 && Date.now() - since > 7000);
-      /* `el.error` and not our own state, so a source that recovers — a retry,
-         a network blip that resolved — comes back on its own instead of
-         leaving the learner on a failure screen over a working video. */
-      if (enough && !el.error) {
-        setState('ready');
-        tryAutoPlay();
-      }
-      /* Only a genuinely buffered element clears the buffering spinner —
-         "not paused" is exactly what a stalled video looks like. */
+      if (enough && !el.error) { setState('ready'); tryAutoPlay(); }
       if (el.readyState >= 3) setWaiting(false);
-
       const live = !el.paused && !el.ended;
-      setPlaying((p) => (p === live ? p : live));
-      /* A paused video must never be left with its controls hidden — that is
-         the state the learner is stuck in when they cannot find play. */
+      if (playingRef.current !== live) setPlayingNow(live);
       if (!live) setUiOn(true);
-
       if (Number.isFinite(el.duration) && el.duration > 0) {
         dur.current = el.duration;
         setLen((l) => (Math.abs(l - el.duration) < 0.01 ? l : el.duration));
       }
-      setCur((c) => (Math.abs(c - el.currentTime) < 0.05 ? c : el.currentTime));
+      showTime(el.currentTime);
       setVol((v) => (v === el.volume ? v : el.volume));
       setMuted((m) => (m === el.muted ? m : el.muted));
       setRate((r) => (r === el.playbackRate ? r : el.playbackRate));
-
       if (live) advance(el.currentTime, el.duration);
     };
-
-    sync();                                   // catch up on whatever we missed
+    sync();
     const id = setInterval(sync, 400);
     return () => clearInterval(id);
-  }, [native, sourceKey, advance, tryAutoPlay]);
+  }, [native, sourceKey, advance, tryAutoPlay, setPlayingNow, showTime]);
 
-  /* ── "Revise This Lesson" ─────────────────────────────────────────────────
-     Back to the top and play, without remounting the player: the file is
-     already buffered, so a rewatch starts instantly instead of reloading the
-     whole source. The end-of-lesson one-shot is re-armed too, so finishing it
-     a second time asks a second time. */
+  /* ── native <video>: attach the source ───────────────────────────────── */
   useEffect(() => {
-    if (!replayToken) return;
-    seeded.current = true;             // do not seek back to `startAt` this time
-    tick.current = 0;                  // a jump to 0 is not −23 minutes watched
-    pos.current = 0;
-    sentPos.current = -1;
-    /* The one-shot re-arms itself: maybeEnded() clears it as soon as the
-       playhead is back inside the video, which is what seeking to 0 does. */
-
-    if (native) {
-      const el = videoRef.current;
-      if (el) {
-        el.currentTime = 0;
-        el.play().catch(() => setBlocked(true));
-      }
-    } else if (drivable) {
-      postToFrame('setCurrentTime', 0);
-      postToFrame('play');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [replayToken]);
-
-  /* The same guarantee for an embed, which has no readyState to poll: its
-     `load` event is the only thing that clears the spinner, and a frame served
-     from cache can fire that before React is listening. Eight seconds is far
-     longer than any embed takes and far shorter than a learner will sit in
-     front of a spinner wondering whether the course is broken. */
-  useEffect(() => {
-    if (!IFRAME_KINDS.has(kind)) return undefined;
-    const t = setTimeout(() => setState((s) => (s === 'loading' ? 'ready' : s)), 8000);
-    return () => clearTimeout(t);
-  }, [kind, sourceKey]);
-
-  /* ── native <video>: MP4/WebM directly, .m3u8 through hls.js ─────────── */
-  useEffect(() => {
-    if (!native) return;
+    if (!native) return undefined;
     const el = videoRef.current;
-    if (!el || !video?.src) return;
-
+    if (!el || !video?.src) return undefined;
     let cancelled = false;
     let hls = null;
 
     const attach = async () => {
-      /* `armed` gates the reconciler above: until the new source is on the
-         element, its readyState still describes the PREVIOUS lesson, and
-         reading it would flip the stage to "ready" over the last frame of a
-         video the learner has already left. */
       if (kind === 'file') { el.src = video.src; armed.current = true; return; }
-
-      /* Safari/iOS ship HLS in the element; everyone else needs hls.js. */
-      if (el.canPlayType('application/vnd.apple.mpegurl')) {
-        el.src = video.src;
-        armed.current = true;
-        return;
-      }
-
+      if (el.canPlayType('application/vnd.apple.mpegurl')) { el.src = video.src; armed.current = true; return; }
       try {
         const Hls = await loadHls();
         if (cancelled) return;
@@ -541,9 +691,7 @@ export default function VideoPlayer({
         hls.loadSource(video.src);
         hls.attachMedia(el);
         armed.current = true;
-        hls.on(Hls.Events.ERROR, (_e, data) => {
-          if (data?.fatal && !cancelled) setState('error');
-        });
+        hls.on(Hls.Events.ERROR, (_e, data) => { if (data?.fatal && !cancelled) setState('error'); });
       } catch {
         if (!cancelled) setState('error');
       }
@@ -557,195 +705,92 @@ export default function VideoPlayer({
       el.removeAttribute('src');
       el.load();
     };
-  }, [native, kind, video?.src]);
+  }, [native, kind, video?.src, frameNonce]);
 
-  /* ── the player.js bridge Vimeo and Bunny both speak ──────────────────────
-     Two dialects of one idea, and the gap between them is what kept the
-     end-of-lesson card off every Bunny lesson:
-
-       Vimeo   {method, value}                        — bare
-       Bunny   {context:'player.js', version, method} — Embedly's player.js
-
-     A bare `addEventListener: 'ended'` therefore registered NOTHING on Bunny:
-     the lecture finished and the page was never told. Commands now go out in
-     both shapes (see postToFrame).
-
-     The replies differ the same way — player.js sends {event, value} where
-     Vimeo sends {event, data} — and reading only `data` meant a registered
-     timeupdate still yielded no seconds and no duration, which took the
-     playhead fallback down with it. `body()` accepts either. */
+  /* Embeds have no readyState to poll: their `load` clears the spinner, with
+     an eight-second floor for a frame served from cache before we listened. */
   useEffect(() => {
-    if (kind !== 'vimeo' && kind !== 'bunny') return;
+    if (!IFRAME_KINDS.has(kind)) return undefined;
+    const t = setTimeout(() => setState((s) => (s === 'loading' ? 'ready' : s)), 8000);
+    return () => clearTimeout(t);
+  }, [kind, sourceKey, frameNonce]);
 
-    const frame = frameRef.current;
-    if (!frame) return;
-
-    const send = (payload) => {
-      try { frame.contentWindow?.postMessage(JSON.stringify(payload), '*'); } catch { /* not ready yet */ }
-    };
-
-    /* player.js answers a getter on the `listener` id it was handed, so the
-       duration comes back as an event named this rather than 'getDuration'. */
-    const DURATION_ID = 'istudio-duration';
-
-    const subscribe = () => {
-      ['ready', 'timeupdate', 'ended', 'play', 'pause', 'seeked'].forEach((evt) => {
-        send({ method: 'addEventListener', value: evt });
-        send({ context: 'player.js', version: '0.0.11', method: 'addEventListener', value: evt, listener: evt });
-      });
-      send({ method: 'getDuration' });
-      send({ context: 'player.js', version: '0.0.11', method: 'getDuration', listener: DURATION_ID });
-    };
-
-    /* The event's payload, whichever envelope carried it. */
-    const body = (d) => {
-      const v = d.value !== undefined ? d.value : d.data;
-      return (v && typeof v === 'object') ? v : d;
-    };
-
-    const noteDuration = (v) => {
-      const n = Number(v);
-      if (Number.isFinite(n) && n > 0) { dur.current = n; setLen(n); }
-    };
-
-    const onMessage = (e) => {
-      /* Only the two embed hosts are trusted; anything else on the page that
-         posts a message is ignored outright. */
-      if (!/^https:\/\/(player\.vimeo\.com|iframe\.mediadelivery\.net)$/.test(e.origin)) return;
-
-      let data = e.data;
-      if (typeof data === 'string') { try { data = JSON.parse(data); } catch { return; } }
-      if (!data || typeof data !== 'object') return;
-
-      const evt = data.event || data.method;
-      const b = body(data);
-
-      if (evt === DURATION_ID || evt === 'getDuration') {
-        noteDuration(data.value ?? data.data ?? b?.duration);
-        return;
-      }
-
-      if (evt === 'ready') {
-        setState('ready');
-        subscribe();
-        if (!seeded.current && startAt > 5) {
-          seeded.current = true;
-          postToFrame('setCurrentTime', startAt);
-        }
-        /* The URL parameter usually has this covered; this is the path for an
-           embed that booted before the parameter could take effect. */
-        if (autoPlay) postToFrame('play');
-        return;
-      }
-
-      if (evt === 'play')  { setState('ready'); setPlaying(true); setWaiting(false); return; }
-      if (evt === 'pause') { setPlaying(false); flush(true); return; }
-
-      if (evt === 'timeupdate' || evt === 'seeked') {
-        /* On an embed this message is the ONLY source of the playhead — the
-           readout, the skip buttons, Resume and the end-of-lesson card all
-           depend on it arriving and being read correctly. */
-        if (Number.isFinite(Number(b.duration)) && Number(b.duration) > 0) noteDuration(b.duration);
-
-        const secs = Number(b.seconds ?? b.currentTime);
-        if (Number.isFinite(secs)) {
-          setCur(secs);
-          advance(secs, dur.current);
-          maybeEnded(secs, dur.current);
-        }
-        return;
-      }
-
-      if (evt === 'ended' || evt === 'finish') { setPlaying(false); fireEnded(); }
-    };
-
-    window.addEventListener('message', onMessage);
-    /* Some builds are listening before they announce themselves, so nudge
-       twice on load as well as waiting for the ready event. */
-    const a = setTimeout(subscribe, 600);
-    const b2 = setTimeout(subscribe, 2000);
-    return () => {
-      window.removeEventListener('message', onMessage);
-      clearTimeout(a);
-      clearTimeout(b2);
-    };
-  }, [kind, frameSrc, startAt, autoPlay, advance, flush, fireEnded, maybeEnded, postToFrame]);
-
-  /* ── YouTube ──────────────────────────────────────────────────────────────
-     No loader script and no third-party bundle: an iframe carrying
-     enablejsapi=1 answers a `listening` handshake with a stream of
-     `infoDelivery` messages that carry currentTime, duration and playerState.
-
-     That is everything the rest of this component needs — the skip buttons,
-     the position Resume seeks back to, and knowing the lecture finished. A
-     YouTube lesson previously reported none of it. */
+  /* ── noticing trouble ────────────────────────────────────────────────────
+     Twelve seconds without a playable source, or a drivable embed that never
+     answered, is worth a "Having trouble?" on the stage — and a row in the
+     issue log, so the admin can see which browsers it happens on. */
   useEffect(() => {
-    if (kind !== 'youtube') return;
-    const frame = frameRef.current;
-    if (!frame) return;
+    if (kind === 'none') return undefined;
+    const t = setTimeout(() => {
+      const el = videoRef.current;
+      const stuck = native ? !el || el.readyState < 2 : false;
+      if (stuck) { setSlow(true); report('slow_load', 'native source not playable after 12s'); }
+    }, 12000);
+    return () => clearTimeout(t);
+  }, [kind, native, sourceKey, frameNonce, report]);
 
-    const listen = () => {
-      try {
-        frame.contentWindow?.postMessage(
-          JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*',
-        );
-      } catch { /* not ready yet */ }
-    };
+  useEffect(() => {
+    if (!drivable) return undefined;
+    const t = setTimeout(() => {
+      if (!connected) { setSlow(true); report('no_bridge', `${kind} embed did not answer within 12s`); }
+    }, 12000);
+    return () => clearTimeout(t);
+  }, [drivable, kind, connected, sourceKey, frameNonce, report]);
 
-    const onMessage = (e) => {
-      if (!/^https:\/\/(www\.)?youtube(-nocookie)?\.com$/.test(e.origin)) return;
+  useEffect(() => {
+    if (state === 'error') report('load_error', `${kind} source failed to load`);
+  }, [state, kind, report]);
 
-      let data = e.data;
-      if (typeof data === 'string') { try { data = JSON.parse(data); } catch { return; } }
-      const info = data?.info;
-      if (!info || typeof info !== 'object') return;
 
-      const length = Number(info.duration);
-      if (Number.isFinite(length) && length > 0) {
-        dur.current = length;
-        setLen(length);
-      }
+  useEffect(() => {
+    latest.current.onDiag?.({ kind, state, connected, drivable, src: video?.embed || video?.src || '' });
+  }, [kind, state, connected, drivable, video?.embed, video?.src]);
 
-      const secs = Number(info.currentTime);
-      if (Number.isFinite(secs)) {
-        setCur(secs);
-        advance(secs, length);
-        maybeEnded(secs, length || dur.current);
+  /* ── "Revise This Lesson" ─────────────────────────────────────────────── */
+  useEffect(() => {
+    if (!replayToken) return;
+    seeded.current = true;
+    tick.current = 0;
+    pos.current = 0;
+    sentPos.current = -1;
+    lastCmdAt.current = Date.now();
+    if (native) {
+      const el = videoRef.current;
+      if (el) { el.currentTime = 0; el.play().catch(() => setBlocked(true)); }
+    } else if (drivable) {
+      sendCmd('setCurrentTime', 0);
+      sendCmd('play');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replayToken]);
 
-        /* Resume, once the length is known — seeking past the end of a video
-           whose duration has not arrived yet just restarts it. */
-        if (!seeded.current && startAt > 5 && Number.isFinite(length) && startAt < length - 15) {
-          seeded.current = true;
-          postToFrame('setCurrentTime', startAt);
-        }
-      }
-
-      /* -1 unstarted · 0 ended · 1 playing · 2 paused · 3 buffering */
-      if (info.playerState === 1) { setState('ready'); setPlaying(true); setWaiting(false); }
-      else if (info.playerState === 2) { setPlaying(false); flush(true); }
-      else if (info.playerState === 3) setWaiting(true);
-      else if (info.playerState === 0) { setPlaying(false); fireEnded(); }
-    };
-
-    window.addEventListener('message', onMessage);
-    /* The handshake needs a frame that exists and a player that has booted.
-       Two nudges covers a slow first paint without polling forever. */
-    const a = setTimeout(listen, 400);
-    const b = setTimeout(listen, 1800);
-    return () => {
-      window.removeEventListener('message', onMessage);
-      clearTimeout(a);
-      clearTimeout(b);
-    };
-  }, [kind, frameSrc, startAt, advance, flush, fireEnded, maybeEnded, postToFrame]);
+  /* ── the troubleshooter's "Reload video" — same place, fresh player ──── */
+  const [seenReload, setSeenReload] = useState(reloadToken);
+  if (seenReload !== reloadToken) {
+    setSeenReload(reloadToken);
+    setPlaying(false);
+    setConnected(false);
+    setSlow(false);
+    setState('loading');
+    setFrameNonce((n) => n + 1);
+  }
+  useEffect(() => {
+    if (!reloadToken) return;
+    flush(true);
+    resumeOverride.current = pos.current > 5 ? pos.current : null;
+    seeded.current = false;
+    autoTried.current = false;
+    tick.current = null;
+    playingRef.current = false;
+    reported.current = new Set();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadToken]);
 
   /* ── fullscreen, and the phone turning with it ───────────────────────── */
   useEffect(() => {
     const sync = () => {
       const on = !!(document.fullscreenElement || document.webkitFullscreenElement);
-      setFs(on);
-      /* Leaving fullscreen must hand the rotation back, or the rest of the
-         portal is stuck sideways for the rest of the session. */
+      setFs(on && (document.fullscreenElement || document.webkitFullscreenElement) === wrapRef.current);
       if (!on) { try { window.screen?.orientation?.unlock?.(); } catch { /* unsupported */ } }
     };
     document.addEventListener('fullscreenchange', sync);
@@ -760,17 +805,13 @@ export default function VideoPlayer({
     const box = wrapRef.current;
     const el = videoRef.current;
     bumpUi();
-
     if (document.fullscreenElement || document.webkitFullscreenElement) {
       try { window.screen?.orientation?.unlock?.(); } catch { /* unsupported */ }
       (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
       return;
     }
-
-    /* iOS Safari has no element fullscreen worth using: the video element's
-       own one is the only thing that fills the screen there, and it rotates on
-       its own. Everywhere else the WRAPPER goes fullscreen, so our bar — and
-       with it the two skip buttons — stays over the picture. */
+    /* The WRAPPER goes fullscreen, so our controls stay over the picture. iOS
+       Safari has no element fullscreen worth using: the video's own is it. */
     if (box?.requestFullscreen) {
       try { await box.requestFullscreen({ navigationUI: 'hide' }); }
       catch { try { await box.requestFullscreen(); } catch { /* refused */ } }
@@ -780,63 +821,58 @@ export default function VideoPlayer({
       el.webkitEnterFullscreen();
       return;
     }
-
-    /* A phone held upright shows a 16:9 lecture at a third of the pixels it
-       could. Ask for landscape; desktops and iOS refuse, which is harmless. */
     if (isTouchScreen()) {
       try { await window.screen?.orientation?.lock?.('landscape'); } catch { /* refused */ }
     }
   }, [bumpUi]);
 
-  /* ── the controls themselves ─────────────────────────────────────────── */
+  /* ── the controls ────────────────────────────────────────────────────── */
   const togglePlay = useCallback(() => {
-    /* On an embed there is no element to ask, so `playing` — the last thing
-       the embed told us — is the only state there is. */
-    if (!native && drivable) {
-      postToFrame(playing ? 'pause' : 'play');
-      setPlaying((p) => !p);
-      bumpUi();
+    lastCmdAt.current = Date.now();
+    if (!native) {
+      if (!drivable) return;
+      const want = !playingRef.current;
+      sendCmd(want ? 'play' : 'pause');
+      setPlayingNow(want);
+      if (!want) { pausedAt.current = Date.now(); flush(true); }
+      showBurst(want ? 'play' : 'pause');
+      /* Confirm with the embed rather than trust the guess — if it refused
+         (autoplay policy, still booting) the button corrects itself. */
+      if (kind !== 'youtube') setTimeout(() => sendCmd('getPaused'), 900);
       return;
     }
     const el = videoRef.current;
     if (!el) return;
-    if (el.paused) el.play().catch(() => {/* autoplay policy */});
-    else el.pause();
+    if (el.paused) {
+      el.play().catch(() => {/* autoplay policy */});
+      showBurst('play');
+    } else {
+      el.pause();
+      showBurst('pause');
+    }
     bumpUi();
-  }, [bumpUi, native, drivable, playing, postToFrame]);
+  }, [native, drivable, kind, sendCmd, setPlayingNow, flush, showBurst, bumpUi]);
 
-  const flashAt = useRef(null);
   const seekBy = useCallback((delta) => {
-    /* The "+5s" flash, wherever the seek came from. */
-    const flash = () => {
-      setNudge(delta > 0 ? `+${delta}s` : `−${Math.abs(delta)}s`);
-      clearTimeout(flashAt.current);
-      flashAt.current = setTimeout(() => setNudge(''), 600);
-      bumpUi();
-    };
-
-    if (!native && drivable) {
-      /* pos.current is the last playhead the embed reported. Writing tick as
-         well is what stops the jump being banked as five watched seconds. */
+    showSkip(delta);
+    if (!native) {
+      if (!drivable) return;
       const end = dur.current > 0 ? dur.current - 0.5 : Infinity;
       const to = Math.max(0, Math.min(end, (pos.current || 0) + delta));
-      postToFrame('setCurrentTime', to);
+      sendCmd('setCurrentTime', to);
+      /* Writing tick too is what stops the jump being banked as watched. */
       pos.current = to;
       tick.current = to;
       setCur(to);
-      flash();
       return;
     }
-
     const el = videoRef.current;
     if (!el) return;
     const end = Number.isFinite(el.duration) && el.duration > 0 ? el.duration - 0.25 : Infinity;
     el.currentTime = Math.max(0, Math.min(end, el.currentTime + delta));
     setCur(el.currentTime);
-    flash();
-  }, [bumpUi, native, drivable, postToFrame]);
-
-  useEffect(() => () => clearTimeout(flashAt.current), []);
+    bumpUi();
+  }, [native, drivable, sendCmd, showSkip, bumpUi]);
 
   const seekTo = (secs) => {
     const el = videoRef.current;
@@ -846,21 +882,21 @@ export default function VideoPlayer({
     bumpUi();
   };
 
-  const setVolume = (v) => {
+  const setVolume = useCallback((v) => {
     const el = videoRef.current;
     if (!el) return;
     el.volume = v;
     el.muted = v === 0;
     bumpUi();
-  };
+  }, [bumpUi]);
 
-  const toggleMute = () => {
+  const toggleMute = useCallback(() => {
     const el = videoRef.current;
     if (!el) return;
     el.muted = !el.muted;
     if (!el.muted && el.volume === 0) el.volume = 0.6;
     bumpUi();
-  };
+  }, [bumpUi]);
 
   const pickRate = (r) => {
     const el = videoRef.current;
@@ -870,26 +906,76 @@ export default function VideoPlayer({
     bumpUi();
   };
 
-  /* Every shortcut a learner reaches for on a lecture: space to stop, arrows
-     to go back over the line they missed, f for fullscreen, m for mute. */
-  const onKeyDown = (e) => {
-    if (!native) return;
-    /* The two sliders own every key while they have focus, and a focused
-       button already answers space with its own click — pressing space on the
-       pause button must not also toggle play a second time. */
-    if (e.target instanceof HTMLInputElement) return;
-    if (e.target instanceof HTMLButtonElement && (e.key === ' ' || e.key === 'Enter')) return;
-    const hit = (fn) => { e.preventDefault(); fn(); };
-    switch (e.key) {
-      case ' ': case 'k':            return hit(togglePlay);
-      case 'ArrowLeft': case 'j':    return hit(() => seekBy(-SKIP));
-      case 'ArrowRight': case 'l':   return hit(() => seekBy(SKIP));
-      case 'f':                      return hit(toggleFullscreen);
-      case 'm':                      return hit(toggleMute);
-      case 'ArrowUp':                return hit(() => setVolume(Math.min(1, vol + 0.1)));
-      case 'ArrowDown':              return hit(() => setVolume(Math.max(0, vol - 0.1)));
-      default:                       return undefined;
+  /* ── keyboard: space/k, ←/j, →/l, f, m, ↑/↓ ─────────────────────────────
+     Listened for on the document, so the shortcuts work without first
+     clicking the player — but never while the learner is typing, and never
+     stealing Enter/space from a focused button. */
+  const keys = useRef({});
+  useEffect(() => {
+    keys.current = { togglePlay, seekBy, toggleFullscreen, toggleMute, setVolume, vol, native, drivable };
+  });
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+      const t = e.target;
+      const tag = t?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t?.isContentEditable) return;
+      const inPlayer = !!wrapRef.current?.contains(t);
+      if (!inPlayer && t !== document.body && t !== document.documentElement) return;
+      if ((tag === 'BUTTON' || tag === 'A') && (e.key === ' ' || e.key === 'Enter')) return;
+      /* A dialog open over the page owns the keyboard. */
+      if (document.querySelector('[aria-modal="true"]')) return;
+
+      const k = keys.current;
+      if (!k.native && !k.drivable) return;
+      const hit = (fn) => { e.preventDefault(); fn(); };
+      switch (e.key) {
+        case ' ': case 'k': case 'K':            return hit(k.togglePlay);
+        case 'ArrowLeft': case 'j': case 'J':    return hit(() => k.seekBy(-SKIP));
+        case 'ArrowRight': case 'l': case 'L':   return hit(() => k.seekBy(SKIP));
+        case 'f': case 'F':                      return hit(k.toggleFullscreen);
+        case 'm': case 'M':                      return k.native ? hit(k.toggleMute) : undefined;
+        case 'ArrowUp':   return inPlayer && k.native ? hit(() => k.setVolume(Math.min(1, k.vol + 0.1))) : undefined;
+        case 'ArrowDown': return inPlayer && k.native ? hit(() => k.setVolume(Math.max(0, k.vol - 0.1))) : undefined;
+        default: return undefined;
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  /* ── touch on the native stage ───────────────────────────────────────────
+     One tap shows the controls (or plays/pauses once they are showing); a
+     double tap on the left or right third skips ten seconds, and further taps
+     on that side while the "+10" is still up keep adding. */
+  const lastTap = useRef({ at: 0, x: 0.5 });
+  const tapTimer = useRef(null);
+  useEffect(() => () => clearTimeout(tapTimer.current), []);
+
+  const onStageTap = (e) => {
+    if (!isTouchScreen()) { togglePlay(); return; }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = rect.width ? (e.clientX - rect.left) / rect.width : 0.5;
+    const now = Date.now();
+    const side = x < 0.38 ? -1 : x > 0.62 ? 1 : 0;
+
+    /* Still inside a skip run on this side: every tap counts. */
+    if (side && skipRun.current.dir === side && now - skipRun.current.at < 800) {
+      clearTimeout(tapTimer.current);
+      seekBy(side * SKIP);
+      return;
     }
+    if (now - lastTap.current.at < 300 && side && Math.abs(x - lastTap.current.x) < 0.25) {
+      clearTimeout(tapTimer.current);
+      lastTap.current = { at: 0, x };
+      seekBy(side * SKIP);
+      return;
+    }
+    lastTap.current = { at: now, x };
+    clearTimeout(tapTimer.current);
+    tapTimer.current = setTimeout(() => {
+      if (!uiOnRef.current) bumpUi(); else togglePlay();
+    }, 260);
   };
 
   /* ── nothing to play ─────────────────────────────────────────────────── */
@@ -903,91 +989,112 @@ export default function VideoPlayer({
 
   const retry = () => {
     setState('loading');
-    if (frameRef.current) frameRef.current.src = frameRef.current.src;   // eslint-disable-line no-self-assign
+    setFrameNonce((n) => n + 1);
     if (videoRef.current) videoRef.current.load();
   };
 
   const pct = len > 0 ? (cur / len) * 100 : 0;
   const bufPct = len > 0 ? Math.min(100, (buffered / len) * 100) : 0;
 
+  /* The two animations, shared by every kind. pointer-events: none — they
+     are feedback, never a target. */
+  const effects = (
+    <>
+      {burst && (
+        <div key={burst.id} className={`vp-burst vp-burst-${burst.type}`} aria-hidden="true">
+          <span className="vp-burst-ring" />
+          <span className="vp-burst-core">
+            {burst.type === 'play'
+              ? <Play size={44} fill="currentColor" stroke="none" />
+              : <Pause size={44} strokeWidth={2.6} />}
+          </span>
+        </div>
+      )}
+      {skipFx && (
+        <div key={skipFx.id} className={`vp-skipfx ${skipFx.dir < 0 ? 'is-back' : 'is-fwd'}`} aria-hidden="true">
+          <span className="vp-skipfx-wave" />
+          <span className="vp-skipfx-body">
+            <span className="vp-skipfx-arrows"><i /><i /><i /></span>
+            <span className="vp-skipfx-n">{skipFx.dir < 0 ? '−' : '+'}{skipFx.total}</span>
+            <span className="vp-skipfx-l">seconds</span>
+          </span>
+        </div>
+      )}
+      {resumed > 0 && (
+        <div className="vp-resumed" role="status">Resumed from {clock(resumed)}</div>
+      )}
+    </>
+  );
+
   return (
     <div
       ref={wrapRef}
       className={[
         'vp', `vp-${kind}`,
-        native ? 'vp-native' : '',
+        native ? 'vp-native' : 'vp-embed',
         fs ? 'vp-fs' : '',
+        playing ? 'is-playing' : 'is-paused',
         native && !uiOn ? 'vp-idle' : '',
       ].filter(Boolean).join(' ')}
       onPointerMove={native ? bumpUi : undefined}
       onPointerLeave={native ? () => { if (playing && !rateOpen) setUiOn(false); } : undefined}
-      onKeyDown={native ? onKeyDown : undefined}
-      tabIndex={native ? 0 : undefined}
+      tabIndex={-1}
     >
       {title && <div className="vp-title">{title}</div>}
 
       {IFRAME_KINDS.has(kind) ? (
         <>
           <iframe
+            key={`${frameSrc}#${frameNonce}`}
             ref={frameRef}
             className="vp-frame"
             src={frameSrc}
             title={title || 'Lesson video'}
             loading="eager"
-            allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+            allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
             allowFullScreen
+            referrerPolicy="strict-origin-when-cross-origin"
             onLoad={() => setState('ready')}
             onError={() => setState('error')}
           />
 
-          {/* ── our skip controls, over someone else's player ───────────────
-              The embed owns the bottom strip of its own frame, so ours sits
-              ABOVE that bar rather than fighting it for the same pixels.
-              Only for embeds that answer postMessage — see `drivable`. */}
-          {drivable && (
-            <div className="vp-embed-ctl">
-              <button
-                type="button"
-                className="vp-embed-btn"
-                onClick={() => seekBy(-SKIP)}
-                aria-label="Back 5 seconds"
-                title="Back 5 seconds"
-              >
-                <Back5 size={19} />
+          {/* ── our toolbar, above the embed's own bar ──────────────────────
+              A pill, not a layer: it covers only its own pixels, so every
+              click anywhere else on the video still reaches the video. */}
+          {drivable && state !== 'error' && (
+            <div className="vp-dock" role="toolbar" aria-label="Video controls">
+              <button type="button" className="vp-dock-btn" onClick={() => seekBy(-SKIP)}
+                aria-label={`Back ${SKIP} seconds`} title={`Back ${SKIP} seconds (←)`}>
+                <SkipBack n={SKIP} size={22} />
               </button>
-
-              {/* A pause of our own. The embed draws its own bar, but that bar
-                  belongs to a third party and sits underneath whatever a
-                  browser extension decides to overlay on it — a learner who
-                  cannot pause the lecture has no way out at all. This one
-                  speaks to the player directly and always answers. */}
-              <button
-                type="button"
-                className="vp-embed-btn vp-embed-play"
-                onClick={togglePlay}
-                aria-label={playing ? 'Pause' : 'Play'}
-                title={playing ? 'Pause' : 'Play'}
-              >
-                {playing ? <Pause size={19} /> : <Play size={19} fill="currentColor" stroke="none" />}
+              <button type="button" className="vp-dock-btn vp-dock-play" onClick={togglePlay}
+                aria-label={playing ? 'Pause' : 'Play'} title={playing ? 'Pause (space)' : 'Play (space)'}>
+                <span className={`vp-morph${playing ? ' is-on' : ''}`}>
+                  <Play className="vp-morph-play" size={22} fill="currentColor" stroke="none" />
+                  <Pause className="vp-morph-pause" size={22} strokeWidth={2.6} />
+                </span>
               </button>
-
+              <button type="button" className="vp-dock-btn" onClick={() => seekBy(SKIP)}
+                aria-label={`Forward ${SKIP} seconds`} title={`Forward ${SKIP} seconds (→)`}>
+                <SkipFwd n={SKIP} size={22} />
+              </button>
               {len > 0 && (
-                <span className="vp-embed-time">{clock(cur)} <em>/</em> {clock(len)}</span>
+                <span className="vp-dock-time">{clock(cur)}<em>/</em>{clock(len)}</span>
               )}
-
-              <button
-                type="button"
-                className="vp-embed-btn"
-                onClick={() => seekBy(SKIP)}
-                aria-label="Forward 5 seconds"
-                title="Forward 5 seconds"
-              >
-                <Fwd5 size={19} />
+              <span className="vp-dock-sep" />
+              <button type="button" className="vp-dock-btn vp-dock-sm" onClick={toggleFullscreen}
+                aria-label={fs ? 'Exit fullscreen' : 'Fullscreen'} title={fs ? 'Exit fullscreen (f)' : 'Fullscreen (f)'}>
+                {fs ? <Compress size={18} /> : <Expand size={18} />}
               </button>
+              {onHelp && (
+                <button type="button" className="vp-dock-btn vp-dock-sm" onClick={onHelp}
+                  aria-label="Video not working? Troubleshoot" title="Video not working? Troubleshoot">
+                  <Wrench size={17} />
+                </button>
+              )}
             </div>
           )}
-
-          {nudge && <div className="vp-nudge" aria-hidden="true">{nudge}</div>}
+          {effects}
         </>
       ) : (
         <video
@@ -995,94 +1102,65 @@ export default function VideoPlayer({
           className="vp-video"
           poster={poster || undefined}
           playsInline
-          /* `metadata` fetched the duration and then stopped, so pressing play
-             was where the buffering started and the first seconds stuttered.
-             The learner opened this lesson to watch it: start pulling the
-             video the moment the stage appears, which is what makes the
-             picture arrive with the play button rather than after it. */
           preload="auto"
           onContextMenu={(e) => e.preventDefault()}
-          onClick={() => {
-            /* On a phone the first tap means "show me the controls" — playing
-               or pausing on a stray touch is the classic way to lose a place. */
-            if (isTouchScreen() && !uiOn) { bumpUi(); return; }
-            togglePlay();
-          }}
+          onClick={onStageTap}
           onDoubleClick={() => { if (!isTouchScreen()) toggleFullscreen(); }}
           onLoadedMetadata={(e) => {
-            /* Metadata is the duration and the dimensions — NOT a picture.
-               Calling the stage ready here is what put a play button over a
-               black frame that then had to buffer before anything happened.
-               `loadeddata` below is the first moment there is really something
-               to show. */
             const el = e.currentTarget;
-            if (Number.isFinite(el.duration) && el.duration > 0) {
-              dur.current = el.duration;
-              setLen(el.duration);
-            }
+            if (Number.isFinite(el.duration) && el.duration > 0) { dur.current = el.duration; setLen(el.duration); }
             setVol(el.volume);
             setMuted(el.muted);
-            /* Resume where they stopped, but never within the last 15 seconds —
-               dropping someone straight onto the end credits is worse than
-               restarting the tail. */
-            if (!seeded.current && startAt > 5 && startAt < el.duration - 15) {
+            const at = Number(seekTarget()) || 0;
+            if (!seeded.current && at > 5 && at < el.duration - 15) {
               seeded.current = true;
-              el.currentTime = startAt;
-              tick.current = startAt;
-              pos.current = startAt;
-              setCur(startAt);
-              /* Say so, briefly. A video that opens three minutes in with no
-                 explanation reads as a bug rather than as a courtesy. */
-              setResumed(startAt);
+              el.currentTime = at;
+              tick.current = at;
+              pos.current = at;
+              setCur(at);
+              setResumed(at);
               setTimeout(() => setResumed(0), 4200);
             }
           }}
-          /* The first frame is decoded and on screen: that is "loaded". */
-          onLoadedData={() => { setState('ready'); setWaiting(false); tryAutoPlay(); }}
-          onCanPlay={() => { setState('ready'); setWaiting(false); tryAutoPlay(); }}
+          onLoadedData={() => { setState('ready'); setWaiting(false); setSlow(false); tryAutoPlay(); }}
+          onCanPlay={() => { setState('ready'); setWaiting(false); setSlow(false); tryAutoPlay(); }}
           onWaiting={() => setWaiting(true)}
           onStalled={() => { if (!videoRef.current?.paused) setWaiting(true); }}
-          onPlaying={() => { setWaiting(false); setPlaying(true); setState('ready'); }}
-          onPlay={() => { setPlaying(true); setBlocked(false); bumpUi(); }}
+          onPlaying={() => { setWaiting(false); setPlayingNow(true); setState('ready'); }}
+          onPlay={() => { setPlayingNow(true); setBlocked(false); bumpUi(); }}
           onDurationChange={(e) => {
             const d = e.currentTarget.duration;
             if (Number.isFinite(d) && d > 0) { dur.current = d; setLen(d); }
           }}
           onTimeUpdate={(e) => {
             const el = e.currentTarget;
-            setCur(el.currentTime);
+            showTime(el.currentTime);
             try {
               const b = el.buffered;
-              if (b.length) setBuffered(b.end(b.length - 1));
+              if (b.length) {
+                const end = b.end(b.length - 1);
+                setBuffered((x) => (Math.abs(x - end) < 1 ? x : end));
+              }
             } catch { /* nothing buffered yet */ }
             advance(el.currentTime, el.duration);
           }}
-          /* A seek breaks the tick chain: without this the jump would be
-             measured against the pre-seek reading on the next tick. */
           onSeeking={(e) => { tick.current = e.currentTarget.currentTime; }}
           onVolumeChange={(e) => { setVol(e.currentTarget.volume); setMuted(e.currentTarget.muted); }}
           onRateChange={(e) => setRate(e.currentTarget.playbackRate)}
-          onPause={() => { setPlaying(false); setUiOn(true); flush(true); }}
+          onPause={() => { setPlayingNow(false); setUiOn(true); flush(true); }}
           onEnded={(e) => {
             pos.current = e.currentTarget.currentTime;
-            setPlaying(false);
+            setPlayingNow(false);
             setUiOn(true);
-            flush(true);
-            onEnded?.();
+            fireEnded();
           }}
-          /* Switching lessons tears the old source down with
-             `removeAttribute('src'); load()`, and an element asked to load
-             nothing raises an error of its own. Reporting that as "this video
-             would not load" put a failure screen over a lesson that was about
-             to play perfectly well, so an error only counts once a source has
-             actually been attached. */
+          /* Tearing a source down raises an error of its own; only one raised
+             while a source is attached counts. */
           onError={() => { if (armed.current) setState('error'); }}
         />
       )}
 
-      {/* ── our one control bar ──────────────────────────────────────────
-          Only once the source is really playable: a bar reading 0:00 / 0:00
-          over a spinner is furniture, not a control. */}
+      {/* ── our control bar (file / hls) ──────────────────────────────────── */}
       {native && state === 'ready' && (
         <>
           {!playing && (
@@ -1090,17 +1168,10 @@ export default function VideoPlayer({
               <button type="button" className="vp-big" onClick={togglePlay} aria-label="Play">
                 <Play size={34} fill="currentColor" stroke="none" />
               </button>
-              {blocked && (
-                <div className="vp-blocked">Tap play to start — your browser blocked autoplay</div>
-              )}
+              {blocked && <div className="vp-blocked">Tap play to start — your browser blocked autoplay</div>}
             </>
           )}
-
-          {nudge && <div className="vp-nudge" aria-hidden="true">{nudge}</div>}
-
-          {resumed > 0 && (
-            <div className="vp-resumed" role="status">Resumed from {clock(resumed)}</div>
-          )}
+          {effects}
 
           <div className="vp-ctl">
             <div className="vp-seek">
@@ -1124,30 +1195,21 @@ export default function VideoPlayer({
 
             <div className="vp-row">
               <button type="button" className="vp-btn" onClick={togglePlay} aria-label={playing ? 'Pause' : 'Play'}>
-                {playing ? <Pause size={21} /> : <Play size={21} fill="currentColor" stroke="none" />}
+                <span className={`vp-morph${playing ? ' is-on' : ''}`}>
+                  <Play className="vp-morph-play" size={21} fill="currentColor" stroke="none" />
+                  <Pause className="vp-morph-pause" size={21} strokeWidth={2.6} />
+                </span>
               </button>
-
-              <button
-                type="button"
-                className="vp-btn"
-                onClick={() => seekBy(-SKIP)}
-                aria-label="Back 5 seconds"
-                title="Back 5 seconds"
-              >
-                <Back5 size={21} />
+              <button type="button" className="vp-btn" onClick={() => seekBy(-SKIP)}
+                aria-label={`Back ${SKIP} seconds`} title={`Back ${SKIP} seconds (←)`}>
+                <SkipBack n={SKIP} size={22} />
               </button>
-              <button
-                type="button"
-                className="vp-btn"
-                onClick={() => seekBy(SKIP)}
-                aria-label="Forward 5 seconds"
-                title="Forward 5 seconds"
-              >
-                <Fwd5 size={21} />
+              <button type="button" className="vp-btn" onClick={() => seekBy(SKIP)}
+                aria-label={`Forward ${SKIP} seconds`} title={`Forward ${SKIP} seconds (→)`}>
+                <SkipFwd n={SKIP} size={22} />
               </button>
 
               <span className="vp-time">{clock(cur)} <em>/</em> {clock(len)}</span>
-
               <span className="vp-gap" />
 
               <div className="vp-vol">
@@ -1180,14 +1242,8 @@ export default function VideoPlayer({
                 {rateOpen && (
                   <div className="vp-rate" role="menu">
                     {SPEEDS.map((r) => (
-                      <button
-                        key={r}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={r === rate}
-                        className={r === rate ? 'on' : ''}
-                        onClick={() => pickRate(r)}
-                      >
+                      <button key={r} type="button" role="menuitemradio" aria-checked={r === rate}
+                        className={r === rate ? 'on' : ''} onClick={() => pickRate(r)}>
                         {r === 1 ? 'Normal' : `${r}x`}
                       </button>
                     ))}
@@ -1195,13 +1251,14 @@ export default function VideoPlayer({
                 )}
               </div>
 
-              <button
-                type="button"
-                className="vp-btn"
-                onClick={toggleFullscreen}
-                aria-label={fs ? 'Exit fullscreen' : 'Fullscreen'}
-                title={fs ? 'Exit fullscreen' : 'Fullscreen'}
-              >
+              {onHelp && (
+                <button type="button" className="vp-btn" onClick={onHelp}
+                  aria-label="Video not working? Troubleshoot" title="Video not working? Troubleshoot">
+                  <Wrench size={18} />
+                </button>
+              )}
+              <button type="button" className="vp-btn" onClick={toggleFullscreen}
+                aria-label={fs ? 'Exit fullscreen' : 'Fullscreen'} title={fs ? 'Exit fullscreen (f)' : 'Fullscreen (f)'}>
                 {fs ? <Compress size={20} /> : <Expand size={20} />}
               </button>
             </div>
@@ -1216,19 +1273,29 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {/* Buffering is not loading: the picture is already there, so only the
-          spinner comes back, with nothing written over the frame. */}
       {state === 'ready' && waiting && (
         <div className="vp-overlay vp-overlay-bare" role="status" aria-live="polite">
           <div className="spinner" />
         </div>
       )}
 
+      {/* Slow or unanswered: say so, and offer the way out. */}
+      {slow && !(drivable && connected) && state !== 'error' && onHelp && (
+        <button type="button" className="vp-trouble" onClick={onHelp}>
+          <Wrench size={15} /> Video not playing? Fix it
+        </button>
+      )}
+
       {state === 'error' && (
         <div className="vp-overlay vp-overlay-solid" role="alert">
           <p className="vp-error-title">This video would not load</p>
           <p className="vp-error-sub">It may be a network hiccup, or the source may have moved.</p>
-          <button type="button" className="btn btn-outline vp-retry" onClick={retry}>Try again</button>
+          <div className="vp-error-acts">
+            <button type="button" className="btn btn-outline vp-retry" onClick={retry}>Try again</button>
+            {onHelp && (
+              <button type="button" className="btn btn-outline vp-retry" onClick={onHelp}>Troubleshoot</button>
+            )}
+          </div>
         </div>
       )}
     </div>

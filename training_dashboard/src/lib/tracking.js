@@ -25,10 +25,12 @@
 //  Everything here is best effort: analytics must never break a lesson.
 // ===========================================================================
 import { api } from './api';
+import { devicePayload, deviceInfoRich } from './device';
 
 const KEY = 'istudio_visit_key';
 const FLUSH_MS = 60000;    // how often buffered time is handed over
 const IDLE_MS = 120000;    // silence after which we stop counting
+const FIRST_FLUSH_MS = 4000; // open the visit row (with the device) promptly
 
 function visitKey() {
   let k = sessionStorage.getItem(KEY);
@@ -44,6 +46,10 @@ function visitKey() {
 let started = false;
 let timer = null;
 let sentEntry = false;
+let firstTimer = null;
+/* Browser, version, OS, screen… filled in (with Client Hints where the
+   browser has them) before the first flush goes out. */
+let device = devicePayload();
 
 /** Screens awaiting delivery: key -> { path, title, course_id, lesson_id, seconds, views } */
 const buffer = new Map();
@@ -97,6 +103,7 @@ function flush(beacon = false) {
     payload.entry = {
       path: window.location.pathname,
       referrer: document.referrer || '',
+      device,
     };
     sentEntry = true;
   }
@@ -141,6 +148,10 @@ export function startTracking() {
   segmentStart = now();
 
   timer = setInterval(() => flush(false), FLUSH_MS);
+  /* The visit row carries the device details, and a visit that ends inside
+     the first minute should still leave one — so the first flush is early. */
+  deviceInfoRich().then((d) => { device = devicePayload(d); }).catch(() => {});
+  firstTimer = setTimeout(() => flush(false), FIRST_FLUSH_MS);
 
   document.addEventListener('visibilitychange', onVisibility);
   window.addEventListener('pagehide', onPageHide);
@@ -152,6 +163,7 @@ export function startTracking() {
 export function stopTracking() {
   if (!started) return;
   clearInterval(timer);
+  clearTimeout(firstTimer);
   timer = null;
   started = false;
   buffer.clear();

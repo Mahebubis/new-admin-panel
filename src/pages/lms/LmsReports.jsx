@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { LMS, money, duration, shortDate } from './lmsApi';
 import { Loader, Empty } from './LmsStyles';
+import { DeviceReport, FeedbackReport } from './LmsPortalInsights';
 
 /* All time first: the portal is new, so the lifetime figure is the headline
    number for now and the windows are the follow-up question. */
@@ -165,6 +166,8 @@ export default function LmsReports() {
           <button className={view === 'funnel' ? 'active' : ''} onClick={() => setView('funnel')}>Course funnel</button>
           <button className={view === 'progress' ? 'active' : ''} onClick={() => setView('progress')}>Learner progress</button>
           <button className={view === 'access' ? 'active' : ''} onClick={() => setView('access')}>Portal access</button>
+          <button className={view === 'devices' ? 'active' : ''} onClick={() => setView('devices')}>Devices & issues</button>
+          <button className={view === 'feedback' ? 'active' : ''} onClick={() => setView('feedback')}>Course feedback</button>
         </div>
         {view === 'progress' && (
           <select className="lms-select" style={{ width: 280 }} value={courseId} onChange={e => setCourseId(e.target.value)}>
@@ -179,6 +182,10 @@ export default function LmsReports() {
           </select>
         )}
       </div>
+
+      {/* ═══ DEVICES & ISSUES / COURSE FEEDBACK — see LmsPortalInsights.jsx ═══ */}
+      {view === 'devices' && <DeviceReport />}
+      {view === 'feedback' && <FeedbackReport courses={courses} />}
 
       {/* ═══ FUNNEL ═══ */}
       {view === 'funnel' && (

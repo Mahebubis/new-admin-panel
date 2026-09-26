@@ -9,6 +9,7 @@ import {
 } from './eventsConfig';
 
 const API = '/api/netcore/behaviour.php';
+const SPEND_API = '/api/campaigns/spend.php';
 const FORM_HEADERS = { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } };
 
 /* Prepend the 'select parameter' sentinel that the behaviour-page dropdown
@@ -58,6 +59,94 @@ function DotsLoader({ color = '#4f46e5', size = 9 }) {
         }} />
       ))}
     </span>
+  );
+}
+
+/*
+ * What messaging is costing, as one line on the screen that is already open.
+ *
+ * DELIBERATELY UNABLE TO BREAK THIS PAGE. It is mounted last, fetches on its own, renders nothing
+ * at all until the numbers arrive, and swallows every failure — this page is the Netcore home and
+ * an analytics dashboard must not go blank because a cap table has not been created yet.
+ *
+ * It shows only what needs no explanation: the period's spend against the cap, and whether the
+ * watchdog has seen anything odd. Everything that can be changed lives on /netcore/spend.
+ */
+function SpendStrip() {
+  const navigate = useNavigate();
+  const [s, setS] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    api.post(SPEND_API, new URLSearchParams({ action: 'get' }),
+             { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+      .then(r => { if (alive) setS(r.data?.data || r.data || null); })
+      .catch(() => { /* the cap is not configured, or the endpoint is not deployed yet */ });
+    return () => { alive = false; };
+  }, []);
+
+  if (!s) return null;
+  const wa = s.whatsapp?.state || {};
+  const em = s.email?.state || {};
+  /* Nothing to say while neither cap is on and nothing has been spent. A row of zeroes on the
+     home page is worse than no row. */
+  const anySpend = Number(wa.month_spent || 0) + Number(em.month_spent || 0) > 0;
+  if (!wa.enabled && !em.enabled && !anySpend) return null;
+
+  const findings = (s.anomalies || []).filter(a => {
+    const age = (Date.now() - new Date(String(a.seen_at).replace(' ', 'T')).getTime()) / 36e5;
+    return age >= 0 && age <= 72;   // only what is still current
+  });
+  const pausedN = (s.paused?.whatsapp?.length || 0) + (s.paused?.email?.length || 0);
+  const fmt = (cur, n) => `${cur || 'INR'} ${Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+
+  const Cell = ({ label, st }) => {
+    const pct = Math.max(Number(st.month_pct || 0), Number(st.month_msg_pct || 0));
+    const color = !st.enabled ? '#94a3b8' : pct >= 100 ? '#dc2626' : pct >= 80 ? '#f59e0b' : '#4f46e5';
+    return (
+      <div style={{ minWidth: 168 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', letterSpacing: '.03em', textTransform: 'uppercase' }}>{label}</div>
+        <div style={{ fontSize: 17, fontWeight: 750, color: '#0f172a', letterSpacing: '-.2px', marginTop: 2 }}>
+          {fmt(st.currency, st.month_spent)}
+          {st.enabled && Number(st.month_cap) > 0 && (
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}> / {fmt(st.currency, st.month_cap)}</span>
+          )}
+        </div>
+        <div style={{ height: 5, borderRadius: 999, background: '#e2e8f0', overflow: 'hidden', marginTop: 6 }}>
+          <div style={{ height: '100%', width: `${Math.max(0, Math.min(100, pct))}%`, background: color, borderRadius: 999, transition: 'width .4s' }} />
+        </div>
+        <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+          {st.enabled ? `${pct.toFixed(0)}% of the cap · ${Number(st.month_messages || 0).toLocaleString('en-US')} messages`
+                      : 'no cap set'}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 28, flexWrap: 'wrap',
+      background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12,
+      padding: '14px 18px', marginBottom: 18, boxShadow: '0 1px 2px rgba(16,24,40,.05)'
+    }}>
+      <Cell label="WhatsApp this period" st={wa} />
+      <Cell label="Email this period" st={em} />
+
+      {(findings.length > 0 || pausedN > 0) && (
+        <div style={{ fontSize: 12, lineHeight: 1.55, color: '#92400e', background: '#fef3c7',
+                      border: '1px solid #fde68a', borderRadius: 8, padding: '8px 12px', maxWidth: 380 }}>
+          {pausedN > 0 && <div><b>{pausedN} campaign{pausedN > 1 ? 's' : ''} paused by the cap.</b> Their recipients are still queued.</div>}
+          {findings.length > 0 && <div>{findings[0].detail}</div>}
+        </div>
+      )}
+
+      <button onClick={() => navigate('/netcore/spend')}
+              style={{ marginLeft: 'auto', padding: '8px 16px', fontSize: 12.5, fontWeight: 680,
+                       fontFamily: 'inherit', color: '#344054', background: '#fff',
+                       border: '1.5px solid #d0d5dd', borderRadius: 8, cursor: 'pointer' }}>
+        Spend control
+      </button>
+    </div>
   );
 }
 
@@ -809,6 +898,13 @@ export default function NetcoreBehaviour() {
             )}
           </div>
         </div>
+
+        {/* ══ SPEND STRIP ══
+            What messaging is costing, on the screen people already have open.
+            Read-only and entirely optional: it renders only once the numbers arrive and a
+            failure leaves the page exactly as it was. The controls themselves live on
+            /netcore/spend — this is the line that makes anyone go and look. */}
+        <SpendStrip />
 
         {/* ══ TABS ══ */}
         <div style={{ display: 'flex', borderBottom: '2px solid #e0e0e0', marginBottom: 20 }}>

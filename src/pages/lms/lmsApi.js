@@ -173,6 +173,11 @@ export const LMS = {
      went. `days` of 0 means all time. Enrollment is not access — this is the
      only report that can tell the two apart. */
   portalAccess: (days = 0) => api(`resource=reports&action=portal_access&days=${days}`),
+  /* Browser / version / OS / device / IP per portal visit, plus every playback
+     problem the portal logged. Dates are YYYY-MM-DD, inclusive. */
+  portalDevices: (from, to) => api(`resource=reports&action=portal_devices&from=${from}&to=${to}`),
+  /* The learners' course reviews — stars, why, and the six quick questions. */
+  courseFeedback: ({ from, to, course_id = 0 }) => api(`resource=reports&action=course_feedback&from=${from}&to=${to}&course_id=${course_id}`),
 
   /* support desk — the other end of the learner portal's /support screen.
      `author` on a reply is the signed-in admin's name: this file's PHP has no

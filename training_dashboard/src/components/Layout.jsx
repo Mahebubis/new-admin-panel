@@ -7,11 +7,13 @@ import Header from './Header';
 import Footer from './Footer';
 import SupportFab from './SupportFab';
 import ResetNotice from './ResetNotice';
+import InAppNotice from './InAppNotice';
 import { EmptyFigure } from './icons';
 
 export default function Layout({ bare = false }) {
   return (
     <div className="shell">
+      <InAppNotice />
       <Header />
       <main className="shell-main">
         <Outlet />

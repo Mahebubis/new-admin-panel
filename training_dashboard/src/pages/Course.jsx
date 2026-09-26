@@ -30,9 +30,14 @@ import { markActive, trackPage } from '../lib/tracking';
 import VideoPlayer from '../components/VideoPlayer';
 import QuizStage from '../components/QuizStage';
 import DocStage from '../components/DocStage';
+import PlayerHelp from '../components/PlayerHelp';
+import CourseFeedback, { FeedbackPrompt } from '../components/CourseFeedback';
+import { devicePayload, deviceInfoRich } from '../lib/device';
 import Syllabus from '../components/Syllabus';
 import { EmptyState, PageLoader } from '../components/Layout';
-import { Bookmark, Check, CheckCircle, ChevronLeft, Hourglass, Kebab, Replay, SkipNext } from '../components/icons';
+import {
+  Bookmark, Check, CheckCircle, ChevronLeft, Hourglass, Info, Kebab, Replay, SkipNext, Star, Wrench,
+} from '../components/icons';
 import './course.css';
 
 const TABS = [
@@ -79,6 +84,18 @@ export default function Course() {
      lesson opened by CLICKING (the syllabus, Up next, "play next") follows a
      real user gesture and starts on its own. */
   const [autoPlay, setAutoPlay] = useState(false);
+  /* The troubleshooter, and the player state it reports on. */
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [diag, setDiag] = useState(null);
+  /* The course review: what this learner has already said, the dialog, and
+     the snackbar that asks after a lesson is completed. */
+  const [myFeedback, setMyFeedback] = useState(null);
+  const [fbOpen, setFbOpen] = useState(false);
+  const [fbStars, setFbStars] = useState(0);
+  const [fbPrompt, setFbPrompt] = useState(false);
+  const fbRef = useRef(null);
+  useEffect(() => { fbRef.current = myFeedback; }, [myFeedback]);
 
   const stageRef = useRef(null);
   /* The lesson we have already warned about a failed save on — see onProgress. */
@@ -203,6 +220,49 @@ export default function Course() {
     return () => { alive = false; };
   }, [course?.id]);
 
+  /* ── the learner's review of this course ─────────────────────────────── */
+  useEffect(() => {
+    if (!course?.id) return undefined;
+    let alive = true;
+    api.feedback(course.id)
+      .then((d) => alive && setMyFeedback(d.feedback || null))
+      .catch(() => alive && setMyFeedback(null));
+    return () => { alive = false; };
+  }, [course?.id]);
+
+  /* Ask — gently — once the learner has something to rate: at least two
+     lessons or a fifth of the course done. "Not now" holds off for three
+     days; a rating already given means it never asks again. */
+  const snoozeKey = `istudio_fb_snooze_${course?.id || 0}`;
+  const maybeAskFeedback = useCallback((prog) => {
+    if (!course?.id || fbRef.current?.rating) return;
+    const done = Number(prog?.completed || 0);
+    const pct = Number(prog?.percent || 0);
+    if (done < 2 && pct < 20) return;
+    try {
+      if (Number(localStorage.getItem(snoozeKey) || 0) > Date.now()) return;
+    } catch { /* storage blocked: ask anyway */ }
+    setTimeout(() => setFbPrompt(true), 1200);
+  }, [course?.id, snoozeKey]);
+
+  const snoozeFeedback = useCallback(() => {
+    setFbPrompt(false);
+    try { localStorage.setItem(snoozeKey, String(Date.now() + 3 * 86400000)); } catch { /* ignore */ }
+  }, [snoozeKey]);
+
+  const openFeedback = useCallback((stars = 0) => {
+    setFbPrompt(false);
+    setFbStars(stars);
+    setFbOpen(true);
+  }, []);
+  const closeFeedback = useCallback(() => {
+    setFbOpen(false);
+    /* Closed without rating: that is a "not now". */
+    if (!fbRef.current?.rating) {
+      try { localStorage.setItem(snoozeKey, String(Date.now() + 3 * 86400000)); } catch { /* ignore */ }
+    }
+  }, [snoozeKey]);
+
   /* ── analytics: a lesson change is a page view ───────────────────────── */
   useEffect(() => {
     if (!course?.id) return;
@@ -287,29 +347,72 @@ export default function Course() {
 
   const [saving, setSaving] = useState(false);
 
-  const setComplete = useCallback(async (done) => {
-    if (!active?.id) return;
+  /* Any lesson, not only the open one — the attachments sheet in the syllabus
+     ticks off the lesson whose files it is showing. */
+  const setComplete = useCallback(async (done, lessonId = active?.id) => {
+    if (!lessonId) return;
     setSaving(true);
     try {
-      const d = await api.markComplete(active.id, done);
+      const d = await api.markComplete(lessonId, done);
       setData((prev) => prev && {
         ...prev,
         progress: d.progress,
-        lessons: prev.lessons.map((l) => (l.id === active.id ? { ...l, status: d.status } : l)),
+        lessons: prev.lessons.map((l) => (l.id === lessonId ? { ...l, status: d.status } : l)),
         sections: prev.sections.map((s) => ({
           ...s,
-          lessons: s.lessons.map((l) => (l.id === active.id ? { ...l, status: d.status } : l)),
+          lessons: s.lessons.map((l) => (l.id === lessonId ? { ...l, status: d.status } : l)),
         })),
       });
       /* The server reports the status it actually stored, so a write it
          refused cannot leave a tick on screen. */
       flash(d.status === 'completed' ? 'Marked as complete' : 'Marked as not complete');
+      if (d.status === 'completed') maybeAskFeedback(d.progress);
     } catch (e) {
       flash(e.message);
     } finally {
       setSaving(false);
     }
-  }, [active, flash]);
+  }, [active?.id, flash, maybeAskFeedback]);
+
+  /* ── playback problems → the issue log ─────────────────────────────────
+     The player reports what it notices by itself (a source that never
+     loaded, an embed that never answered); the troubleshooter's button sends
+     what the learner describes. Both carry the device details, which is what
+     lets the admin Reports screen say which browser and version is behind
+     the complaints. */
+  const sendIssue = useCallback(async (type, detail, note = '', source = 'auto') => {
+    const dev = await deviceInfoRich().catch(() => undefined);
+    return api.reportIssue({
+      course_id: course?.id || 0,
+      lesson_id: active?.id || 0,
+      type,
+      detail: String(detail || '').slice(0, 400),
+      note,
+      source,
+      video_kind: diag?.kind || active?.video?.kind || '',
+      video_url: String(diag?.src || active?.video?.embed || active?.video?.src || '').slice(0, 480),
+      player_state: diag ? `${diag.state}${diag.drivable ? (diag.connected ? ' · connected' : ' · not connected') : ''}` : '',
+      page: window.location.pathname + window.location.search,
+      device: devicePayload(dev),
+    });
+  }, [course?.id, active, diag]);
+
+  const onIssue = useCallback(({ type, detail }) => {
+    sendIssue(type, detail).catch(() => {/* best effort */});
+  }, [sendIssue]);
+
+  const onReport = useCallback((note) => sendIssue('learner_report', 'Reported from the troubleshooter', note, 'learner'), [sendIssue]);
+  const openHelp = useCallback(() => setHelpOpen(true), []);
+  const closeHelp = useCallback(() => setHelpOpen(false), []);
+
+  /* Links inside admin-written HTML (the course description, an article
+     lesson) must never navigate this tab away from the lesson. */
+  const newTabLinks = useCallback((e) => {
+    const a = e.target.closest?.('a[href]');
+    if (!a || a.target === '_blank' || a.getAttribute('href')?.startsWith('#')) return;
+    e.preventDefault();
+    window.open(a.href, '_blank', 'noopener,noreferrer');
+  }, []);
 
   /** Open a lesson the learner asked for by clicking. */
   const openLesson = useCallback((lessonId) => {
@@ -423,6 +526,9 @@ export default function Course() {
     );
   }
 
+  const isDone = active?.status === 'completed';
+  const canComplete = !!active && !active.coming_soon && active.type !== 'quiz';
+
   return (
     <div className="course">
       {/* ── left: stage + tabs ─────────────────────────────────────────── */}
@@ -433,9 +539,32 @@ export default function Course() {
           </button>
           <h1 className="course-name">{course?.title}</h1>
 
+          {/* Completion, in plain sight, for every lesson a learner can finish
+              by hand — videos, PDFs, attachments, articles. It used to live
+              only in the kebab over the stage, where nobody found it. Quizzes
+              complete themselves by being passed. */}
+          {canComplete && (
+            <button
+              type="button"
+              className={`course-done${isDone ? ' on' : ''}`}
+              onClick={() => setComplete(!isDone)}
+              disabled={saving}
+              title={isDone ? 'Completed — click to mark as not complete' : 'Mark this lesson as complete'}
+            >
+              <span className="course-done-ico">{isDone ? <CheckCircle size={18} /> : <Check size={17} />}</span>
+              <span className="course-done-l">{saving ? 'Saving…' : isDone ? 'Completed' : 'Mark as complete'}</span>
+            </button>
+          )}
+
+          <button type="button" className="course-rate" onClick={() => openFeedback(0)}
+            title={myFeedback?.rating ? 'Edit your rating' : 'Rate this course'}>
+            <Star size={17} fill={myFeedback?.rating ? 'currentColor' : 'none'} />
+            <span>{myFeedback?.rating ? <>YOUR RATING <b>{myFeedback.rating}.0</b></> : 'RATE COURSE'}</span>
+          </button>
+
           <button className={`course-fav${fav ? ' on' : ''}`} onClick={toggleFav}>
             <Bookmark size={18} />
-            {fav ? 'IN FAVOURITES' : 'ADD TO FAVOURITES'}
+            <span>{fav ? 'IN FAVOURITES' : 'ADD TO FAVOURITES'}</span>
           </button>
         </div>
 
@@ -467,7 +596,13 @@ export default function Course() {
           ) : docStage ? (
             /* PDFs, images and every attachment render right here now, in the
                space the video would occupy — see DocStage.jsx. */
-            <DocStage lesson={active} />
+            <DocStage
+              lesson={active}
+              done={isDone}
+              saving={saving}
+              onToggleDone={() => setComplete(!isDone)}
+              onLinkClick={newTabLinks}
+            />
           ) : (
             <VideoPlayer
               video={active?.video}
@@ -478,8 +613,12 @@ export default function Course() {
               startAt={active?.resume_secs || active?.watched_secs || 0}
               autoPlay={autoPlay}
               replayToken={replayToken}
+              reloadToken={reloadToken}
               onProgress={onProgress}
               onEnded={onEnded}
+              onHelp={openHelp}
+              onIssue={onIssue}
+              onDiag={setDiag}
             />
           )}
 
@@ -589,6 +728,21 @@ export default function Course() {
           </div>
         </div>
 
+        {/* The standing advice, where the learner is looking when a video
+            misbehaves — and the door to the troubleshooter. */}
+        {!docStage && active?.type !== 'quiz' && !active?.coming_soon && (
+          <div className="stage-note">
+            <Info size={16} />
+            <span className="stage-note-text">
+              <b>Open this portal in Chrome, Edge, Safari or Firefox</b> — not inside an app like
+              Instagram, WhatsApp, Facebook or LinkedIn, where videos may not play or pause properly.
+            </span>
+            <button type="button" className="stage-note-help" onClick={openHelp}>
+              <Wrench size={14} /> Video not playing?
+            </button>
+          </div>
+        )}
+
         <div className="course-tabs" role="tablist">
           {TABS.map((t) => (
             <button
@@ -603,7 +757,7 @@ export default function Course() {
           ))}
         </div>
 
-        <div className="course-panel">
+        <div className="course-panel" onClick={newTabLinks}>
           {tab === 'about' && <AboutTab course={course} lesson={active} progress={data?.progress} />}
           {tab === 'recent' && <RecentTab />}
           {tab === 'notes' && (
@@ -627,7 +781,32 @@ export default function Course() {
         activeId={activeId}
         nextId={next?.id || 0}
         onPick={openLesson}
+        onComplete={(lessonId, done) => setComplete(done, lessonId)}
+        completing={saving}
       />
+
+      <PlayerHelp
+        open={helpOpen}
+        onClose={closeHelp}
+        onReload={() => setReloadToken((n) => n + 1)}
+        video={active?.video}
+        diag={diag}
+        onReport={onReport}
+      />
+
+      <CourseFeedback
+        open={fbOpen}
+        onClose={closeFeedback}
+        course={course}
+        existing={myFeedback}
+        initialRating={fbStars}
+        onSaved={setMyFeedback}
+        progress={data?.progress?.percent || 0}
+        lessonId={active?.id || 0}
+      />
+      {fbPrompt && !fbOpen && (
+        <FeedbackPrompt course={course} onRate={openFeedback} onDismiss={snoozeFeedback} />
+      )}
 
       {toast && <div className="course-toast" role="status">{toast}</div>}
     </div>

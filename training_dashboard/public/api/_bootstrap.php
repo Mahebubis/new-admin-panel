@@ -498,3 +498,168 @@ function learn_log_login($conn, $userId, $email, $method, $outcome = 'success', 
                 '" . learn_esc($conn, $outcome) . "', '" . learn_esc($conn, $reason) . "', " . (int)$handoffId . ",
                 '" . learn_esc($conn, learn_ip()) . "', '" . learn_esc($conn, learn_ua()) . "')");
 }
+
+
+/* ═══════════════════════ device, playback issues, feedback ═══════════════════
+ *
+ * Three things the admin Reports screen reads (react-api/api/lms/lms_api.php,
+ * resource=reports, actions portal_devices and course_feedback):
+ *
+ *   lms_learner_visits  + browser / version / OS / device / in-app columns, so
+ *                         "which browser were they on" has an answer per visit
+ *   lms_player_issues   one row per playback problem — noticed by the player
+ *                         itself or reported from the troubleshooter
+ *   lms_course_feedback one row per learner per course: the star rating, why,
+ *                         and the six Yes / No / Not sure questions
+ *
+ * Not in learn_install(): that runs on every request, and the ALTERs here
+ * are only needed by track.php and feedback.php. Cached in a marker file for
+ * an hour, like learn_watch_columns().
+ */
+function learn_insight_install($conn) {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+
+    $marker = sys_get_temp_dir() . '/istudio-lms-insight-v1.flag';
+    if (is_file($marker) && (time() - (int)@filemtime($marker)) < 3600) return;
+
+    /* mysqli throws on PHP 8.1+; a schema hiccup here must never take down
+       the request that asked — tracking is best effort. */
+    try {
+        learn_insight_ddl($conn, $marker);
+    } catch (Throwable $t) {
+        learn_log('SCHEMA', 'insight install: ' . $t->getMessage());
+    }
+}
+
+function learn_insight_ddl($conn, $marker) {
+
+    $ok = true;
+    $cols = [];
+    $r = $conn->query('SHOW COLUMNS FROM lms_learner_visits');
+    while ($r && ($row = $r->fetch_assoc())) $cols[strtolower((string)$row['Field'])] = true;
+    $want = [
+        'browser'         => "`browser` VARCHAR(40) NULL DEFAULT NULL",
+        'browser_version' => "`browser_version` VARCHAR(40) NULL DEFAULT NULL",
+        'os'              => "`os` VARCHAR(30) NULL DEFAULT NULL",
+        'os_version'      => "`os_version` VARCHAR(30) NULL DEFAULT NULL",
+        'device_type'     => "`device_type` VARCHAR(16) NULL DEFAULT NULL",
+        'in_app'          => "`in_app` VARCHAR(40) NULL DEFAULT NULL",
+        'screen'          => "`screen` VARCHAR(20) NULL DEFAULT NULL",
+        'device_json'     => "`device_json` TEXT NULL",
+    ];
+    if ($cols) {
+        foreach ($want as $name => $ddl) {
+            if (isset($cols[$name])) continue;
+            if (!$conn->query("ALTER TABLE lms_learner_visits ADD COLUMN $ddl")) {
+                $ok = false;
+                learn_log('SCHEMA', "could not add lms_learner_visits.$name: " . $conn->error);
+            }
+        }
+    }
+
+    $ok = $conn->query("CREATE TABLE IF NOT EXISTS lms_player_issues (
+        id              INT AUTO_INCREMENT PRIMARY KEY,
+        user_id         INT          NOT NULL,
+        course_id       INT               DEFAULT 0,
+        lesson_id       INT               DEFAULT 0,
+        issue_type      VARCHAR(40)  NOT NULL,
+        source          VARCHAR(12)       DEFAULT 'auto',
+        detail          VARCHAR(400)      DEFAULT NULL,
+        note            TEXT,
+        video_kind      VARCHAR(16)       DEFAULT NULL,
+        video_url       VARCHAR(500)      DEFAULT NULL,
+        player_state    VARCHAR(60)       DEFAULT NULL,
+        page            VARCHAR(255)      DEFAULT NULL,
+        browser         VARCHAR(40)       DEFAULT NULL,
+        browser_version VARCHAR(40)       DEFAULT NULL,
+        os              VARCHAR(30)       DEFAULT NULL,
+        os_version      VARCHAR(30)       DEFAULT NULL,
+        device_type     VARCHAR(16)       DEFAULT NULL,
+        in_app          VARCHAR(40)       DEFAULT NULL,
+        device_json     TEXT,
+        ip              VARCHAR(45)       DEFAULT NULL,
+        user_agent      VARCHAR(400)      DEFAULT NULL,
+        created_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_created (created_at),
+        INDEX idx_user (user_id, created_at),
+        INDEX idx_browser (browser, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci") && $ok;
+
+    $ok = $conn->query("CREATE TABLE IF NOT EXISTS lms_course_feedback (
+        id          INT AUTO_INCREMENT PRIMARY KEY,
+        user_id     INT          NOT NULL,
+        course_id   INT          NOT NULL,
+        rating      TINYINT           DEFAULT 0,
+        review      TEXT,
+        answers     TEXT,
+        progress    TINYINT           DEFAULT 0,
+        lesson_id   INT               DEFAULT 0,
+        created_at  TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+        updated_at  DATETIME          DEFAULT NULL,
+        UNIQUE KEY uniq_user_course (user_id, course_id),
+        INDEX idx_course (course_id, created_at),
+        INDEX idx_created (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci") && $ok;
+
+    if ($ok) @touch($marker);
+}
+
+/**
+ * The browser, version, OS and form factor — the client's own report where it
+ * sent one (Client Hints know Windows 11 from 10 and the full build number),
+ * else a parse of the User-Agent header so an old client still gets a row.
+ */
+function learn_device($client = null) {
+    $ua = (string)($_SERVER['HTTP_USER_AGENT'] ?? '');
+    $d  = ['browser' => 'Unknown', 'browser_version' => '', 'os' => 'Unknown', 'os_version' => '',
+           'device_type' => 'desktop', 'in_app' => ''];
+
+    if (preg_match('#Edg(?:e|A|iOS)?/([\d.]+)#', $ua, $m))            { $d['browser'] = 'Edge';    $d['browser_version'] = $m[1]; }
+    elseif (preg_match('#OPR/([\d.]+)#', $ua, $m))                     { $d['browser'] = 'Opera';   $d['browser_version'] = $m[1]; }
+    elseif (preg_match('#SamsungBrowser/([\d.]+)#', $ua, $m))          { $d['browser'] = 'Samsung Internet'; $d['browser_version'] = $m[1]; }
+    elseif (preg_match('#(?:Firefox|FxiOS)/([\d.]+)#', $ua, $m))       { $d['browser'] = 'Firefox'; $d['browser_version'] = $m[1]; }
+    elseif (preg_match('#CriOS/([\d.]+)#', $ua, $m))                   { $d['browser'] = 'Chrome';  $d['browser_version'] = $m[1]; }
+    elseif (preg_match('#Chrome/([\d.]+)#', $ua, $m))                  { $d['browser'] = strpos($ua, '; wv)') !== false ? 'Android WebView' : 'Chrome'; $d['browser_version'] = $m[1]; }
+    elseif (strpos($ua, 'Safari/') !== false && preg_match('#Version/([\d.]+)#', $ua, $m)) { $d['browser'] = 'Safari'; $d['browser_version'] = $m[1]; }
+
+    if (preg_match('#Windows NT ([\d.]+)#', $ua, $m))                  { $d['os'] = 'Windows'; $d['os_version'] = $m[1] === '10.0' ? '10/11' : $m[1]; }
+    elseif (preg_match('#Android ([\d.]+)#', $ua, $m))                 { $d['os'] = 'Android'; $d['os_version'] = $m[1]; }
+    elseif (preg_match('#(?:iPhone|iPad|iPod).*?OS ([\d_]+)#', $ua, $m)) { $d['os'] = 'iOS'; $d['os_version'] = str_replace('_', '.', $m[1]); }
+    elseif (preg_match('#Mac OS X ([\d_.]+)#', $ua, $m))               { $d['os'] = 'macOS';   $d['os_version'] = str_replace('_', '.', $m[1]); }
+    elseif (strpos($ua, 'CrOS') !== false)                             { $d['os'] = 'ChromeOS'; }
+    elseif (strpos($ua, 'Linux') !== false)                            { $d['os'] = 'Linux'; }
+
+    if (preg_match('#iPad|Tablet#', $ua) || (strpos($ua, 'Android') !== false && strpos($ua, 'Mobile') === false)) $d['device_type'] = 'tablet';
+    elseif (preg_match('#Mobi|iPhone|iPod|Android#', $ua)) $d['device_type'] = 'mobile';
+
+    foreach (['Instagram' => 'Instagram', 'FBAN|FBAV|FB_IAB' => 'Facebook', 'WhatsApp' => 'WhatsApp',
+              'LinkedInApp' => 'LinkedIn', 'Snapchat' => 'Snapchat', 'Telegram' => 'Telegram',
+              'MicroMessenger' => 'WeChat', 'GSA/' => 'Google app'] as $re => $name) {
+        if (preg_match("#$re#", $ua)) { $d['in_app'] = $name; break; }
+    }
+
+    /* The client's answer wins field by field, trimmed to the column sizes. */
+    if (is_array($client)) {
+        $map = ['browser' => 40, 'browser_version' => 40, 'os' => 30, 'os_version' => 30, 'in_app' => 40];
+        foreach ($map as $k => $len) {
+            if (isset($client[$k]) && is_scalar($client[$k]) && trim((string)$client[$k]) !== '') {
+                $d[$k] = substr(trim((string)$client[$k]), 0, $len);
+            }
+        }
+        if (isset($client['device']) && in_array($client['device'], ['desktop', 'mobile', 'tablet'], true)) {
+            $d['device_type'] = $client['device'];
+        }
+        $d['screen'] = substr(preg_replace('/[^0-9x]/', '', (string)($client['screen'] ?? '')), 0, 20);
+        /* Everything else the client measured, for the detail view. Only
+           scalars, capped, so a forged payload cannot bloat the row. */
+        $extra = [];
+        foreach ($client as $k => $v) {
+            if (count($extra) >= 30) break;
+            if (is_scalar($v) && preg_match('/^[a-z_]{1,24}$/', (string)$k)) $extra[$k] = substr((string)$v, 0, 120);
+        }
+        $d['json'] = json_encode($extra, JSON_UNESCAPED_SLASHES);
+    }
+    return $d;
+}

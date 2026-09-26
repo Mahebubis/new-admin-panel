@@ -118,6 +118,10 @@ export const api = {
   favourites:   ()                 => get('library.php?action=favourites'),
   toggleFav:    (course_id)        => post('library.php?action=fav_toggle', { course_id }),
 
+  /* the learner's review of a course — see CourseFeedback.jsx */
+  feedback:     (courseId)         => get(`feedback.php?action=get&course_id=${Number(courseId) || 0}`),
+  saveFeedback: (payload)          => post('feedback.php?action=save', payload),
+
   /* progress */
   /* `report` is the player's {seconds, duration, watched} — the playhead, the
      video's real length and the seconds genuinely watched since the last call.
@@ -141,6 +145,10 @@ export const api = {
 
   /* analytics — one batched call, see lib/tracking.js */
   trackFlush: (payload) => post('track.php?action=flush', payload, { keepalive: true }),
+  /* A playback problem — the troubleshooter's Report button, or one the player
+     noticed on its own (a source that never loaded, an embed that never
+     answered). Stored with the device details for the admin Reports screen. */
+  reportIssue:  (payload) => post('track.php?action=issue', payload, { keepalive: true }),
   /* sendBeacon needs the raw URL: it posts on its own, outside this wrapper. */
   flushUrl:   () => `${BASE}/track.php?action=flush`,
 };

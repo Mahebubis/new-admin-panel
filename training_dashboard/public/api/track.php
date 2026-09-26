@@ -33,6 +33,53 @@ $uid    = learn_require_user();
 $action = $_GET['action'] ?? '';
 $in     = learn_input();
 
+learn_insight_install($conn);
+
+/* ── ?action=issue — a playback problem ─────────────────────────────────
+   POST { course_id, lesson_id, type, detail, note, source, video_kind,
+          video_url, player_state, page, device:{…} }
+   From the player itself (a source that never loaded, an embed that never
+   answered) or from the troubleshooter's Report button. One row each, with
+   the browser details, so the admin can see where problems cluster. */
+if ($action === 'issue') {
+    $type = preg_replace('/[^a-z_]/', '', strtolower((string)($in['type'] ?? '')));
+    if ($type === '') learn_error('type is required');
+    $lid = max(0, (int)($in['lesson_id'] ?? 0));
+
+    /* A player stuck in a loop is one problem, not fifty rows. A learner's
+       own report always gets through. */
+    try {
+    if ($type !== 'learner_report') {
+        $dup = $conn->query("SELECT id FROM lms_player_issues
+                             WHERE user_id = " . (int)$uid . " AND lesson_id = $lid
+                               AND issue_type = '" . learn_esc($conn, $type) . "'
+                               AND created_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE) LIMIT 1");
+        if ($dup && $dup->num_rows) learn_ok(['logged' => false]);
+    }
+
+    $d   = learn_device(is_array($in['device'] ?? null) ? $in['device'] : null);
+    $e   = fn($v, $len) => "'" . learn_esc($conn, substr((string)$v, 0, $len)) . "'";
+    $src = in_array($in['source'] ?? '', ['auto', 'learner'], true) ? $in['source'] : 'auto';
+
+    $ok = $conn->query("INSERT INTO lms_player_issues
+        (user_id, course_id, lesson_id, issue_type, source, detail, note, video_kind, video_url,
+         player_state, page, browser, browser_version, os, os_version, device_type, in_app,
+         device_json, ip, user_agent)
+        VALUES (" . (int)$uid . ", " . max(0, (int)($in['course_id'] ?? 0)) . ", $lid,
+                " . $e($type, 40) . ", '$src', " . $e($in['detail'] ?? '', 400) . ", " . $e($in['note'] ?? '', 1000) . ",
+                " . $e($in['video_kind'] ?? '', 16) . ", " . $e($in['video_url'] ?? '', 500) . ",
+                " . $e($in['player_state'] ?? '', 60) . ", " . $e($in['page'] ?? '', 255) . ",
+                " . $e($d['browser'], 40) . ", " . $e($d['browser_version'], 40) . ", " . $e($d['os'], 30) . ",
+                " . $e($d['os_version'], 30) . ", " . $e($d['device_type'], 16) . ", " . $e($d['in_app'], 40) . ",
+                " . $e($d['json'] ?? '', 4000) . ", " . $e(learn_ip(), 45) . ", " . $e(learn_ua(), 400) . ")");
+    if (!$ok) learn_log('ISSUE', 'insert failed: ' . $conn->error);
+    } catch (Throwable $t) {
+        learn_log('ISSUE', $t->getMessage());
+        $ok = false;
+    }
+    learn_ok(['logged' => (bool)$ok]);
+}
+
 if ($action !== 'flush') learn_error('Unknown track action: ' . $action, 404);
 
 /* A visit key is client-generated, so it is validated hard before use. */
@@ -57,6 +104,20 @@ if (!$visitId) {
                 '" . learn_esc($conn, substr((string)($entry['referrer'] ?? ''), 0, 500)) . "',
                 '" . learn_esc($conn, learn_ip()) . "', '" . learn_esc($conn, learn_ua()) . "', NOW())");
     $visitId = (int)$conn->insert_id;
+
+    /* Which browser, which version, which machine — for the admin's Devices
+       & browsers report. A statement of its own, so a database still missing
+       these columns keeps recording the visit itself. */
+    if ($visitId) {
+        $d = learn_device(is_array($entry['device'] ?? null) ? $entry['device'] : null);
+        $e = fn($v, $len) => "'" . learn_esc($conn, substr((string)$v, 0, $len)) . "'";
+        try { $conn->query("UPDATE lms_learner_visits SET
+                browser = " . $e($d['browser'], 40) . ", browser_version = " . $e($d['browser_version'], 40) . ",
+                os = " . $e($d['os'], 30) . ", os_version = " . $e($d['os_version'], 30) . ",
+                device_type = " . $e($d['device_type'], 16) . ", in_app = " . $e($d['in_app'], 40) . ",
+                screen = " . $e($d['screen'] ?? '', 20) . ", device_json = " . $e($d['json'] ?? '', 4000) . "
+            WHERE id = $visitId"); } catch (Throwable $t) { learn_log('TRACK', 'device: ' . $t->getMessage()); }
+    }
 
     if (!$visitId) {
         /* Two tabs racing on one key: re-read rather than insert a duplicate. */

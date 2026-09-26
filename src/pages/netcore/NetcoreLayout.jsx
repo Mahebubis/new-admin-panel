@@ -44,6 +44,10 @@ const SECTIONS = {
     { to: '/netcore/whatsapp/settings', label: 'WhatsApp settings', icon: 'whatsapp' },
     { to: '/netcore/domains',           label: 'Email domains',     icon: 'domain' },
     { to: '/netcore/journeys/dnd',      label: 'Quiet hours',       icon: 'moon' },
+    /* Under Settings because the caps are a configuration decision — but the same page also
+       shows live spend and the weekly reports, which is why it is not buried in either
+       provider's settings screen. */
+    { to: '/netcore/spend',             label: 'Spend control',     icon: 'wallet' },
   ] },
 };
 
@@ -84,6 +88,7 @@ const SUB_ICONS = {
   domain:       <><circle cx="12" cy="12" r="8.6" {...S} /><path d="M3.4 12h17.2M12 3.4c2.3 2.4 3.4 5.4 3.4 8.6s-1.1 6.2-3.4 8.6c-2.3-2.4-3.4-5.4-3.4-8.6S9.7 5.8 12 3.4z" {...S} /></>,
   // A crescent, not a clock: this is about the hours we stay quiet, not about scheduling.
   moon:         <><path d="M20.5 14.2A8.6 8.6 0 0 1 9.8 3.5a8.6 8.6 0 1 0 10.7 10.7z" {...S} /></>,
+  wallet:       <><rect x="2.8" y="5.6" width="18.4" height="12.8" rx="2.4" {...S} /><path d="M2.8 10h18.4" {...S} /><circle cx="17.2" cy="14.2" r="1.35" fill="currentColor" /></>,
   // A branch: a journey is one entry splitting into paths, which is the whole idea of it.
   journey:      <><circle cx="6" cy="5.5" r="2.4" {...S} /><circle cx="6" cy="18.5" r="2.4" {...S} /><circle cx="18" cy="12" r="2.4" {...S} /><path d="M6 7.9v8.2" {...S} /><path d="M8.4 5.9h4.2a3 3 0 0 1 3 3v.9" {...S} /></>,
   // An outbox tray: an envelope in a tray, because that is exactly what this is — messages
@@ -101,7 +106,8 @@ function activeSection(p) {
   /* Checked FIRST. /netcore/journeys/dnd and /netcore/whatsapp/settings both begin with a prefix
      that the broader tests below would otherwise claim for Engage. */
   if (p.startsWith('/netcore/settings') || p.startsWith('/netcore/domains')
-      || p.startsWith('/netcore/journeys/dnd') || p.startsWith('/netcore/whatsapp/settings')) return 'settings';
+      || p.startsWith('/netcore/journeys/dnd') || p.startsWith('/netcore/whatsapp/settings')
+      || p.startsWith('/netcore/spend')) return 'settings';
   if (p.startsWith('/netcore/contacts') || p.startsWith('/netcore/segments') || p.startsWith('/netcore/lists') || p.startsWith('/netcore/blocklist') || p.startsWith('/netcore/attributes')) return 'users';
   // Checked before the plain /netcore/whatsapp prefix below, so the templates gallery lands in
   // Content alongside its email counterpart rather than under Engage.

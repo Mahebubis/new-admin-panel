@@ -22,7 +22,7 @@
 // ===========================================================================
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Attachment, Download, ExternalLink, Pdf } from './icons';
+import { Attachment, Check, CheckCircle, Download, ExternalLink, Pdf } from './icons';
 import './attachmentDrawer.css';
 
 const IMAGE_EXT = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'avif'];
@@ -54,7 +54,7 @@ function nameOf(doc, i) {
   return tidy(tail) || `File ${i + 1}`;
 }
 
-export default function AttachmentDrawer({ lesson, onClose }) {
+export default function AttachmentDrawer({ lesson, onClose, onToggleDone, saving = false }) {
   const [busy, setBusy] = useState(() => new Set());
 
   useEffect(() => {
@@ -83,6 +83,7 @@ export default function AttachmentDrawer({ lesson, onClose }) {
 
   const files = (lesson.attachments || []).filter((a) => a?.url);
   const count = files.length;
+  const done = lesson.status === 'completed';
 
   const mark = (id, on) => setBusy((prev) => {
     const n = new Set(prev);
@@ -90,11 +91,15 @@ export default function AttachmentDrawer({ lesson, onClose }) {
     return n;
   });
 
-  const hit = (href, name) => {
+  /* `newTab` for the cross-origin fallback: the browser ignores `download`
+     on another origin's file, so a bare click NAVIGATED THIS TAB to the PDF
+     and took the learner out of their lesson. It opens beside it instead. */
+  const hit = (href, name, newTab = false) => {
     const a = document.createElement('a');
     a.href = href;
     if (name) a.download = name;
-    a.rel = 'noreferrer';
+    if (newTab) a.target = '_blank';
+    a.rel = 'noopener noreferrer';
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -114,7 +119,7 @@ export default function AttachmentDrawer({ lesson, onClose }) {
     } catch {
       /* The CDN sends no CORS header. The bare link still gets the learner
          the file — the browser saves it, or opens it in a tab by type. */
-      hit(doc.url, name);
+      hit(doc.url, name, true);
     } finally {
       mark(key, false);
     }
@@ -205,11 +210,26 @@ export default function AttachmentDrawer({ lesson, onClose }) {
           </div>
         )}
 
-        {count > 1 && (
+        {(count > 1 || onToggleDone) && (
           <div className="att-foot">
-            <button type="button" className="att-all" onClick={saveAll} disabled={busy.size > 0}>
-              <Download size={16} /> Download all {count} files
-            </button>
+            {count > 1 && (
+              <button type="button" className="att-all" onClick={saveAll} disabled={busy.size > 0}>
+                <Download size={16} /> Download all {count} files
+              </button>
+            )}
+            {/* The files ARE the lesson for a lot of these rows — ticking it off
+                from here saves opening it just to press a button. */}
+            {onToggleDone && (
+              <button
+                type="button"
+                className={`att-done${done ? ' on' : ''}`}
+                onClick={onToggleDone}
+                disabled={saving}
+              >
+                {done ? <CheckCircle size={16} /> : <Check size={16} />}
+                {done ? 'Lesson completed' : 'Mark lesson as complete'}
+              </button>
+            )}
           </div>
         )}
       </div>

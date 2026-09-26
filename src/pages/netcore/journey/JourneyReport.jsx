@@ -39,6 +39,7 @@ const SUPPRESS_LABEL = {
   not_configured: 'No provider configured',
   already_messaged: 'Already messaged once by this journey',
   duplicate:      'Already sent (duplicate guard)',
+  price_cap:      'Spend cap reached',
 };
 
 /* Outcome as a shape, not just a word — a page of grey text hides the one red row. */

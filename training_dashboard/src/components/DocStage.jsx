@@ -36,7 +36,7 @@
 //    screen in the first place.
 // ===========================================================================
 import { useMemo, useState } from 'react';
-import { Attachment, ChevronDown, ChevronUp, Download, ExternalLink, Pdf } from './icons';
+import { Attachment, Check, CheckCircle, ChevronDown, ChevronUp, Download, ExternalLink, Pdf } from './icons';
 import './docstage.css';
 
 const IMAGE_EXT = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'avif'];
@@ -76,7 +76,7 @@ function labelOf(doc, i) {
   return String(raw).replace(/_lyst\d+(?=\.[a-z0-9]+$)/i, '').replace(/\.[a-z0-9]+$/i, '');
 }
 
-export default function DocStage({ lesson }) {
+export default function DocStage({ lesson, done = false, saving = false, onToggleDone, onLinkClick }) {
   const [open, setOpen] = useState(true);
   const [at, setAt] = useState(0);
 
@@ -137,6 +137,21 @@ export default function DocStage({ lesson }) {
           </div>
         )}
 
+        {/* Reading a PDF or downloading the files IS the lesson, so it gets
+            the same completion button a video has — right where the files are. */}
+        {onToggleDone && (
+          <button
+            type="button"
+            className={`doc-done${done ? ' on' : ''}`}
+            onClick={onToggleDone}
+            disabled={saving}
+            title={done ? 'Completed — click to mark as not complete' : 'Mark this lesson as complete'}
+          >
+            {done ? <CheckCircle size={16} /> : <Check size={16} />}
+            <span>{done ? 'Completed' : 'Mark complete'}</span>
+          </button>
+        )}
+
         {/* The control the sticky mobile stage had no way of offering. */}
         <button
           type="button"
@@ -170,7 +185,7 @@ export default function DocStage({ lesson }) {
           )}
 
           {html && (
-            <div className="doc-rich rich" dangerouslySetInnerHTML={{ __html: html }} />
+            <div className="doc-rich rich" onClick={onLinkClick} dangerouslySetInnerHTML={{ __html: html }} />
           )}
 
           {kind === 'pdf' && (
